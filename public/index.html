@@ -1,0 +1,231 @@
+<!-- 
+
+
+       _      _      _        _ _ _       _                      
+      (_)    (_)    (_)      | (_) |     | |                     
+  __ _ _ _ __ _  ___ _   __ _| |_| |_ ___| |__    _ __ ___   ___ 
+ / _` | | '__| |/ __| | / _` | | | __/ __| '_ \  | '_ ` _ \ / _ \
+| (_| | | |  | | (__| || (_| | | | || (__| | | |_| | | | | |  __/
+ \__, |_|_|  |_|\___|_(_)__, |_|_|\__\___|_| |_(_)_| |_| |_|\___|
+  __/ |                  __/ |                                   
+ |___/                  |___/                                    
+                                  
+
+
+
+-->
+
+<!--
+
+BURAYA KADAR GELDİYSEN: https://girici.glitch.me/easteregg.html
+
+-->
+<!DOCTYPE html5>
+<html>
+    <head>
+        <title>Girici</title>
+        <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="description" content="A cool thing made with Glitch" />
+        <link id="favicon" rel="icon" href="https://glitch.com/edit/favicon-app.ico" type="image/x-icon" />
+        <link href="https://stackpath.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" integrity="sha384-wvfXpqpZZVQGK6TAh5PVlGOfQNHSoD2xbE+QkPxCAFlNEevoEH3Sl0sibVcOQVnN" crossorigin="anonymous" />
+        <link rel="stylesheet" href="/css.css" />
+
+        <link rel="shortcut icon" href="https://cdn.glitch.com/d13518aa-f0dd-429d-8d31-1ffdc6fe6aac%2Fmagnifying-glass-1083378_1280.png?v=1548849538593" />
+    </head>
+
+    <body
+        onload="document.getElementById('url').focus();if(window.location.search.indexOf('hata-mesaj=')>-1){var err=window.location.search.substr(window.location.search.indexOf('hata-mesaj=')+6,window.location.search.indexOf('&',window.location.search.indexOf('hata-mesaj='))==-1?undefined:window.location.search.indexOf('&',window.location.search.indexOf('hata-mesaj=')));document.getElementById('hata-mesaj').innerText=document.getElementById('hata-mesaj').textContent=decodeURIComponent(err);document.getElementById('hata-mesaj').style.display='block';}"
+    >
+        <div id="ust-taraf">
+            <img style="margin-left: 20%; display: none;" class="mobilinlogosu" height="40px;" src="https://cdn.glitch.com/c0a764c7-9345-4319-be50-d1b2f95f17ec%2Flogo.png?v=1583253881597" />
+            <form class="gizlimobil" action="-" method="get" onsubmit="aramayap();">
+                <input placeholder="Url veya site adı girin..." id="url" name="url" class="mbl" type="text" autofocus="autofocus" />
+            </form>
+            <div id="girici-logo">
+                <form action="-" method="get" onsubmit="aramayap();">
+                    <input placeholder="Url veya site adı girin..." name="url" class="url-kutucugu" type="text" autofocus="autofocus" />
+                </form>
+                <div style="margin-top: -15px; margin-left: 10px;" class="arama_kutu" onclick="aramayap();">
+                    <a href="#"><i style="" aria-hidden="true"> </i></a>
+                </div>
+            </div>
+        </div>
+        <div class="alt-taraf sil">
+            <h1 style="margin-left: 38%;">
+                Girici Web Market
+            </h1>
+            <br />
+            <div class="sosyal-medya">
+                <a href="./oyunlar.html" style="background: #8e2de2; background: -webkit-linear-gradient(to right, #4a00e0, #8e2de2); background: linear-gradient(to right, #4a00e0, #8e2de2);">
+                    <i class="fa fa-gamepad" aria-hidden="true"></i>
+                </a>
+                <a href="#" style="background: #ff0099; background: -webkit-linear-gradient(to right, #493240, #ff0099); background: linear-gradient(to right, #493240, #ff0099);"><i class="fa fa-home" aria-hidden="true"></i></a>
+                <a onclick="sozler();" style="cursor: pointer; background: #8360c3; background: -webkit-linear-gradient(to right, #2ebf91, #8360c3); background: linear-gradient(to right, #2ebf91, #8360c3);">
+                    <i class="fa fa-truck" aria-hidden="true"></i>
+                </a>
+                <a
+                    href="./eglence.html"
+                    style="
+                        background: #3a1c71; /* fallback for old browsers */
+                        background: -webkit-linear-gradient(to right, #ffaf7b, #d76d77, #3a1c71); /* Chrome 10-25, Safari 5.1-6 */
+                        background: linear-gradient(to right, #ffaf7b, #d76d77, #3a1c71); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+                    "
+                >
+                    <i class="fa fa-windows" aria-hidden="true"></i>
+                </a>
+                <a
+                    onclick="window.location='./youtube.html'; "
+                    style="
+                        cursor: pointer;
+                        background: #ff416c; /* fallback for old browsers */
+                        background: -webkit-linear-gradient(to right, #ff4b2b, #ff416c); /* Chrome 10-25, Safari 5.1-6 */
+                        background: linear-gradient(to right, #ff4b2b, #ff416c); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+                    "
+                >
+                    <i class="fa fa-play" aria-hidden="true"></i>
+                </a>
+                <a onclick="webmarket(); " style="cursor: pointer; background-image: linear-gradient(147deg, #ffe53b 0%, #fd3838 74%);"><i class="fa fa-download" aria-hidden="true"></i></a>
+            </div>
+            <div style="clear: left;"></div>
+        </div>
+
+        <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.min.css" />
+        <a id="popuplink" href="#inline" style="display: none;"></a>
+        <div id="inline" style="display: none; text-align: center;">
+            <img src="https://cdn.glitch.com/c0a764c7-9345-4319-be50-d1b2f95f17ec%2FUntitled-2.png?v=1583258151342" style="height: 60px;" alt="" id="logo" />
+            <h3 style="margin-top: 20px;">Önemli Duyuru</h3>
+            <p>Projeye destek olmak için alttaki papara hesabına para yatırabilirsiniz (bu mesaj tek seferlik gösterimdir)</p>
+            <p>
+                <br />
+                <b>Papara: 5517958129</b><br />
+            </p>
+
+            <p>
+                <a
+                    href="javascript:;"
+                    onclick="jQuery.fancybox.close();"
+                    style="background: -webkit-linear-gradient(to right, #ff4b2b, #ff416c); background: linear-gradient(to right, #ff4b2b, #ff416c); padding: 5px 10px; color: #fff; border-radius: 5px; text-decoration: none;"
+                >
+                    Mesajı Kapat
+                </a>
+            </p>
+        </div>
+        <div id="footer">
+            <center>
+                <h1 style="color: white; font-family: 'Roboto', sans-serif; padding-top: 50px;">
+                    Daha Fazlasını Keşfedin
+                </h1>
+            </center>
+        </div>
+        <div class="alt-taraf" style="padding-top: 40px;">
+            <center>
+                <br />
+                <style>
+                    .temalar {
+                        float: left;
+                        margin-left: 30px;
+                        margin-bottom: 30px;
+                    }
+                </style>
+
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://www.newshub.co.nz/dam/form-uploaded-images-ordered/2019/08/08/KNOWYOURMEME-sad-cat-crying-1120.JPG');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="border-radius: 15px; height: 200px; width: 300px; background-image: url('https://media-cdn.t24.com.tr/media/library/2020/01/1578568673402-ibrahim-tatlises.jpg'); background-size: cover; border: 0px solid;"
+                    onclick="renk2();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://images.pexels.com/photos/3667816/pexels-photo-3667816.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk3();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://media.wired.com/photos/59a459d3b345f64511c5e3d4/master/pass/MemeLoveTriangle_297886754.jpg');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk4();"
+                ></button>
+
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://cdn.glitch.com/c0a764c7-9345-4319-be50-d1b2f95f17ec%2FUntitled-1_01.gif?v=1583253628500');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk5();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://cdn.glitch.com/45ff859d-71c0-4700-af38-7afe6f021c8d%2Fcorona-virusune-karsi-mucadelede-uzmanlardan-gida-tavsiyesi-d-vitamini-1589444579084.jpg?v=1589511953483');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk6();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://cdn.glitch.com/45ff859d-71c0-4700-af38-7afe6f021c8d%2F3595700_obe55.jpg?v=1589511951457');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk7();"
+                ></button>
+                <button
+                    class="temalar"
+                    style="
+                        border-radius: 15px;
+                        height: 200px;
+                        width: 300px;
+                        background-image: url('https://cdn.glitch.com/45ff859d-71c0-4700-af38-7afe6f021c8d%2F1553771762215.png?v=1589511950863');
+                        background-size: cover;
+                        border: 0px solid;
+                    "
+                    onclick="renk8();"
+                ></button>
+                <div style="clear: left;"></div>
+            </center>
+        </div>
+        <script src="https://code.jquery.com/jquery-latest.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/fancybox/2.1.5/jquery.fancybox.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.0/jquery.cookie.js"></script>
+        <script src="/script.js" defer></script>
+    </body>
+</html>
+
