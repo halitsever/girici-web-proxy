@@ -35,8 +35,6 @@ function youtube() {
 
 function webmarket() {
   window.open(
-    "market.php",
-    "acılacaksayfa",
     "width=400,height=400,menubar=0,toolbar=0,resizable=0"
   );
 }
