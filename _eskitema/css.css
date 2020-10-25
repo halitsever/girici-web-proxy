@@ -1,0 +1,161 @@
+@import url("https://fonts.googleapis.com/css?family=Roboto:400,400i,700");
+  @import url('https://fonts.googleapis.com/css?family=Exo');
+@import url('https://fonts.googleapis.com/css?family=Nova+Flat');
+
+* {
+  font-family: Roboto, sans-serif;
+  padding: 0;
+  margin: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+}
+
+
+  body {
+background-color:#9b59b6;
+    
+    background-size:cover;
+  background-repeat:no-repeat;
+  font-family: 'Exo', sans-serif;
+
+    }
+
+.ustsey {
+color:white;
+height:20px;
+background: #FF416C;  /* fallback for old browsers */
+background: -webkit-linear-gradient(to right, #FF4B2B, #FF416C);  /* Chrome 10-25, Safari 5.1-6 */
+background: linear-gradient(to right, #FF4B2B, #FF416C); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+
+text-align:center;
+background-color:orange;
+}
+
+.ustsey i {
+font-size:20px; 
+	-webkit-animation: flip-horizontal-bottom 0.4s cubic-bezier(0.455, 0.030, 0.515, 0.955) both;
+	        animation: flip-horizontal-bottom 0.4s cubic-bezier(0.455, 0.030, 0.515, 0.955) both;
+}
+
+.ustsey i:hover {
+font-size:20px; 
+	-webkit-animation: flip-scale-2-hor-top 0.5s linear both;
+	        animation: flip-scale-2-hor-top 0.5s linear both;
+}
+
+.ustsey span{
+  display:none;
+}
+
+.ustsey:hover span {
+background: #FF416C;  /* fallback for old browsers */
+background: -webkit-linear-gradient(to right, #FF4B2B, #FF416C);  /* Chrome 10-25, Safari 5.1-6 */
+background: linear-gradient(to right, #FF4B2B, #FF416C); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+height:60px;
+display:block;
+}
+
+.ustsey span:hover {
+background: #FF416C;  /* fallback for old browsers */
+background: -webkit-linear-gradient(to right, #FF4B2B, #FF416C);  /* Chrome 10-25, Safari 5.1-6 */
+background: linear-gradient(to right, #FF4B2B, #FF416C); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+height:60px;
+display:block;
+}
+
+
+  .kutu {
+  display:block;
+  border-radius:0px;
+  border:0px;
+  font-size:40px;
+  margin-left:30%;
+  text-align:center;
+  width:600px;
+  color:#7f8c8d;
+  height:50px;
+  background-color:#ecf0f1;
+  }
+  .tuş {
+   display:block;
+  border-radius:3px;
+  color:white;
+  border:0px;
+  font-size:40px;
+  margin-top:3%;
+  margin-left:45%;
+  width:200px;
+  height:50px; 
+    box-shadow: 0 19px 38px rgba(0,0,0,0.30), 0 15px 12px rgba(0,0,0,0.22);  
+  background: #00F260;  /* fallback for old browsers */
+background: -webkit-linear-gradient(to right, #0575E6, #00F260);  /* Chrome 10-25, Safari 5.1-6 */
+background: linear-gradient(to right, #0575E6, #00F260); /* W3C, IE 10+/ Edge, Firefox 16+, Chrome 26+, Opera 12+, Safari 7+ */
+
+  }
+    
+  .logo-girici {
+font-family: 'Nova Flat', cursive;
+font-size:60px;
+margin-left:47%;
+    
+display:block;
+padding-top:110px;
+    color:#ecf0f1;
+    
+    }
+
+.button {
+  border: none;
+  color: white;
+  display: inline-block;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 20px 50px;
+  border-radius: 3px;
+  margin:5px;
+  border-bottom-style: solid;
+  border-bottom-width: 3px;
+  transition: text-shadow 0.3s ease;
+}
+
+.button:active {
+  position: relative;
+  top: 1px;
+  border-bottom-width: 2px;
+}
+
+.button:hover {
+  text-shadow: 2px 2px 0px rgba(0,0,0,.3)
+}
+
+
+
+
+.yesil {
+  background-color: #4CDF78;
+  border-color: #53A574;
+}
+  
+@-webkit-keyframes flip-horizontal-bottom {
+  0% {
+    -webkit-transform: rotateX(0);
+            transform: rotateX(0);
+  }
+  100% {
+    -webkit-transform: rotateX(-180deg);
+            transform: rotateX(-180deg);
+  }
+}
+@keyframes flip-horizontal-bottom {
+  0% {
+    -webkit-transform: rotateX(0);
+            transform: rotateX(0);
+  }
+  100% {
+    -webkit-transform: rotateX(-180deg);
+            transform: rotateX(-180deg);
+  }
+}

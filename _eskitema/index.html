@@ -1,0 +1,81 @@
+<!---Girici  
+  _________
+ ///////////\
+///////////  \
+|    _    |  |
+|[] | | []|[]|
+|   | |   |  |
+--->
+<!DOCTYPE html5>
+<html>
+<head>
+  <title>Girici</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" type="image/png" href="https://cdn.glitch.com/d13518aa-f0dd-429d-8d31-1ffdc6fe6aac%2Fmagnifying-glass-1083378_1280.png?1548849538593" />
+  <link href="//fonts.googleapis.com/css?family=Orbitron" rel="stylesheet" type="text/css">
+  <link href="//fonts.googleapis.com/css?family=Droid+Sans" rel="stylesheet" type="text/css">
+  <link href="css.css" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
+  <style>
+#kutular {
+margin-left:20%;
+width:100%;
+    }
+    
+.inputlar {
+  margin:10px;
+    }
+.kutu-global {
+background-color:#cc181e;
+margin:10px;
+float:left;
+box-shadow: 0 14px 28px rgba(0,0,0,0.25), 0 10px 10px rgba(0,0,0,0.22); border-radius:3px; border:0px;
+background-size:cover;
+background-repeat: no-repeat;
+width:200px;
+height:100px;
+}
+.kutu-global a {
+color:white;
+display:block;
+margin-top:20%;  
+padding-left:36%;
+text-decoration:none;
+    }
+</style>
+</head><div style="color:red;" id="hatamesaji">
+  
+  
+Hata: versiyon 4 yapılandırma dosyası bulunamadı<br>
+Hata: argument is not an object<br>
+Hata: yonlendir.js 234<br>
+Hata: 41<br>
+Hata:<br>
+  </div>
+<body onload="document.getElementById('url').focus();if(window.location.search.indexOf('error=')>-1){var err=window.location.search.substr(window.location.search.indexOf('error=')+6,window.location.search.indexOf('&',window.location.search.indexOf('error='))==-1?undefined:window.location.search.indexOf('&',window.location.search.indexOf('error=')));document.getElementById('error').innerText=document.getElementById('error').textContent=decodeURIComponent(err);document.getElementById('error').style.display='block';}">
+  <div class="ist-ana">
+    <div class="ana">
+
+
+
+      <div id="hata-mesaj"></div>
+
+      <form action="-" method="get" onsubmit="window.location.href='/yonlendir/'+(document.getElementById('url').value.substr(0,4)!='http'?'http://':'')+document.getElementById('url').value;return false;">
+
+<a style="padding-top:100px; font-size:200px; margin-left:33%; display:block;  color:#ecf0f1; font-family: 'Nova Flat', cursive;">Girici</a>
+          <input class="kutu" type="text" id="url" name="url" autofocus="autofocus" />
+          <script> 
+                    console.log("Sunucu bağlantısı - OK 3000 PORTU")
+h
+          </script>
+
+          <input class="button yesil" style="margin-left:47%; margin-top:20px; heig" type="submit" value="Bağlan" />
+        
+      </form>
+      
+    </div>
+
+    
+  </div>
+</body>
+</html>
