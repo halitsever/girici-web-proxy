@@ -6,7 +6,7 @@
     "build-all": "cd front-end && npm run build && cd .. && cd back-end && npm run build && cd ..",
     "start": "cd back-end && node dist/index.js",
     "dev": "cd back-end && DEV_MODE=true ts-node-dev ./src/index.ts",
-    "install-modules": "cd back-end && npm i && cd .. && cd front-end && npm i",
+    "install-modules": "npm i && cd back-end && npm i && cd .. && cd front-end && npm i",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Halit Sever",
