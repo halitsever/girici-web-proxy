@@ -5,6 +5,14 @@
 <h1 align="center">Step by step installation</h1>
 
 ```
+npm run install-modules
+```
+
+<p align="center">
+This command installs all dependencies for front-end & back-end folders
+</p>
+
+```
 npm run build-all
 ```
 

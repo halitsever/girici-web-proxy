@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "description": "A web proxy application for unblock websites",
   "scripts": {
-    "build-all": "cd ./front-end && npm run build && cd .. && cd ./back-end && npm run build && cd ..",
-    "start": "cd ./back-end && node dist/index.js",
-    "dev": "DEV_MODE=true ts-node ./back-end/src/index.ts",
+    "build-all": "cd front-end && npm run build && cd .. && cd back-end && npm run build && cd ..",
+    "start": "cd back-end && node dist/index.js",
+    "dev": "cd back-end && DEV_MODE=true ts-node-dev ./src/index.ts",
     "install-modules": "cd back-end && npm i && cd .. && cd front-end && npm i",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Halit Sever",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0"
+  }
 }
