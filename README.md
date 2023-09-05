@@ -32,10 +32,13 @@ npm run start
 
 <h1 align="center">Running on docker</h1>
 <p align="center">Running in swarm mode:</p>
+
 ```
 docker stack deploy -c docker-compose.yml
 ```
+
 <p align="center">Run with CLI:</p>
+
 ```
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
