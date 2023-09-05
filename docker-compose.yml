@@ -1,0 +1,11 @@
+version: "3.9"
+
+services:
+  girici-web-proxy:
+    image: halitsever/girici-web-proxy:latest
+    deploy:
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+    ports:
+      - "3000:3000"
