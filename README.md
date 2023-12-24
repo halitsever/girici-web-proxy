@@ -79,7 +79,7 @@ docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 
 
 
-<a align="center" href="https://github.com/halitsever/girici/issues">
+<a align="center" href="https://github.com/halitsever/girici-web-proxy/issues">
 <img src="https://halitsever-api.vercel.app/api/issue"/>
 </a>
 
