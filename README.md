@@ -1,8 +1,38 @@
+<p align="center" class="logo-section">
+<img src="https://i.ibb.co/nsmYYSc/Group-39.png" height="150"/>
+</br>
+<img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
+
 <p align="center">
-<img src="https://assets.halit.org/assets/github-repos/repo-thumbnails/girici-thumbnail.png" alt="Girici Web Proxy Node.js, Free, Open Source, Self Host"/>
+🌐 Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.
+<br/>
+<br/>
+<img src="https://img.shields.io/github/sponsors/halitsever"/> 
+  <img src="https://img.shields.io/github/license/halitsever/girici-web-proxy"/> 
+</p>
 </p>
 
-<h1 align="center">Step by step installation</h1>
+
+<a align="center">
+<img src="https://halitsever-api.vercel.app/api/details"/>
+</a>
+
+- 📝 [**Http/Https Support**](#) - http/https protocols are supported
+- 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
+- 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
+- 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
+
+
+
+
+<a align="center" >
+<img src="https://halitsever-api.vercel.app/api/installation"/>
+</a>
+
+
+<p align="center">
+<b>Build & run from source</b>
+</p>
 
 ```
 npm run install-modules
@@ -23,14 +53,16 @@ npm run start
 ```
 
 <p align="center">and this command serves express server on specific port (default 3000)</p>
-
-<h1 align="center">Screenshot</h1>
-
+<p align="center">
+<b>Screenshot</b>
+</p>
 <p align="center">
 <img src="https://assets.halit.org/assets/github-repos/screenshots/girici-screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
 </p>
 
-<h1 align="center">Running on docker</h1>
+<p align="center">
+<b>Running on docker</b>
+</p>
 <p align="center">Running in swarm mode:</p>
 
 ```
@@ -42,3 +74,24 @@ docker stack deploy -c docker-compose.yml
 ```
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
+
+
+
+
+
+<a align="center" href="https://github.com/halitsever/girici/issues">
+<img src="https://halitsever-api.vercel.app/api/issue"/>
+</a>
+
+<a align="center">
+<img src="https://halitsever-api.vercel.app/api/sponsor"/>
+</a>
+
+
+<a align="center">
+<img src="https://halitsever-api.vercel.app/api/license"/>
+</a>
+
+<p>
+  MIT License © 2021 <a href="https://www.github.com/halitsever">Halit Sever</a>
+</p>
