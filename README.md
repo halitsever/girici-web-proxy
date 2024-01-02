@@ -92,6 +92,6 @@ docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 <img src="https://halitsever-api.vercel.app/api/license"/>
 </a>
 
-<p>
+<p align="center">
   MIT License © 2021 <a href="https://www.github.com/halitsever">Halit Sever</a>
 </p>
