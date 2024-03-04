@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
+import { ProxyAgent } from "proxy-agent"
 import appConfig from "./config/app.config";
 import { resolve } from 'path'
 import { infoMessage, debugMessage, errorMessage } from "./utils/console.utils";
@@ -7,6 +8,7 @@ import { checkDirectory } from "./utils/filesystem.utils";
 
 const proxyMiddleware = require("unblocker");
 const app = express();
+const agent = new ProxyAgent();
 
 const staticAssetsPath = resolve(appConfig.RELATIVE_FRONT_END_ASSETS_PATH);
 
@@ -17,7 +19,7 @@ app.get("/", (req: Request, res: Response, next: NextFunction)=> {
   res.sendFile(path)
 });
 
-app.use(proxyMiddleware({ prefix: "/proxy/" }));
+app.use(proxyMiddleware({ prefix: "/proxy/", httpAgent: agent, httpsAgent: agent }));
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   debugMessage(`Request sent! ${req.url}`);
