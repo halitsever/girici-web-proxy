@@ -10,7 +10,7 @@ const handleFormTextInputClick = () => {
   targetUrl.value = 'https://';
 };
 
-const handleFormButtonInputClick = () => {
+const handleSubmitForm = () => {
   if (isValidUrl(targetUrl.value)) {
     window.location.href = `/proxy/${targetUrl.value}`
   } else {
@@ -22,14 +22,22 @@ const handleFormButtonInputClick = () => {
 <template>
   <main class="container-fluid mt-64">
 
+
     <div class="flex justify-center flex-col items-center  ">
       <WarningMessage class="w-2/5" @click="errorMessage = null" v-if="errorMessage" :message="errorMessage" />
 
-      <input type="text" v-model="targetUrl" @click="handleFormTextInputClick" :placeholder="getRandomPlaceholder()"
-        class="input input-bordered w-2/5" />
-      <button class="btn btn-primary w-2/5 tooltip mt-3" @click="handleFormButtonInputClick"
+      <input @keypress.ctrl.enter="handleSubmitForm" type="text" v-model="targetUrl" @click="handleFormTextInputClick"
+        :placeholder="getRandomPlaceholder()" class="input input-bordered w-2/5" />
+      <button class="btn btn-primary w-2/5 tooltip mt-3" @click="handleSubmitForm"
         data-tip="Go to website via proxy">Unblock</button>
+      <div class="mt-5">
+        <kbd class="kbd text-white">ctrl</kbd>
+        +
+        <kbd class="kbd text-white">enter</kbd>
+      </div>
     </div>
+
+
 
   </main>
 </template>
