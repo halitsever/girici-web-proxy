@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import HomeView from '@/views/Home/HomeView.vue'
+import { RouterLink, RouterView } from 'vue-router'
+import Header from '@/components/Header.vue'
+
 </script>
 
 <template>
-  <HomeView />
+  <Header />
+  <RouterView />
 </template>

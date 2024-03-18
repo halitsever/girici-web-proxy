@@ -1,5 +1,5 @@
 <p align="center" class="logo-section">
-<img src="https://i.ibb.co/nsmYYSc/Group-39.png" height="150"/>
+<img src="https://i.ibb.co/LvysvJ5/Girici-1.png" height="40"/>
 </br>
 <img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
 
@@ -12,7 +12,6 @@
 </p>
 </p>
 
-
 <a align="center">
 <img src="https://halitsever-api.vercel.app/api/details"/>
 </a>
@@ -22,13 +21,9 @@
 - 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
 - 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
 
-
-
-
 <a align="center" >
 <img src="https://halitsever-api.vercel.app/api/installation"/>
 </a>
-
 
 <p align="center">
 <b>Build & run from source</b>
@@ -75,10 +70,6 @@ docker stack deploy -c docker-compose.yml
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
 
-
-
-
-
 <a align="center" href="https://github.com/halitsever/girici-web-proxy/issues">
 <img src="https://halitsever-api.vercel.app/api/issue"/>
 </a>
@@ -86,7 +77,6 @@ docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 <a align="center">
 <img src="https://halitsever-api.vercel.app/api/sponsor"/>
 </a>
-
 
 <a align="center">
 <img src="https://halitsever-api.vercel.app/api/license"/>
