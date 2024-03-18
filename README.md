@@ -16,8 +16,7 @@
 <img src="https://halitsever-api.vercel.app/api/details"/>
 </a>
 
-- 📝 [**Http/Https Support**](#) - http/https protocols are supported
-- 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
+- 🧑‍💻 [**Can run inside container**](#) - you can run girici inside of a docker container
 - 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
 - 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy or you can use directly a custom http proxy
 
@@ -29,7 +28,7 @@
 <b>Build & run from source</b>
 </p>
 
-```
+```bash
 npm run install-modules
 ```
 
@@ -37,13 +36,13 @@ npm run install-modules
 This command installs all dependencies for front-end & back-end folders
 </p>
 
-```
+```bash
 npm run build-all
 ```
 
 <p align="center">This command builds front-end and back-end</p>
 
-```
+```bash
 npm run start
 ```
 
@@ -60,13 +59,13 @@ npm run start
 </p>
 <p align="center">Running in swarm mode:</p>
 
-```
+```bash
 docker stack deploy -c docker-compose.yml
 ```
 
 <p align="center">Run with CLI:</p>
 
-```
+```bash
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
 
