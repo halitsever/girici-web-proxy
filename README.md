@@ -1,5 +1,5 @@
 <p align="center" class="logo-section">
-<img src="https://i.ibb.co/LvysvJ5/Girici-1.png" height="40"/>
+<img src="https://raw.githubusercontent.com/halitsever/girici-web-proxy/GIR-1.1.0/front-end/public/logo.svg" height="100"/>
 </br>
 <img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
 
@@ -19,7 +19,7 @@
 - 📝 [**Http/Https Support**](#) - http/https protocols are supported
 - 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
 - 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
-- 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
+- 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy or you can use directly a custom http proxy
 
 <a align="center" >
 <img src="https://halitsever-api.vercel.app/api/installation"/>
@@ -52,7 +52,7 @@ npm run start
 <b>Screenshot</b>
 </p>
 <p align="center">
-<img src="https://assets.halit.org/assets/github-repos/screenshots/girici-screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
+<img src="https://i.ibb.co/vPPYkRb/Screenshot-2024-03-19-at-01-03-10.png" alt="Girici Web Proxy Node.js Screenshot"/>
 </p>
 
 <p align="center">
