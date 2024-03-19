@@ -1,5 +1,5 @@
 <p align="center" class="logo-section">
-<img src="https://raw.githubusercontent.com/halitsever/girici-web-proxy/GIR-1.1.0/front-end/public/logo.svg" height="100"/>
+<img src="https://raw.githubusercontent.com/halitsever/girici-web-proxy/GIR-1.1.0/resources/images/logo.svg" height="100"/>
 </br>
 <img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
 
