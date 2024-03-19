@@ -31,9 +31,9 @@ const handleSubmitForm = () => {
       <button class="btn btn-primary w-2/5 tooltip mt-3" @click="handleSubmitForm"
         data-tip="Go to website via proxy">Unblock</button>
       <div class="mt-5">
-        <kbd class="kbd text-white">ctrl</kbd>
+        <kbd class="kbd dark:text-white text-neutral">ctrl</kbd>
         +
-        <kbd class="kbd text-white">enter</kbd>
+        <kbd class="kbd dark:text-white text-neutral">enter</kbd>
       </div>
     </div>
 
