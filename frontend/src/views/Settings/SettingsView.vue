@@ -13,6 +13,7 @@ import WarningMessage from '@/components/WarningMessage.vue';
                     <input type="checkbox" class="toggle disable" disabled />
                     <span class="label-text pl-5">URL Encryption</span>
                 </label>
+                <p>If its enabled, its gonna encrypt urls for browser tracking</p>
             </div>
         </div>
     </div>
