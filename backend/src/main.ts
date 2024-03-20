@@ -14,8 +14,6 @@ async function bootstrap() {
   // TODO: change proxy middleware with new one
   app.use(proxyMiddleware({ prefix: "/proxy/", httpAgent: agent, httpsAgent: agent }));
 
-
-
   await app.listen(3000);
 }
 bootstrap();
