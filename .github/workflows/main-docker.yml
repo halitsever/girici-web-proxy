@@ -1,4 +1,4 @@
-name: Pipeline
+name: Latest Docker Packager
 
 on:
   push:
