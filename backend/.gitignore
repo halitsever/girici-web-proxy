@@ -34,3 +34,4 @@ client
 !.vscode/launch.json
 !.vscode/extensions.json
 client
+*.sqlite

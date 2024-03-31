@@ -1,8 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SettingEntity } from './setting.entity';
-import { SettingDto } from './dtos/setting.dto';
 
 @Injectable()
 export class SettingService {
@@ -11,23 +10,27 @@ export class SettingService {
         private settingRepository: Repository<SettingEntity>,
     ) { }
 
-    async findAll() {
-        return await this.settingRepository.find();
+    async getSettings(userId: string) {
+        const settings = await this.settingRepository.findOne({
+            where: {
+                id: userId
+            }
+        })
+
+        if (!settings) throw new NotFoundException();
+        return settings;
     }
 
-    async addSetting(key, value) {
-        const setting = new SettingEntity();
-        setting.key = key;
-        setting.value = value;
-        await this.settingRepository.save(setting);
+    async updateSetting({ id, key, value }) {
+        const setting = await this.getSettings(id);
+        setting[key] = value;
+        this.settingRepository.save(setting);
+        return { id, key, value }
+    }
+
+    async getSettingKeys() {
+        return this.settingRepository.metadata.columns.map(column => column.propertyName);
     }
 
 
-    async updateSetting(keyObject: SettingDto) {
-        if (!keyObject || Object.keys(keyObject).length <= 0) throw new BadRequestException('No key provided');
-        const [key, value]: [string, boolean] = Object.entries(keyObject)[0];
-        const setting = await this.settingRepository.findOne({ where: { key } });
-        setting.value = value;
-        await this.settingRepository.save(setting);
-    }
 }
