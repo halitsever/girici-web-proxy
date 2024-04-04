@@ -20,6 +20,14 @@
 - 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
 - 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy or you can use directly a custom http proxy
 
+<p align="center">
+<img src="https://i.ibb.co/zH06N8g/Screenshot-2024-04-05-at-01-19-48.png" alt="Girici Web Proxy Node.js Screenshot"/>
+</p>
+
+<p align="center">
+<a href="https://github.com/halitsever/shotscreen-browser" ><i>(screenshot captured via shotscreen-browser)</i></a>
+</p>
+
 <a align="center" >
 <img src="https://halitsever-api.vercel.app/api/installation"/>
 </a>
@@ -47,12 +55,6 @@ npm run start
 ```
 
 <p align="center">and this command serves express server on specific port (default 3000)</p>
-<p align="center">
-<b>Screenshot</b>
-</p>
-<p align="center">
-<img src="https://i.ibb.co/vPPYkRb/Screenshot-2024-03-19-at-01-03-10.png" alt="Girici Web Proxy Node.js Screenshot"/>
-</p>
 
 <p align="center">
 <b>Running on docker</b>
