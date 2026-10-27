@@ -1,0 +1,21 @@
+{
+  "name": "@girici/engine",
+  "version": "2.0.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    "./shared": {
+      "types": "./dist/lib/index.d.ts",
+      "default": "./dist/lib/index.js"
+    }
+  },
+  "scripts": {
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "build": "npm run build:lib && node scripts/build.mjs",
+    "dev": "run-p --print-label \"dev:*\"",
+    "dev:lib": "tsc -p tsconfig.lib.json --watch --preserveWatchOutput",
+    "dev:bundles": "node scripts/build.mjs --watch",
+    "typecheck": "npm run build:lib && tsc -p tsconfig.test.json"
+  }
+}

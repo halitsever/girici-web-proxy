@@ -19,7 +19,7 @@
     "dev:server": "npm run dev -w @girici/server",
     "dev:web": "npm run dev -w @girici/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "vitest run",
+    "test": "npm run build:lib -w @girici/engine && vitest run",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
