@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
-import { toProxyPath } from "@/lib/target";
+import { resolveInput } from "@/lib/target";
 import { getRandomInternetFact, type InternetFact } from "./data/internetFacts";
 import { getRandomPlaceholder } from "./data/inputPlaceholders";
 import "./home.css";
@@ -12,7 +12,7 @@ const error = ref<string | null>(null);
 const fact = ref<InternetFact>({ text: "", source: "" });
 
 async function onSubmit() {
-  const path = toProxyPath(url.value);
+  const path = resolveInput(url.value);
   if (!path) {
     error.value = "Please enter a valid URL";
     return;

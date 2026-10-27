@@ -22,3 +22,15 @@ export function toProxyPath(input: string): string | null {
 
   return encodeUrl(url);
 }
+
+/** DuckDuckGo's HTML version works without JavaScript, which suits a proxy best. */
+export function toSearchPath(query: string): string {
+  return encodeUrl(new URL(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query.trim())}`));
+}
+
+/** Text that is not a URL is searched for; something that looks like a URL but is not a usable one is refused. */
+export function resolveInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  return toProxyPath(trimmed) ?? (SCHEME.test(trimmed) ? null : toSearchPath(trimmed));
+}

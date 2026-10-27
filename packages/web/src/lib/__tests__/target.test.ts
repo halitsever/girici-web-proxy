@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toProxyPath } from "../target";
+import { resolveInput, toProxyPath } from "../target";
 
 describe("toProxyPath", () => {
   it("builds the proxy path for http(s) URLs", () => {
@@ -26,6 +26,20 @@ describe("toProxyPath", () => {
       "not a url",
     ]) {
       expect(toProxyPath(input)).toBeNull();
+    }
+  });
+});
+
+describe("resolveInput", () => {
+  it("opens URLs and searches everything else", () => {
+    expect(resolveInput("example.com")).toBe("/~/https/example.com/");
+    expect(resolveInput("not a url")).toBe("/~/https/html.duckduckgo.com/html/?q=not%20a%20url");
+    expect(resolveInput("localhost")).toBe("/~/https/html.duckduckgo.com/html/?q=localhost");
+  });
+
+  it("refuses empty input and broken URLs", () => {
+    for (const input of ["", "   ", "https://user:pass@example.com/", "ftp://example.com/"]) {
+      expect(resolveInput(input)).toBeNull();
     }
   });
 });
