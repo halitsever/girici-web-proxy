@@ -46,6 +46,40 @@ describe("buildPageResponse", () => {
     expect(await res.text()).toBe("body");
   });
 
+  it("keeps content-length on an identity (non-encoded, non-rewritten) response", async () => {
+    const res = await buildPageResponse(
+      upstream([
+        ["content-type", "video/mp4"],
+        ["content-length", "100"],
+      ]),
+      context({ destination: "video" }),
+    );
+    expect(res.headers.get("content-length")).toBe("100");
+  });
+
+  it("drops content-length when the body was decompressed", async () => {
+    const res = await buildPageResponse(
+      upstream([
+        ["content-type", "video/mp4"],
+        ["content-encoding", "gzip"],
+        ["content-length", "100"],
+      ]),
+      context({ destination: "video" }),
+    );
+    expect(res.headers.has("content-length")).toBe(false);
+  });
+
+  it("drops content-length when the body is rewritten", async () => {
+    const res = await buildPageResponse(
+      upstream([
+        ["content-type", "text/javascript"],
+        ["content-length", "100"],
+      ]),
+      context({ destination: "script" }),
+    );
+    expect(res.headers.has("content-length")).toBe(false);
+  });
+
   it("maps a same-host redirect into the proxy", async () => {
     const res = await buildPageResponse(
       upstream([["location", "/next?x=1"]], null, 302),

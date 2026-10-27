@@ -61,7 +61,13 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
 
   const contentType = headers.get("content-type");
   const kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
-  if (!kind) return new Response(body, { status, headers });
+  if (!kind) {
+    // The relay hop already decoded any content-encoding, so the upstream length is right only for an identity body.
+    const encoded = envelope.some(([name]) => name === "content-encoding");
+    const length = envelope.find(([name]) => name === "content-length")?.[1];
+    if (!encoded && length) headers.set("content-length", length);
+    return new Response(body, { status, headers });
+  }
   const validators: Validators = {
     etag: envelope.find(([name]) => name === "etag")?.[1] ?? null,
     lastModified: envelope.find(([name]) => name === "last-modified")?.[1] ?? null,
