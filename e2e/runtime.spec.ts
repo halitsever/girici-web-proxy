@@ -54,3 +54,20 @@ test("shows real URLs on network responses", async ({ page }) => {
     eventSourceUrl: "https://site-a.test/sse",
   });
 });
+
+test("runs scripts that workers import", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/worker");
+  await expect(page.locator("#answer")).toHaveText("42");
+});
+
+test("keeps sockets and WebRTC from going around the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/realtime");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    rtc: "undefined",
+    transport: "undefined",
+    error: true,
+    closed: 1006,
+    state: 3,
+  });
+});

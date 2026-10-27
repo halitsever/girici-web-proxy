@@ -54,6 +54,21 @@ describe("splitUpstreamHeaders", () => {
   });
 });
 
+describe("origin-wide headers", () => {
+  it("drops headers that would act on the whole proxy origin", () => {
+    const split = splitUpstreamHeaders({
+      "clear-site-data": '"storage"',
+      "accept-ch": "Sec-CH-UA-Model",
+      "critical-ch": "Sec-CH-UA-Model",
+      "origin-agent-cluster": "?1",
+      "document-policy": "force-load-at-top",
+      "supports-loading-mode": "credentialed-prerender",
+      "x-ok": "1",
+    });
+    expect(split.envelope).toEqual([["x-ok", "1"]]);
+  });
+});
+
 describe("mapVary", () => {
   it("maps vary onto the headers the relay moved", () => {
     expect(mapVary("Accept-Encoding, Cookie, Origin, X-Custom")).toBe(

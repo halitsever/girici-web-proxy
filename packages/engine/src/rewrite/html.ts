@@ -171,7 +171,9 @@ class HtmlRewriter {
       if (tag === "base" && name === "href" && !this.#baseSeen) {
         this.#baseSeen = true;
         try {
-          this.#base = new URL(value.trim(), this.#base);
+          const base = new URL(value.trim(), this.#base);
+          // A base that is not a web URL would leave nothing to proxy relative URLs against.
+          if (base.protocol === "http:" || base.protocol === "https:") this.#base = base;
         } catch {
           // Browsers ignore a base URL they cannot parse, and so do we.
         }

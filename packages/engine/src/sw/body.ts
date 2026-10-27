@@ -13,8 +13,11 @@ export function rewriteKind(
   return null;
 }
 
+const CHARSET = /charset\s*=\s*["']?([^"';\s>]+)/i;
+
 export function decodeText(bytes: ArrayBuffer, contentType: string | null): string {
-  const label = /charset\s*=\s*"?([^";\s]+)/i.exec(contentType ?? "")?.[1];
+  const isHtml = (contentType ?? "").split(";")[0]?.trim().toLowerCase() === "text/html";
+  const label = CHARSET.exec(contentType ?? "")?.[1] ?? (isHtml ? metaCharset(bytes) : undefined);
   let decoder: TextDecoder;
   try {
     decoder = new TextDecoder(label ?? "utf-8");
@@ -22,4 +25,15 @@ export function decodeText(bytes: ArrayBuffer, contentType: string | null): stri
     decoder = new TextDecoder("utf-8");
   }
   return decoder.decode(bytes);
+}
+
+/** Pages that name their encoding only in a <meta> tag must still decode right; full sniffing comes later. */
+function metaCharset(bytes: ArrayBuffer): string | undefined {
+  // The first 1024 bytes are read as Latin-1, which keeps the ASCII of the tag intact whatever the encoding.
+  const head = new TextDecoder("latin1").decode(bytes.slice(0, 1024));
+  for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
+    const label = CHARSET.exec(tag)?.[1];
+    if (label) return label;
+  }
+  return undefined;
 }

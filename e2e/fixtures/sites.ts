@@ -40,6 +40,7 @@ const NAV = page(
 <form id="post" method="post" action="https://site-a.test/echo"><input name="q" value="posted"><button id="post-go">Go</button></form>
 <form method="post" action="/redirect-307"><input name="q" value="kept"><button id="post-307-go">Go</button></form>
 <form method="post" action="/redirect-303"><input name="q" value="dropped"><button id="post-303-go">Go</button></form>
+<button id="blank-frame" onclick="const f = document.createElement('iframe'); f.id = 'blank'; document.body.append(f); f.contentWindow.location.href = 'https://site-b.test/';">blank frame</button>
 <iframe id="frame" src="https://site-b.test/frame"></iframe>`,
 );
 
@@ -133,7 +134,45 @@ const NETWORK = page(
 </script>`,
 );
 
+const WORKER = page(
+  "Worker",
+  `<pre id="answer"></pre>
+<script>
+  const worker = new Worker("worker.js");
+  worker.onmessage = (event) => {
+    document.getElementById("answer").textContent = String(event.data);
+  };
+  worker.onerror = () => {
+    document.getElementById("answer").textContent = "error";
+  };
+</script>`,
+);
+
+const REALTIME = page(
+  "Realtime",
+  `<pre id="results"></pre>
+<script>
+  const results = { rtc: typeof RTCPeerConnection, transport: typeof WebTransport };
+  const socket = new WebSocket("wss://site-b.test/socket");
+  socket.onerror = () => {
+    results.error = true;
+  };
+  socket.onclose = (event) => {
+    results.closed = event.code;
+    results.state = socket.readyState;
+    document.getElementById("results").textContent = JSON.stringify(results);
+  };
+</script>`,
+);
+
 type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
+
+const script =
+  (body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, { "content-type": "application/javascript" });
+    res.end(body);
+  };
 
 const cookieEcho: Route = (req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
@@ -263,6 +302,10 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),
     "/network": html(NETWORK),
+    "/worker": html(WORKER),
+    "/worker.js": script('importScripts("lib.js");\npostMessage(self.answer);'),
+    "/lib.js": script('self.answer = typeof self.location.href === "string" ? 42 : 0;'),
+    "/realtime": html(REALTIME),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },

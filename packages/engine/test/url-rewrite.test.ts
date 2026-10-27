@@ -46,6 +46,14 @@ describe("rewriteUrl", () => {
     expect(rewriteUrl("http://proxy.test/_g/client.js", base, origin)).toBe("http://proxy.test/_g/client.js");
   });
 
+  it("never throws on URLs or bases that are not web URLs", () => {
+    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe("java\nscript:void(0)");
+    expect(rewriteUrl("/x", new URL("ftp://x.test/"), origin)).toBe("/x");
+    expect(rewriteUrl("http://proxy.test/other", new URL("about:blank"), origin)).toBe("http://proxy.test/other");
+    expect(rewriteUrl("https://other.test/", new URL("about:blank"), origin)).toBe("/~/https/other.test/");
+    expect(unrewriteUrl("img/a.png", new URL("about:blank"), origin)).toBe("img/a.png");
+  });
+
   it("maps other paths on our origin onto the page's real origin", () => {
     expect(rewriteUrl("http://proxy.test/other?x=1", base, origin)).toBe("/~/https/site.test/other?x=1");
   });

@@ -12,6 +12,10 @@ export function createIdbCookieStore(): CookieRecordStore {
       upgrade: (db) => {
         db.createObjectStore(STORE);
       },
+    }).catch((error: unknown) => {
+      // A failed open is retried on the next call rather than remembered forever.
+      database = null;
+      throw error;
     });
     return database;
   };

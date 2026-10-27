@@ -75,7 +75,8 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext): Prom
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
     case "js":
-      return rewriteJs(text);
+      // Workers and blank frames load scripts too, and they have no runtime to call into.
+      return rewriteJs(text, { standalone: true });
   }
 }
 

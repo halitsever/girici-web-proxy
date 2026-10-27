@@ -3,8 +3,13 @@ import { isParseError, parseModule, parseScript, type ESTree } from "meriyah";
 
 export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 
+/** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
+export const STANDALONE_SHIM =
+  "globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o}});";
+
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
+  standalone?: boolean;
 }
 
 type Role = "read" | "target" | "binding" | "callee";
@@ -24,7 +29,18 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
     // Pathologically deep code can overflow the stack; serving it unrewritten beats failing the page.
     return source;
   }
-  return output.hasChanged() ? output.toString() : source;
+  if (!output.hasChanged()) return source;
+  if (options.standalone) {
+    // The shim goes after any "use strict" prologue, which only counts at the very start.
+    let last: ESTree.Statement | undefined;
+    for (const statement of program.body) {
+      if (statement.type !== "ExpressionStatement" || !("directive" in statement)) break;
+      last = statement;
+    }
+    if (last) output.appendLeft(last.end as number, STANDALONE_SHIM);
+    else output.prepend(STANDALONE_SHIM);
+  }
+  return output.toString();
 }
 
 function parse(source: string, kind: NonNullable<JsRewriteOptions["kind"]>): ESTree.Program | null {
@@ -65,6 +81,19 @@ class LocationRewriter {
       case "ChainExpression":
         this.visit(node.expression, role, true);
         return;
+      case "BinaryExpression":
+      case "LogicalExpression": {
+        // Long "a"+"b"+... chains nest leftwards; walking them in a loop keeps deep ones off the call stack.
+        const rights: ESTree.Node[] = [];
+        let current: ESTree.Node = node;
+        while (current.type === "BinaryExpression" || current.type === "LogicalExpression") {
+          rights.push(current.right);
+          current = current.left;
+        }
+        this.visit(current, "read", false);
+        for (let index = rights.length - 1; index >= 0; index--) this.visit(rights[index], "read", false);
+        return;
+      }
       case "CallExpression":
         if (isHelperCall(node)) return;
         this.visit(node.callee, "callee", inChain);

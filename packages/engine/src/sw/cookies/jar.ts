@@ -96,18 +96,34 @@ export class CookieService {
       if (cookie && !isExpired(cookie)) puts.push({ key, value: cookie.toJSON() });
       else deletes.push(key);
     }
-    this.#writing = this.#writing.then(() => (pending.length > 0 ? this.#records.write(puts, deletes) : undefined));
-    await this.#writing;
+    const write = this.#writing.then(async () => {
+      if (pending.length === 0) return;
+      try {
+        await this.#records.write(puts, deletes);
+      } catch {
+        // A failed write stays queued for the next flush instead of being lost or blocking later writes.
+        for (const [key, cookie] of pending) if (!this.#dirty.has(key)) this.#dirty.set(key, cookie);
+      }
+    });
+    this.#writing = write;
+    await write;
   }
 
   async #load(): Promise<void> {
+    let records: Array<{ key: string; value: unknown }>;
+    try {
+      records = await this.#records.loadAll();
+    } catch {
+      // A broken database must not take the proxy down; the jar then starts empty.
+      return;
+    }
     const expired: string[] = [];
-    for (const { key, value } of await this.#records.loadAll()) {
+    for (const { key, value } of records) {
       const cookie = Cookie.fromJSON(value);
       if (cookie && !isExpired(cookie)) await this.#memory.putCookie(cookie);
       else expired.push(key);
     }
-    if (expired.length > 0) await this.#records.write([], expired);
+    if (expired.length > 0) await this.#records.write([], expired).catch(() => {});
   }
 
   async #set(header: string, url: URL, options: SetOptions): Promise<Cookie | undefined> {

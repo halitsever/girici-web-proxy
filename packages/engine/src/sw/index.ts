@@ -21,6 +21,8 @@ const CLIENT_PATH = __GIRICI_CLIENT__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
 const transport = new HttpRelayTransport();
+// Window clients answer at once; only a deadlocked worker ever reaches this.
+const CLIENT_LOOKUP_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const channel = new BroadcastChannel(BROADCAST_CHANNEL);
@@ -72,9 +74,11 @@ async function handle(event: FetchEvent): Promise<Response> {
   const { request } = event;
   const origin = self.location.origin;
   const navigation = request.mode === "navigate";
-  const client = event.clientId ? await self.clients.get(event.clientId) : undefined;
+  const client = await clientOf(event);
   const referrer = request.referrer || null;
-  const route = classifyRequest({ url: request.url, origin, navigation, clientUrl: client?.url ?? null, referrer });
+  // A worker stuck in importScripts cannot be looked up, but its requests still name it as the referrer.
+  const clientUrl = client?.url ?? (navigation ? null : referrer);
+  const route = classifyRequest({ url: request.url, origin, navigation, clientUrl, referrer });
 
   switch (route.kind) {
     case "passthrough":
@@ -84,21 +88,21 @@ async function handle(event: FetchEvent): Promise<Response> {
     case "redirect":
       return Response.redirect(new URL(route.location, origin).href, 307);
     case "proxy": {
-      const clientUrl = realUrlOf(navigation ? referrer : (client?.url ?? null), origin);
+      const initiator = realUrlOf(navigation ? referrer : clientUrl, origin);
       try {
         await cookies.ready();
         // A request sent right after a document.cookie write must carry that cookie.
         const seq = Number(request.headers.get(HEADER.cookieSeq));
         if (seq > 0 && event.clientId) await rpc.waitFor(event.clientId, seq);
         const cookieContext: CookieRequestContext = {
-          initiator: clientUrl,
+          initiator,
           credentials: request.credentials,
           topLevel: request.destination === "document",
           method: request.method,
         };
         const result = await transport.send(request, {
           target: route.target,
-          clientUrl,
+          clientUrl: initiator,
           isNavigation: navigation,
           cookie: await cookies.header(route.target, cookieContext),
         });
@@ -121,7 +125,7 @@ async function handle(event: FetchEvent): Promise<Response> {
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   await cookies.ready();
-  const client = event.clientId ? await self.clients.get(event.clientId) : undefined;
+  const client = await clientOf(event);
   const response = await rpc.handle(
     event.request,
     event.clientId,
@@ -136,6 +140,13 @@ async function forgetClosedClients(): Promise<void> {
   const ids = rpc.clientIds();
   if (ids.length <= 100) return;
   for (const id of ids) if (!(await self.clients.get(id))) rpc.forget(id);
+}
+
+/** Firefox never settles clients.get() for a worker blocked in a synchronous importScripts, so the lookup gives up. */
+async function clientOf(event: FetchEvent): Promise<Client | undefined> {
+  if (!event.clientId) return undefined;
+  const timeout = new Promise<undefined>((resolve) => setTimeout(resolve, CLIENT_LOOKUP_TIMEOUT));
+  return Promise.race([self.clients.get(event.clientId), timeout]);
 }
 
 function htmlError(code: RelayErrorCode, status: number, target: URL | null): Response {

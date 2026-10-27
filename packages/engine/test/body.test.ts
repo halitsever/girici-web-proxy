@@ -27,4 +27,19 @@ describe("decodeText", () => {
     expect(decodeText(utf8, "text/html; charset=x-unknown")).toBe("ğ");
     expect(decodeText(utf8, null)).toBe("ğ");
   });
+
+  it("falls back to the charset a page declares in <meta>", () => {
+    const encode = (text: string, ...bytes: number[]) =>
+      new Uint8Array([...new TextEncoder().encode(text), ...bytes]).buffer;
+    expect(decodeText(encode('<meta charset="windows-1254">', 0xf0, 0xfe, 0xfd), "text/html")).toBe(
+      '<meta charset="windows-1254">ğşı',
+    );
+    expect(
+      decodeText(
+        encode('<meta http-equiv="Content-Type" content="text/html; charset=windows-1254">', 0xfd),
+        "text/html",
+      ),
+    ).toContain("ı");
+    expect(decodeText(encode('<meta charset="windows-1254">', 0xc4, 0x9f), "text/html; charset=utf-8")).toContain("ğ");
+  });
 });

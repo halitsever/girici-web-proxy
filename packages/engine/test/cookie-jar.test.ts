@@ -101,4 +101,29 @@ describe("CookieService", () => {
     expect(sent).toHaveLength(COOKIE_LIMITS.perSite);
     expect(sent).not.toContain("c0=1");
   });
+
+  it("keeps working when persistence fails", async () => {
+    let failingWrites = 1;
+    const records = new Map<string, unknown>();
+    const jar = new CookieService(
+      {
+        loadAll: async () => {
+          throw new Error("broken database");
+        },
+        write: async (puts) => {
+          if (failingWrites-- > 0) throw new Error("quota exceeded");
+          for (const { key, value } of puts) records.set(key, value);
+        },
+      },
+      { flushDelay: 0 },
+    );
+    await jar.ready();
+    const site = new URL("https://site-a.test/");
+    await jar.store(site, ["a=1"], nav());
+    await jar.flush();
+    await jar.store(site, ["b=1"], nav());
+    await jar.flush();
+    expect(await jar.header(site, nav())).toBe("a=1; b=1");
+    expect([...records.keys()].sort()).toEqual(["site-a.test|/|a", "site-a.test|/|b"]);
+  });
 });

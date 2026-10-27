@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { STANDALONE_SHIM } from "../src/rewrite/js.ts";
 import { buildPageResponse, type PageContext } from "../src/sw/page-response.ts";
 import type { TransportResult } from "../src/sw/transport.ts";
 
@@ -109,7 +110,7 @@ describe("buildPageResponse", () => {
       upstream([["content-type", "application/javascript"]], "location.href"),
       context({ destination: "script" }),
     );
-    expect(await js.text()).toBe("__g$.L(location).href");
+    expect(await js.text()).toBe(`${STANDALONE_SHIM}__g$.L(location).href`);
     expect(js.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     const data = await buildPageResponse(
       upstream([["content-type", "application/javascript"]], "location.href"),

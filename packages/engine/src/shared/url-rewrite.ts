@@ -14,22 +14,27 @@ export function rewriteUrl(raw: string, base: URL, origin: string): string {
     if (scheme !== "http:" && scheme !== "https:") return raw;
     const absolute = parse(value);
     if (!absolute) return raw;
-    return absolute.origin === origin ? ownUrl(absolute, base, raw) : encodeUrl(absolute);
+    if (absolute.origin !== origin) return encodeUrl(absolute);
+    return isWeb(base) ? ownUrl(absolute, base, raw) : raw;
   }
+  // Against a base such as about:blank, relative URLs have no web target to proxy.
+  if (!isWeb(base)) return raw;
 
   if (value.startsWith("/") && !value.startsWith("//")) {
     const own = parse(value, origin);
     if (own && decodeUrl(own.pathname + own.search)) return raw;
   }
 
+  // The URL parser drops tabs and newlines, so "java\nscript:" only shows its scheme once resolved.
   const real = parse(value, base);
-  if (!real) return raw;
+  if (!real || !isWeb(real)) return raw;
   if (!value.startsWith("/") && resolvesInsideProxy(value, real, base, origin)) return raw;
   return encodeUrl(real);
 }
 
 /** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */
 export function unrewriteUrl(value: string, base: URL, origin: string): string {
+  if (!isWeb(base)) return value;
   const url = parse(value, new URL(encodeUrl(base), origin));
   if (!url || url.origin !== origin) return value;
   const real = decodeUrl(url.pathname + url.search);
@@ -98,6 +103,10 @@ function parse(value: string, base?: string | URL): URL | null {
   } catch {
     return null;
   }
+}
+
+function isWeb(url: URL): boolean {
+  return url.protocol === "http:" || url.protocol === "https:";
 }
 
 function isWhitespace(char: string | undefined): boolean {

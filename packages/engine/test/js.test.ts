@@ -1,6 +1,6 @@
 import { parseScript } from "meriyah";
 import { describe, expect, it } from "vitest";
-import { MAX_REWRITE_LENGTH, rewriteJs } from "../src/rewrite/js.ts";
+import { MAX_REWRITE_LENGTH, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/js.ts";
 
 describe("rewriteJs", () => {
   it.each([
@@ -79,5 +79,21 @@ describe("rewriteJs", () => {
     expect(() => parseScript(output, { webcompat: true })).not.toThrow();
     expect(rewriteJs(output)).toBe(output);
     expect(output).toContain('__g$.S(c, "location", (__g$.L(location).hash))');
+  });
+
+  it("handles very long expression chains", () => {
+    const chain = '"ab"+'.repeat(5000);
+    expect(rewriteJs(`${chain}location.href`)).toBe(`${chain}__g$.L(location).href`);
+  });
+
+  it("can make its output run where no runtime was installed", () => {
+    expect(rewriteJs("location.href", { standalone: true })).toBe(`${STANDALONE_SHIM}__g$.L(location).href`);
+    expect(rewriteJs('"use strict";\nlocation.href', { standalone: true })).toBe(
+      `"use strict";${STANDALONE_SHIM}\n__g$.L(location).href`,
+    );
+    expect(rewriteJs("const a = 1;", { standalone: true })).toBe("const a = 1;");
+    expect(rewriteJs(rewriteJs("location.href", { standalone: true }), { standalone: true })).toBe(
+      `${STANDALONE_SHIM}__g$.L(location).href`,
+    );
   });
 });

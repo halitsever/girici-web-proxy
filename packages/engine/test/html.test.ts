@@ -162,6 +162,11 @@ describe("documents that are not well formed", () => {
     expect(rw(html)).toBe(html);
   });
 
+  it("survives URLs and bases that are not web URLs", () => {
+    expect(rw('<a href="java&#10;script:void(0)">x</a>')).toBe('<a href="java&#10;script:void(0)">x</a>');
+    expect(rw('<base href="ftp://x.test/"><a href="y">')).toBe('<base href="ftp://x.test/"><a href="y">');
+  });
+
   it("rewrites unclosed and unquoted markup", () => {
     expect(rw("<div><a href=https://x.test/a>t<p><img src=/i.png alt=x>")).toBe(
       '<div><a href="/~/https/x.test/a">t<p><img src="/~/https/site.test/i.png" alt=x>',

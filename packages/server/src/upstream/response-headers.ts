@@ -30,6 +30,13 @@ const DROPPED = new Set([
   "cross-origin-resource-policy",
   // Preload and preconnect hints would make the browser contact the real site directly.
   "link",
+  // These act on the whole proxy origin, so one site would impose them on every other.
+  "clear-site-data",
+  "accept-ch",
+  "critical-ch",
+  "origin-agent-cluster",
+  "document-policy",
+  "supports-loading-mode",
 ]);
 const NATIVE = new Set([
   "content-type",

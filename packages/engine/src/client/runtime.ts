@@ -1,3 +1,4 @@
+import { decodeUrl } from "../shared/codec.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import { installAttributes } from "./attributes.ts";
 import { installCookies, pendingWrites } from "./cookies.ts";
@@ -6,6 +7,7 @@ import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
+import { installRealtimeBlock } from "./realtime.ts";
 import { installStorage } from "./storage.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { createUrlContext, type Realm } from "./url-context.ts";
@@ -30,11 +32,31 @@ export function install(win: Realm, config: ClientConfig): void {
     },
     win.Location.prototype,
   );
+  // Windows without a runtime of their own, such as blank frames and popups, still need a stand-in.
+  const standIns = new WeakMap<object, object>();
+  const standIn = (location: Location): object => {
+    let fake = standIns.get(location);
+    if (!fake) {
+      fake = createFakeLocation(
+        {
+          real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
+          navigate: (url, mode) => (mode === "replace" ? location.replace(url) : location.assign(url)),
+          reload: () => location.reload(),
+          setHash: (hash) => {
+            location.hash = hash;
+          },
+        },
+        win.Location.prototype,
+      );
+      standIns.set(location, fake);
+    }
+    return fake;
+  };
   const helpers = createHelpers({
     nativeLocation,
     fakeLocation,
     isLocation,
-    fakeFor: (location) => fakeFor(win, location),
+    fakeFor: (location) => fakeFor(win, location) ?? standIn(location as Location),
     isWindowOrDocument: (value) => {
       try {
         return typeof value === "object" && value !== null && "location" in value && isLocation(value.location);
@@ -55,6 +77,7 @@ export function install(win: Realm, config: ClientConfig): void {
     ["cookies", () => installCookies(win, ctx, config)],
     ["network", () => installNetwork(win, ctx)],
     ["storage", () => installStorage(win, ctx)],
+    ["realtime", () => installRealtimeBlock(win)],
   ];
   for (const [name, step] of steps) {
     try {
@@ -89,4 +112,16 @@ function fakeFor(win: Realm, location: object): object | null {
     }
   }
   return null;
+}
+
+function realUrlOfLocation(location: Location, origin: string): URL | null {
+  try {
+    const url = new URL(location.href);
+    const real = url.origin === origin ? decodeUrl(url.pathname + url.search) : null;
+    if (real) real.hash = url.hash;
+    return real;
+  } catch {
+    // A cross-origin window hides its address; the caller falls back to this page's URL.
+    return null;
+  }
 }
