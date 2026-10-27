@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { rangeRoute } from "./media.ts";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -479,6 +480,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/worker.js": script('importScripts("lib.js");\npostMessage(self.answer);'),
     "/lib.js": script('self.answer = typeof self.location.href === "string" ? 42 : 0;'),
     "/realtime": html(REALTIME),
+    "/range": rangeRoute(Buffer.alloc(10000, 65), "application/octet-stream"),
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),

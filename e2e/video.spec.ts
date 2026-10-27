@@ -1,0 +1,36 @@
+import type { Page } from "@playwright/test";
+import { expect, openThroughUi, test } from "./support/test.ts";
+
+async function rangeFetch(page: Page, url: string, range: string) {
+  return page.evaluate(
+    async ([u, r]) => {
+      const response = await fetch(u, { headers: { Range: r } });
+      const body = await response.arrayBuffer();
+      return { status: response.status, contentRange: response.headers.get("content-range"), length: body.byteLength };
+    },
+    [url, range] as const,
+  );
+}
+
+test("serves a byte range as 206 with the right bytes", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  const res = await rangeFetch(page, "https://site-a.test/range", "bytes=0-9");
+  expect(res.status).toBe(206);
+  expect(res.contentRange).toBe("bytes 0-9/10000");
+  expect(res.length).toBe(10);
+});
+
+test("serves an open-ended range", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  const res = await rangeFetch(page, "https://site-a.test/range", "bytes=9990-");
+  expect(res.status).toBe(206);
+  expect(res.contentRange).toBe("bytes 9990-9999/10000");
+  expect(res.length).toBe(10);
+});
+
+test("returns 416 for an unsatisfiable range", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  const res = await rangeFetch(page, "https://site-a.test/range", "bytes=999999-");
+  expect(res.status).toBe(416);
+  expect(res.contentRange).toBe("bytes */10000");
+});
