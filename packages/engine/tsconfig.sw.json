@@ -5,5 +5,5 @@
     "types": [],
     "noEmit": true
   },
-  "include": ["src/sw", "src/shared"]
+  "include": ["src/sw", "src/shared", "src/rewrite"]
 }
