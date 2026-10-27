@@ -3,6 +3,8 @@ import { installDocument } from "./document.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
 import { installNavigation } from "./navigation.ts";
+import { installNetwork } from "./network.ts";
+import { installStorage } from "./storage.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { createUrlContext, type Realm } from "./url-context.ts";
 
@@ -42,6 +44,8 @@ export function install(win: Realm): void {
     ["attributes", () => installAttributes(win, ctx)],
     ["navigation", () => installNavigation(win, ctx)],
     ["service worker mask", () => installServiceWorkerMask(win)],
+    ["network", () => installNetwork(win, ctx)],
+    ["storage", () => installStorage(win, ctx)],
   ];
   for (const [name, step] of steps) {
     try {

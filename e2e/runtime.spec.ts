@@ -28,3 +28,29 @@ test("shows pages their real location", async ({ page }) => {
   await expect(page).toHaveURL(/\/~\/https\/site-a\.test\/runtime\/pushed\?z=2$/);
   await expect(page.locator('a#link[href="/~/https/site-c.test/"]')).toHaveCount(1);
 });
+
+test("keeps web storage apart per site", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/storage?set=a");
+  await expect(page.locator("#value")).toHaveText("a");
+  await expect(page.locator("#session")).toHaveText("a");
+  await page.goto("/~/https/site-b.test/storage");
+  await expect(page.locator("#value")).toHaveText("");
+  await expect(page.locator("#session")).toHaveText("");
+  await page.goto("/~/https/site-a.test/storage");
+  await expect(page.locator("#value")).toHaveText("a");
+});
+
+test("shows real URLs on network responses", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/network");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    fetchUrl: "https://site-b.test/api",
+    fetchBody: { method: "GET", origin: "https://site-a.test" },
+    rootUrl: "https://site-a.test/api",
+    rootRedirected: false,
+    requestUrl: "https://site-a.test/api",
+    xhrUrl: "https://site-b.test/api",
+    events: ["one", "two"],
+    eventSourceUrl: "https://site-a.test/sse",
+  });
+});

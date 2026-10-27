@@ -83,7 +83,66 @@ const FRAME = page(
 </script>`,
 );
 
+const STORAGE = page(
+  "Storage",
+  `<p id="value"></p><p id="session"></p>
+<script>
+  const set = new URLSearchParams(location.search).get("set");
+  if (set) {
+    localStorage.setItem("k", set);
+    sessionStorage.setItem("k", set);
+  }
+  document.getElementById("value").textContent = localStorage.getItem("k") ?? "";
+  document.getElementById("session").textContent = sessionStorage.getItem("k") ?? "";
+</script>`,
+);
+
+const NETWORK = page(
+  "Network",
+  `<pre id="results"></pre>
+<script>
+  (async () => {
+    const r = {};
+    const cross = await fetch("https://site-b.test/api");
+    r.fetchUrl = cross.url;
+    r.fetchBody = await cross.json();
+    const root = await fetch("/api");
+    r.rootUrl = root.url;
+    r.rootRedirected = root.redirected;
+    r.requestUrl = new Request("/api").url;
+    r.xhrUrl = await new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", "https://site-b.test/api");
+      xhr.onload = () => resolve(xhr.responseURL);
+      xhr.send();
+    });
+    r.events = await new Promise((resolve) => {
+      const got = [];
+      const source = new EventSource("/sse");
+      r.eventSourceUrl = source.url;
+      source.onmessage = (event) => {
+        got.push(event.data);
+        if (got.length === 2) {
+          source.close();
+          resolve(got);
+        }
+      };
+    });
+    document.getElementById("results").textContent = JSON.stringify(r);
+  })();
+</script>`,
+);
+
 type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
+
+const api: Route = (req, res) => {
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(JSON.stringify({ method: req.method, origin: req.headers.origin ?? null }));
+};
+const sse: Route = (_req, res) => {
+  res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+  res.end("data: one\n\ndata: two\n\n");
+};
 
 const whoami: Route = (req, res) => {
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -166,6 +225,10 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/runtime": html(RUNTIME),
     "/cookie/login": login,
     "/cookie/whoami": whoami,
+    "/storage": html(STORAGE),
+    "/api": api,
+    "/sse": sse,
+    "/network": html(NETWORK),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
@@ -174,6 +237,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,
+    "/storage": html(STORAGE),
+    "/api": api,
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };
