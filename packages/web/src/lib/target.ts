@@ -1,3 +1,5 @@
+import { encodeUrl } from "@girici/engine/shared";
+
 const SCHEME = /^[a-z][a-z\d+.-]*:\/\//i;
 
 /** Turns what the user typed into the proxy path for that page, or null when it is not a public http(s) URL. */
@@ -18,5 +20,5 @@ export function toProxyPath(input: string): string | null {
   // Single-label hosts such as "localhost" or a stray word are not public sites.
   if (!url.hostname.startsWith("[") && !url.hostname.includes(".")) return null;
 
-  return `/~/${url.protocol.slice(0, -1)}/${url.host}${url.pathname}${url.search}${url.hash}`;
+  return encodeUrl(url);
 }

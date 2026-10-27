@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import { toProxyPath } from "@/lib/target";
 import { getRandomInternetFact, type InternetFact } from "./data/internetFacts";
 import { getRandomPlaceholder } from "./data/inputPlaceholders";
@@ -10,14 +11,30 @@ const placeholder = ref("");
 const error = ref<string | null>(null);
 const fact = ref<InternetFact>({ text: "", source: "" });
 
-function onSubmit() {
+async function onSubmit() {
   const path = toProxyPath(url.value);
   if (!path) {
     error.value = "Please enter a valid URL";
     return;
   }
+  const support = serviceWorkerSupport({
+    isSecureContext: window.isSecureContext,
+    hasServiceWorker: "serviceWorker" in navigator,
+  });
+  if (support === "insecure") {
+    error.value = "Girici needs HTTPS (or localhost) to run in this browser.";
+    return;
+  }
+  if (support === "unsupported") {
+    error.value = "This browser does not support service workers, which Girici needs.";
+    return;
+  }
   error.value = null;
-  window.location.assign(path);
+  try {
+    await openProxied(path);
+  } catch (cause) {
+    error.value = `Could not start the proxy engine: ${cause instanceof Error ? cause.message : String(cause)}`;
+  }
 }
 
 onMounted(() => {
