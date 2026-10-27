@@ -1,10 +1,11 @@
-import { existsSync } from "node:fs";
-import { createHttpServer } from "./http/server.ts";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { loadConfig, type Config } from "./config.ts";
+import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
-import { webDistDir } from "./paths.ts";
+import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { createUpstreamAgent } from "./upstream/agent.ts";
 
 let config: Config;
 try {
@@ -18,8 +19,26 @@ const logger = createLogger(config.logLevel);
 if (!existsSync(join(webDistDir, "index.html"))) {
   logger.warn("Web UI is not built; / returns 503 until you run npm run build");
 }
+if (!existsSync(join(engineBundlesDir, "sw.js"))) {
+  logger.warn("Proxy engine is not built; proxied pages cannot load until you run npm run build");
+}
+if (config.testUpstreams.size > 0) {
+  logger.warn(`Test mode: upstream mapping active for ${[...config.testUpstreams.keys()].join(", ")}`);
+}
 
-const server = createHttpServer(createApp({ webDistDir, sourceUrl: config.sourceUrl, logger }));
+const agent = createUpstreamAgent({
+  testUpstreams: config.testUpstreams,
+  testCa: config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined,
+});
+const server = createHttpServer(
+  createApp({
+    webDistDir,
+    engineBundlesDir,
+    sourceUrl: config.sourceUrl,
+    logger,
+    relay: { agent, allowedTestHosts: new Set(config.testUpstreams.keys()), maxRequestBody: 50 * 1024 * 1024 },
+  }),
+);
 server.on("error", (error) => {
   logger.error(error.message);
   process.exit(1);

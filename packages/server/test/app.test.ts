@@ -7,13 +7,25 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { UI_CSP } from "../src/http/security-headers.ts";
 import { createLogger } from "../src/log.ts";
+import { createUpstreamAgent } from "../src/upstream/agent.ts";
+
+const agent = createUpstreamAgent();
+const engineBundlesDir = mkdtempSync(join(tmpdir(), "girici-engine-"));
 
 async function listen(
   webDistDir: string,
   write: (line: string) => void = () => {},
 ): Promise<{ server: Server; base: string }> {
   const logger = createLogger("debug", write);
-  const server = createServer(createApp({ webDistDir, sourceUrl: "https://example.com/source", logger }));
+  const server = createServer(
+    createApp({
+      webDistDir,
+      engineBundlesDir,
+      sourceUrl: "https://example.com/source",
+      logger,
+      relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
+    }),
+  );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { server, base: `http://127.0.0.1:${port}` };
@@ -44,8 +56,10 @@ describe("createApp", () => {
 
   afterAll(async () => {
     await Promise.all([close(server), close(emptyServer)]);
+    await agent.close();
     rmSync(webDistDir, { recursive: true, force: true });
     rmSync(emptyDir, { recursive: true, force: true });
+    rmSync(engineBundlesDir, { recursive: true, force: true });
   });
 
   it("serves the health check", async () => {
@@ -82,19 +96,9 @@ describe("createApp", () => {
     expect(res.headers.get("location")).toBe("https://example.com/source");
   });
 
-  it("answers proxied paths with 503 until the engine exists", async () => {
-    for (const path of ["/~/https/example.com/", "/proxy/https://example.com/"]) {
-      const res = await fetch(`${base}${path}`);
-      expect(res.status).toBe(503);
-      expect(res.headers.get("cache-control")).toBe("no-store");
-    }
-  });
-
-  it("answers malformed percent-encoding in proxy paths with 400 and keeps it out of the error log", async () => {
-    for (const path of ["/~/%", "/proxy/%E0%A4%A"]) {
-      const res = await fetch(`${base}${path}`);
-      expect(res.status).toBe(400);
-    }
+  it("answers malformed proxy paths without server errors", async () => {
+    expect((await fetch(`${base}/~/%`)).status).toBe(404);
+    expect((await fetch(`${base}/proxy/%E0%A4%A`)).status).toBe(404);
     expect(logLines.filter((line) => line.includes("ERROR"))).toEqual([]);
   });
 

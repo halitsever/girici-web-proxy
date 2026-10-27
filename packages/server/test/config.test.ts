@@ -3,7 +3,25 @@ import { DEFAULT_SOURCE_URL, loadConfig } from "../src/config.ts";
 
 describe("loadConfig", () => {
   it("uses defaults when nothing is set", () => {
-    expect(loadConfig({})).toEqual({ port: 3000, host: "0.0.0.0", logLevel: "info", sourceUrl: DEFAULT_SOURCE_URL });
+    expect(loadConfig({})).toEqual({
+      port: 3000,
+      host: "0.0.0.0",
+      logLevel: "info",
+      sourceUrl: DEFAULT_SOURCE_URL,
+      testUpstreams: new Map(),
+      testCaPath: undefined,
+    });
+  });
+
+  it("reads test upstreams only in test mode", () => {
+    const env = { GIRICI_TEST_UPSTREAMS: '{"site-a.test":"127.0.0.1:41443"}', GIRICI_TEST_CA: "/tmp/ca.pem" };
+    expect([...loadConfig({ ...env, NODE_ENV: "test" }).testUpstreams]).toEqual([
+      ["site-a.test", { host: "127.0.0.1", port: 41443 }],
+    ]);
+    expect(loadConfig({ ...env, NODE_ENV: "test" }).testCaPath).toBe("/tmp/ca.pem");
+    expect(loadConfig(env).testUpstreams.size).toBe(0);
+    expect(loadConfig(env).testCaPath).toBeUndefined();
+    expect(() => loadConfig({ NODE_ENV: "test", GIRICI_TEST_UPSTREAMS: "{oops" })).toThrow(/GIRICI_TEST_UPSTREAMS/);
   });
 
   it("reads PORT and accepts LISTENER_PORT as an alias", () => {
