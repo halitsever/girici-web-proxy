@@ -8,6 +8,7 @@ import type { UrlContext } from "./url-context.ts";
 /** The rewriters, bound to the page's current real base, so the runtime can rewrite code and markup synchronously. */
 export interface RewriteBridge {
   js(code: string): string;
+  jsBody(code: string): string;
   html(html: string): string;
   unhtml(html: string): string;
   importSpecifier(spec: string): string;
@@ -19,6 +20,8 @@ export function createRewriteBridge(
 ): RewriteBridge {
   return {
     js: (code) => rewriteJs(code),
+    // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
+    jsBody: (code) => rewriteJs(code, { kind: "handler" }),
     html: (html) => rewriteHtml(html, { url: ctx.realBase(), origin: ctx.origin, scripts: true }),
     unhtml: (html) => unrewriteHtmlAttributes(html, ctx.realBase(), ctx.origin),
     importSpecifier: (spec) => ctx.toProxy(spec),

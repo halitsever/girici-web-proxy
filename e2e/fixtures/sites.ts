@@ -292,6 +292,25 @@ const SINKS_WRITE = page(
 </script>`,
 );
 
+const EXEC = page(
+  "Exec",
+  `<pre id="results"></pre>
+<script>
+  const out = {};
+  out.fn = (new Function("return location.href"))();
+  out.timer = "pending";
+  setTimeout("window.__t = location.href", 0);
+  const dyn = new Function("return (new Function('return location.host'))()")();
+  out.nested = dyn;
+  out.toString = /\\[native code\\]/.test(Function.prototype.toString.call(setTimeout));
+  out.evalDirect = eval("location.href");
+  setTimeout(() => {
+    out.timer = window.__t;
+    document.getElementById("results").textContent = JSON.stringify(out);
+  }, 50);
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -337,6 +356,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/realtime": html(REALTIME),
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
+    "/exec": html(EXEC),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },

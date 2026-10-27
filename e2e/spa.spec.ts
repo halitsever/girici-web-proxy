@@ -19,3 +19,14 @@ test("executes rewritten document.write scripts", async ({ page }) => {
   await expect(page).toHaveURL(/\/~\/https\/site-a\.test\/sinks-write/);
   await expect(page.locator("#written")).toHaveText("https://site-a.test/sinks-write");
 });
+
+test("keeps eval, Function and string timers inside the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/exec");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  expect(out.fn).toBe("https://site-a.test/exec");
+  expect(out.timer).toBe("https://site-a.test/exec");
+  expect(out.nested).toBe("site-a.test");
+  expect(out.evalDirect).toBe("https://site-a.test/exec");
+  expect(out.toString).toBe(true);
+});
