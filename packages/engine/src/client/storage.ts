@@ -1,10 +1,13 @@
 import type { Realm, UrlContext } from "./url-context.ts";
 
-const PREFIX = "__g|";
+/** The key/name prefix that keeps one real origin's storage apart from another's on our shared origin. */
+export function prefixFor(origin: string): string {
+  return `__g|${origin}|`;
+}
 
 /** Every proxied site shares our origin's storage, so each real origin gets its own key prefix. */
 export function createPartitionedStorage(native: Storage, origin: string): Storage {
-  const prefix = `${PREFIX}${origin}|`;
+  const prefix = prefixFor(origin);
   const keys = (): string[] => {
     const found: string[] = [];
     for (let index = 0; index < native.length; index++) {

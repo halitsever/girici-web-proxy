@@ -1,0 +1,118 @@
+import { prefixFor } from "./storage.ts";
+import type { Realm, UrlContext } from "./url-context.ts";
+
+/** Named storage and messaging share our origin, so each real origin's databases, caches, channels and locks are prefixed. */
+export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
+  const prefix = () => prefixFor(ctx.realUrl().origin);
+  const strip = (name: string): string | null => (name.startsWith(prefix()) ? name.slice(prefix().length) : null);
+
+  prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], prefix);
+  wrap(
+    win.IDBFactory?.prototype,
+    "databases",
+    (native) =>
+      async function (this: unknown) {
+        const all = (await native.call(this)) as NamedLock[];
+        return stripLocks(all, strip);
+      },
+  );
+
+  prefixFirstArg(win.CacheStorage?.prototype, ["open", "has", "delete"], prefix);
+  wrap(
+    win.CacheStorage?.prototype,
+    "keys",
+    (native) =>
+      async function (this: unknown) {
+        const all = (await native.call(this)) as string[];
+        return all.map(strip).filter((name): name is string => name !== null);
+      },
+  );
+
+  const LockManager = (win as unknown as { LockManager?: { prototype: object } }).LockManager;
+  prefixFirstArg(LockManager?.prototype, ["request"], prefix);
+  wrap(
+    LockManager?.prototype,
+    "query",
+    (native) =>
+      async function (this: unknown) {
+        const result = (await native.call(this)) as { held?: NamedLock[]; pending?: NamedLock[] };
+        return { ...result, held: stripLocks(result.held, strip), pending: stripLocks(result.pending, strip) };
+      },
+  );
+
+  const Native = win.BroadcastChannel;
+  if (Native) {
+    win.BroadcastChannel = new Proxy(Native, {
+      construct: (target, args: [string, ...unknown[]]) =>
+        Reflect.construct(target, [prefix() + String(args[0]), ...args.slice(1)]),
+    });
+  }
+
+  installCookieStore(win, ctx);
+}
+
+interface NamedLock {
+  name?: string;
+}
+
+function stripLocks(locks: NamedLock[] | undefined, strip: (name: string) => string | null): NamedLock[] {
+  if (!locks) return [];
+  const out: NamedLock[] = [];
+  for (const lock of locks) {
+    const name = lock.name === undefined ? undefined : strip(lock.name);
+    if (lock.name !== undefined && name === null) continue;
+    out.push({ ...lock, name: name ?? undefined });
+  }
+  return out;
+}
+
+type Method = (this: unknown, ...args: unknown[]) => unknown;
+
+function prefixFirstArg(proto: object | undefined, methods: string[], prefix: () => string): void {
+  for (const method of methods) {
+    wrap(
+      proto,
+      method,
+      (native) =>
+        function (this: unknown, name: unknown, ...rest: unknown[]) {
+          return native.call(this, prefix() + String(name), ...rest);
+        },
+    );
+  }
+}
+
+/** Replaces a prototype method with a wrapper the caller builds from the original; `this` is left to the call site. */
+function wrap(proto: object | undefined, name: string, make: (native: Method) => Method): void {
+  if (!proto) return;
+  const target = proto as Record<string, unknown>;
+  const native = target[name];
+  if (typeof native !== "function") return;
+  target[name] = make(native as Method);
+}
+
+/** cookieStore is a typed view of document.cookie, so it reuses the mirror the cookie hooks maintain. */
+function installCookieStore(win: Realm, ctx: UrlContext): void {
+  const store = (win as unknown as { cookieStore?: Record<string, unknown> }).cookieStore;
+  if (!store) return;
+  const parse = (text: string) =>
+    text
+      .split("; ")
+      .filter(Boolean)
+      .map((pair) => {
+        const index = pair.indexOf("=");
+        return { name: pair.slice(0, index), value: pair.slice(index + 1) };
+      });
+  store.get = async (name: unknown) => parse(win.document.cookie).find((c) => c.name === String(name)) ?? null;
+  store.getAll = async () => parse(win.document.cookie);
+  store.set = async (name: unknown, value?: unknown) => {
+    const cookie =
+      typeof name === "object" && name
+        ? (name as { name: string; value: string })
+        : { name: String(name), value: String(value) };
+    win.document.cookie = `${cookie.name}=${cookie.value}; path=${new URL(ctx.realUrl().href).pathname}`;
+  };
+  store.delete = async (name: unknown) => {
+    const key = typeof name === "object" && name ? (name as { name: string }).name : String(name);
+    win.document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  };
+}

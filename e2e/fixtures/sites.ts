@@ -372,6 +372,26 @@ const FRAMES = page(
 </script>`,
 );
 
+const IDB_STORE = page(
+  "IndexedDB store",
+  `<p id="value"></p>
+<script>
+  (async () => {
+    const set = new URL(location.href).searchParams.get("set");
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open("store", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("kv");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const kv = (mode) => db.transaction("kv", mode).objectStore("kv");
+    if (set) await new Promise((resolve) => { kv("readwrite").put(set, "k").onsuccess = resolve; });
+    const got = await new Promise((resolve) => { kv("readonly").get("k").onsuccess = (e) => resolve(e.target.result); });
+    document.getElementById("value").textContent = got || "";
+  })();
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -404,6 +424,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/login": login,
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
+    "/idb-store": html(IDB_STORE),
     "/api": api,
     "/sse": sse,
     "/cookie/echo": cookieEcho,
@@ -435,6 +456,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
+    "/idb-store": html(IDB_STORE),
     "/api": api,
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
