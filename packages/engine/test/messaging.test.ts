@@ -17,14 +17,16 @@ function fakeMessagingWin(calls: unknown[][], proxyOrigin: string): Realm {
 }
 
 describe("installMessaging", () => {
-  it("rewrites a real targetOrigin to our origin and keeps the wildcard", () => {
+  it("delivers to a matching target origin, drops a mismatch and keeps the wildcard", () => {
     const calls: unknown[][] = [];
     const win = fakeMessagingWin(calls, "http://proxy.test");
+    // The receiver's real origin is site-a, so only a message addressed to site-a is delivered.
     installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"));
-    win.postMessage("m", "https://site-b.test");
+    win.postMessage("self", "https://site-a.test");
+    win.postMessage("other", "https://site-b.test");
     win.postMessage("w", "*");
     expect(calls).toEqual([
-      ["m", "http://proxy.test"],
+      ["self", "http://proxy.test"],
       ["w", "*"],
     ]);
   });

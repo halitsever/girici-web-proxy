@@ -70,12 +70,14 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
     return value === null ? value : restore(this, attributeName(namespace, name), value);
   };
 
-  // Reading the Attr node directly (getAttributeNode, the attributes map) must show the real URL like getAttribute does.
-  const attrValue = Object.getOwnPropertyDescriptor(win.Attr.prototype, "value");
-  if (attrValue?.get && attrValue.set) {
-    const { get, set } = attrValue;
-    Object.defineProperty(win.Attr.prototype, "value", {
-      ...attrValue,
+  // Reading an Attr node directly (getAttributeNode, the attributes map, nodeValue, textContent) must show the real URL.
+  for (const name of ["value", "nodeValue", "textContent"] as const) {
+    const descriptor = findAccessor(win.Attr.prototype, name);
+    if (!descriptor?.get || !descriptor.set) continue;
+    const { get, set } = descriptor;
+    Object.defineProperty(win.Attr.prototype, name, {
+      configurable: true,
+      enumerable: descriptor.enumerable ?? true,
       get(this: Attr) {
         const value = get.call(this);
         const owner = this.ownerElement;
@@ -176,4 +178,13 @@ function prototypeOf(win: Realm, constructorName: string): object | undefined {
 function attributeName(namespace: string | null, name: string): string {
   const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
   return namespace === XLINK_NAMESPACE ? `xlink:${local}` : name;
+}
+
+/** Finds a property's accessor on an object or anywhere up its prototype chain (value is own, nodeValue is on Node). */
+function findAccessor(start: object, name: string): PropertyDescriptor | undefined {
+  for (let current: object | null = start; current; current = Object.getPrototypeOf(current) as object | null) {
+    const descriptor = Object.getOwnPropertyDescriptor(current, name);
+    if (descriptor) return descriptor;
+  }
+  return undefined;
 }

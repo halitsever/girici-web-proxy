@@ -27,6 +27,23 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
         return all.map(strip).filter((name): name is string => name !== null);
       },
   );
+  // match() with no cacheName searches every cache on the origin, so it is confined to this site's own caches.
+  wrap(
+    win.CacheStorage?.prototype,
+    "match",
+    (native) =>
+      function (this: CacheStorage, request: unknown, options?: { cacheName?: string }) {
+        if (options?.cacheName)
+          return native.call(this, request, { ...options, cacheName: prefix() + options.cacheName });
+        return (async () => {
+          for (const name of await this.keys()) {
+            const hit = await (await this.open(name)).match(request as RequestInfo, options);
+            if (hit) return hit;
+          }
+          return undefined;
+        })();
+      },
+  );
 
   const LockManager = (win as unknown as { LockManager?: { prototype: object } }).LockManager;
   prefixFirstArg(LockManager?.prototype, ["request"], prefix);
@@ -102,7 +119,10 @@ function installCookieStore(win: Realm, ctx: UrlContext): void {
         const index = pair.indexOf("=");
         return { name: pair.slice(0, index), value: pair.slice(index + 1) };
       });
-  store.get = async (name: unknown) => parse(win.document.cookie).find((c) => c.name === String(name)) ?? null;
+  // get/delete accept both a bare name and the { name } object form the native API allows.
+  const nameOf = (input: unknown) =>
+    typeof input === "object" && input ? String((input as { name?: unknown }).name) : String(input);
+  store.get = async (name: unknown) => parse(win.document.cookie).find((c) => c.name === nameOf(name)) ?? null;
   store.getAll = async () => parse(win.document.cookie);
   store.set = async (name: unknown, value?: unknown) => {
     const cookie =
@@ -112,7 +132,6 @@ function installCookieStore(win: Realm, ctx: UrlContext): void {
     win.document.cookie = `${cookie.name}=${cookie.value}; path=${new URL(ctx.realUrl().href).pathname}`;
   };
   store.delete = async (name: unknown) => {
-    const key = typeof name === "object" && name ? (name as { name: string }).name : String(name);
-    win.document.cookie = `${key}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    win.document.cookie = `${nameOf(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
   };
 }

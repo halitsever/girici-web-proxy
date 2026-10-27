@@ -28,8 +28,15 @@ test("denies notifications", async ({ page }) => {
   await expect(page.locator("#perm")).toHaveText("denied");
 });
 
+test("contains fetches from a srcdoc script", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/srcdoc-escape");
+  await page.waitForTimeout(1500);
+  // The escapeGuard fixture asserts zero requests left the proxy.
+});
+
 test("does not double-prefix raw attribute reads", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/raw-attr");
   await expect(page.locator("#raw")).toHaveText("https://site-a.test/api");
+  await expect(page.locator("#rawnode")).toHaveText("https://site-a.test/api");
   await expect(page.locator("#fetched")).toHaveText("GET");
 });

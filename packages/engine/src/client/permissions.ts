@@ -17,7 +17,16 @@ export function installPermissions(win: Realm): void {
     const nativeQuery = permissions.query.bind(permissions);
     permissions.query = (descriptor: { name: string }) => {
       if (descriptor && (descriptor.name === "notifications" || descriptor.name === "push")) {
-        return Promise.resolve({ state: "denied", name: descriptor.name } as unknown as PermissionStatus);
+        // A plain object would throw when a page registers a change listener, so it mimics a PermissionStatus.
+        const status = {
+          state: "denied",
+          name: descriptor.name,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        };
+        return Promise.resolve(status as unknown as PermissionStatus);
       }
       return nativeQuery(descriptor as PermissionDescriptor);
     };

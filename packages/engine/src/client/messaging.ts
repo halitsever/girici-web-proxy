@@ -5,18 +5,14 @@ import type { Realm, UrlContext } from "./url-context.ts";
 export function installMessaging(win: Realm, ctx: UrlContext): void {
   const nativePost = win.postMessage.bind(win) as (...args: unknown[]) => void;
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
-    if (typeof targetOrigin === "string") {
-      nativePost(message, rewriteTarget(targetOrigin, ctx.origin), ...rest);
-    } else if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
+    if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
       const options = targetOrigin as { targetOrigin?: unknown };
-      const fixed =
-        typeof options.targetOrigin === "string"
-          ? rewriteTarget(options.targetOrigin, ctx.origin)
-          : options.targetOrigin;
-      nativePost(message, { ...options, targetOrigin: fixed }, ...rest);
-    } else {
-      nativePost(message, targetOrigin, ...rest);
+      const decision = resolveTarget(options.targetOrigin, ctx);
+      if (decision.deliver) nativePost(message, { ...options, targetOrigin: decision.target }, ...rest);
+      return;
     }
+    const decision = resolveTarget(targetOrigin, ctx);
+    if (decision.deliver) nativePost(message, decision.target, ...rest);
   } as typeof win.postMessage;
 
   const descriptor = Object.getOwnPropertyDescriptor(win.MessageEvent.prototype, "origin");
@@ -42,14 +38,20 @@ export function installMessaging(win: Realm, ctx: UrlContext): void {
   });
 }
 
-/** A real http(s) origin is replaced with our origin so the browser still delivers; wildcards pass through. */
-function rewriteTarget(targetOrigin: string, origin: string): string {
-  if (targetOrigin === "*" || targetOrigin === "/") return targetOrigin;
-  try {
-    const url = new URL(targetOrigin);
-    if (url.protocol === "http:" || url.protocol === "https:") return origin;
-  } catch {
-    // A value that is not a URL is left for the browser to reject as it would.
+/**
+ * The receiver (this window) runs on our origin, so a message addressed to a real origin is delivered as our origin
+ * only when that origin is this page's real one; otherwise it is dropped, as the native origin check would.
+ */
+function resolveTarget(targetOrigin: unknown, ctx: UrlContext): { deliver: boolean; target?: unknown } {
+  if (typeof targetOrigin !== "string" || targetOrigin === "*" || targetOrigin === "/") {
+    return { deliver: true, target: targetOrigin };
   }
-  return targetOrigin;
+  let url: URL;
+  try {
+    url = new URL(targetOrigin);
+  } catch {
+    return { deliver: true, target: targetOrigin };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return { deliver: true, target: targetOrigin };
+  return url.origin === ctx.realUrl().origin ? { deliver: true, target: ctx.origin } : { deliver: false };
 }

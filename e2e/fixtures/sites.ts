@@ -404,6 +404,11 @@ const POSTMESSAGE = page(
 
 const PM_CHILD = page("PM child", `<script>parent.postMessage("hello", location.origin);</script>`);
 
+const SRCDOC_ESCAPE = page(
+  "Srcdoc escape",
+  `<iframe srcdoc="<script>fetch('https://site-b.test/api').catch(function(){})<\/script>"></iframe>`,
+);
+
 const NOTIFY = page(
   "Notify",
   `<p id="perm"></p>
@@ -416,12 +421,13 @@ const NOTIFY = page(
 
 const RAW_ATTR = page(
   "Raw attr",
-  `<a id="link" href="/api">x</a><p id="raw"></p><p id="fetched"></p>
+  `<a id="link" href="/api">x</a><p id="raw"></p><p id="rawnode"></p><p id="fetched"></p>
 <script>
   (async () => {
     const link = document.getElementById("link");
     const raw = link.getAttributeNode("href").value;
     document.getElementById("raw").textContent = raw;
+    document.getElementById("rawnode").textContent = link.getAttributeNode("href").nodeValue;
     const response = await fetch(new URL(raw, document.baseURI).href);
     const data = await response.json();
     document.getElementById("fetched").textContent = data.method;
@@ -483,6 +489,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/notify": html(NOTIFY),
+    "/srcdoc-escape": html(SRCDOC_ESCAPE),
     "/raw-attr": html(RAW_ATTR),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),

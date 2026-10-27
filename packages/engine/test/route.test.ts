@@ -48,6 +48,19 @@ describe("classifyRequest", () => {
     });
   });
 
+  it("proxies cross-origin requests from an unresolved blank or srcdoc client", () => {
+    expect(summary(classifyRequest(input("https://evil.test/x", { clientUrl: "about:srcdoc" })))).toEqual({
+      kind: "proxy",
+      target: "https://evil.test/x",
+      navigation: false,
+    });
+    expect(summary(classifyRequest(input("https://evil.test/x", { clientUrl: null })))).toEqual({
+      kind: "proxy",
+      target: "https://evil.test/x",
+      navigation: false,
+    });
+  });
+
   it("leaves requests from the Girici UI alone", () => {
     expect(summary(classifyRequest(input("https://cdn.example.com/x.png", { clientUrl: `${origin}/` })))).toEqual({
       kind: "passthrough",
