@@ -18,13 +18,17 @@
     "dev": "run-p --print-label \"dev:*\"",
     "dev:server": "npm run dev -w @girici/server",
     "dev:web": "npm run dev -w @girici/web",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e/tsconfig.json",
     "test": "npm run build:lib -w @girici/engine && vitest run",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test:e2e": "npm run build -w @girici/engine && npm run build -w @girici/web && playwright test",
+    "test:smoke": "SMOKE=1 npm run test:e2e -- --project=chromium smoke",
+    "dev:engine": "npm run dev -w @girici/engine"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^24.19.2",
     "@vue/eslint-config-prettier": "^10.2.0",
     "@vue/eslint-config-typescript": "^14.9.0",

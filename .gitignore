@@ -133,3 +133,4 @@ dist
 dist/
 test-results/
 playwright-report/
+e2e/.cache/
