@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { sep } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
 
@@ -12,10 +13,9 @@ export const test = base.extend<{ escapeGuard: void }>({
       const escaped = (await (await fetch(TRAP_LOG)).json()) as string[];
       // Real sites still leak through absolute links and scripts until the rewriter lands, so smoke tests only report.
       if (testInfo.file.includes(`${sep}smoke${sep}`)) {
-        await testInfo.attach("escaped-requests", {
-          body: JSON.stringify(escaped, null, 2),
-          contentType: "application/json",
-        });
+        const path = testInfo.outputPath("escaped-requests.json");
+        await writeFile(path, JSON.stringify(escaped, null, 2));
+        await testInfo.attach("escaped-requests", { path, contentType: "application/json" });
       } else {
         expect(escaped, "requests that left the proxy").toEqual([]);
       }

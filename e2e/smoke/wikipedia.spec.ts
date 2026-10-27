@@ -13,5 +13,7 @@ test("opens a Wikipedia article", async ({ page }, testInfo) => {
       { timeout: 30_000 },
     )
     .toBeGreaterThan(0);
-  await testInfo.attach("page", { body: await page.screenshot({ fullPage: true }), contentType: "image/png" });
+  const path = testInfo.outputPath("page.png");
+  await page.screenshot({ path, fullPage: true });
+  await testInfo.attach("page", { path, contentType: "image/png" });
 });
