@@ -16,10 +16,13 @@ import { HttpRelayTransport } from "./transport.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
+declare const __GIRICI_WORKER__: string;
 
 const CLIENT_PATH = __GIRICI_CLIENT__;
+const WORKER_PATH = __GIRICI_WORKER__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
+const PRECACHED = new Set([CLIENT_PATH, WORKER_PATH]);
 const transport = new HttpRelayTransport();
 // Window clients answer at once; only a deadlocked worker ever reaches this.
 const CLIENT_LOOKUP_TIMEOUT = 200;
@@ -33,7 +36,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(CLIENT_CACHE)
-      .then((cache) => cache.add(CLIENT_PATH))
+      .then((cache) => cache.addAll([...PRECACHED]))
       .then(() => self.skipWaiting()),
   );
 });
@@ -58,7 +61,7 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.origin === self.location.origin && url.pathname === CLIENT_PATH) {
+  if (url.origin === self.location.origin && PRECACHED.has(url.pathname)) {
     event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request)));
     return;
   }

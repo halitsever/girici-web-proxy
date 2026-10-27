@@ -8,6 +8,7 @@ import { createFakeLocation } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
 import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installScriptExec } from "./script-exec.ts";
+import { installWorkers } from "./workers.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
@@ -80,6 +81,7 @@ export function install(win: Realm, config: ClientConfig): void {
     ["attributes", () => installAttributes(win, ctx)],
     ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
+    ["workers", () => installWorkers(win, ctx)],
     ["navigation", () => installNavigation(win, ctx)],
     ["service worker mask", () => installServiceWorkerMask(win)],
     ["cookies", () => installCookies(win, ctx, config)],

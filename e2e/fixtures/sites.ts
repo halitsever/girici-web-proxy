@@ -311,6 +311,26 @@ const EXEC = page(
 </script>`,
 );
 
+const WORKER2 = page(
+  "Worker2",
+  `<pre id="results"></pre>
+<script>
+  const out = {};
+  let pending = 3;
+  const done = (key, value) => {
+    out[key] = value;
+    if (--pending === 0) document.getElementById("results").textContent = JSON.stringify(out);
+  };
+  const classic = new Worker("/worker-classic.js");
+  classic.onmessage = (event) => done("classicHref", event.data);
+  const mod = new Worker("/worker-module.js", { type: "module" });
+  mod.onmessage = (event) => done("moduleHref", event.data);
+  const blobCode = 'fetch("/api").then((r) => r.json()).then((d) => postMessage(d.method));';
+  const blobWorker = new Worker(URL.createObjectURL(new Blob([blobCode], { type: "text/javascript" })));
+  blobWorker.onmessage = (event) => done("blobApi", event.data);
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -357,6 +377,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),
+    "/worker2": html(WORKER2),
+    "/worker-classic.js": script("postMessage(self.location.href);"),
+    "/worker-module.js": script("postMessage(self.location.href);"),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },

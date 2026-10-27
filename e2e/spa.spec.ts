@@ -30,3 +30,12 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   expect(out.evalDirect).toBe("https://site-a.test/exec");
   expect(out.toString).toBe(true);
 });
+
+test("keeps classic, module and blob workers inside the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/worker2");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  expect(out.classicHref).toBe("https://site-a.test/worker-classic.js");
+  expect(out.moduleHref).toBe("https://site-a.test/worker-module.js");
+  expect(out.blobApi).toBe("GET");
+});

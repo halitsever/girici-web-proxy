@@ -17,26 +17,36 @@ const common = {
   logLevel: "info",
 };
 
-// The hash in the client's name lets the server cache it forever and the worker inject the matching copy.
-const clientOptions = {
+// The hash in each name lets the server cache it forever and the workers inject the matching copy.
+const workerRuntimeOptions = {
   ...common,
-  entryPoints: { client: "src/client/index.ts" },
+  entryPoints: { worker: "src/client/worker-runtime.ts" },
   entryNames: "[name].[hash]",
   metafile: true,
 };
 
-function workerOptions(clientPath) {
+function clientOptions(workerPath) {
   return {
     ...common,
-    entryPoints: { sw: "src/sw/index.ts", boot: "src/boot/index.ts" },
-    define: { __GIRICI_CLIENT__: JSON.stringify(clientPath) },
+    entryPoints: { client: "src/client/index.ts" },
+    entryNames: "[name].[hash]",
+    define: { __GIRICI_WORKER__: JSON.stringify(workerPath) },
     metafile: true,
   };
 }
 
-function clientPathOf(result) {
-  const output = Object.keys(result.metafile.outputs).find((file) => /client\.[^/]+\.js$/.test(file));
-  if (!output) throw new Error("The client bundle was not written");
+function swBootOptions(clientPath, workerPath) {
+  return {
+    ...common,
+    entryPoints: { sw: "src/sw/index.ts", boot: "src/boot/index.ts" },
+    define: { __GIRICI_CLIENT__: JSON.stringify(clientPath), __GIRICI_WORKER__: JSON.stringify(workerPath) },
+    metafile: true,
+  };
+}
+
+function bundlePathOf(result, name) {
+  const output = Object.keys(result.metafile.outputs).find((file) => new RegExp(`${name}\\.[^/]+\\.js$`).test(file));
+  if (!output) throw new Error(`The ${name} bundle was not written`);
   return `/_g/${basename(output)}`;
 }
 
@@ -61,33 +71,50 @@ function writeLicenses(results) {
   writeFileSync(join(OUT_DIR, "THIRD_PARTY_LICENSES.txt"), entries.join("\n"));
 }
 
-function removeOldClients() {
+function removeOldBundles() {
   mkdirSync(OUT_DIR, { recursive: true });
-  for (const file of readdirSync(OUT_DIR)) if (file.startsWith("client.")) rmSync(join(OUT_DIR, file));
+  for (const file of readdirSync(OUT_DIR)) {
+    if (file.startsWith("client.") || file.startsWith("worker.")) rmSync(join(OUT_DIR, file));
+  }
 }
 
-removeOldClients();
+const onEnd = (handler) => ({
+  name: "on-end",
+  setup: (builder) => builder.onEnd((result) => (result.errors.length === 0 ? handler(result) : undefined)),
+});
+
+removeOldBundles();
 if (process.argv.includes("--watch")) {
-  let workerContext;
-  let currentPath;
-  const restartWorkers = {
-    name: "restart-workers",
-    setup(builder) {
-      builder.onEnd(async (result) => {
-        if (result.errors.length > 0) return;
-        const clientPath = clientPathOf(result);
-        if (clientPath === currentPath) return;
-        currentPath = clientPath;
-        await workerContext?.dispose();
-        workerContext = await context(workerOptions(clientPath));
-        await workerContext.watch();
-      });
-    },
+  // Dev chain worker-runtime -> client -> sw/boot: an upstream rebuild refreshes the hashed paths downstream.
+  let clientContext;
+  let swContext;
+  let workerPath;
+  let clientPath;
+  const rebuildSw = async (path) => {
+    if (path === clientPath) return;
+    clientPath = path;
+    await swContext?.dispose();
+    swContext = await context(swBootOptions(clientPath, workerPath));
+    await swContext.watch();
   };
-  const clientContext = await context({ ...clientOptions, plugins: [restartWorkers] });
-  await clientContext.watch();
+  const rebuildClient = async (path) => {
+    if (path === workerPath) return;
+    workerPath = path;
+    await clientContext?.dispose();
+    clientContext = await context({
+      ...clientOptions(workerPath),
+      plugins: [onEnd((result) => rebuildSw(bundlePathOf(result, "client")))],
+    });
+    await clientContext.watch();
+  };
+  const workerContext = await context({
+    ...workerRuntimeOptions,
+    plugins: [onEnd((result) => rebuildClient(bundlePathOf(result, "worker")))],
+  });
+  await workerContext.watch();
 } else {
-  const client = await build(clientOptions);
-  const workers = await build(workerOptions(clientPathOf(client)));
-  writeLicenses([client, workers]);
+  const workerRuntime = await build(workerRuntimeOptions);
+  const client = await build(clientOptions(bundlePathOf(workerRuntime, "worker")));
+  const swBoot = await build(swBootOptions(bundlePathOf(client, "client"), bundlePathOf(workerRuntime, "worker")));
+  writeLicenses([workerRuntime, client, swBoot]);
 }
