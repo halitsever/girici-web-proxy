@@ -1,0 +1,4 @@
+{$GIRICI_DOMAIN:localhost} {
+	encode zstd gzip
+	reverse_proxy girici:3000
+}

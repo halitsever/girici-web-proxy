@@ -1,11 +1,30 @@
-version: "3.9"
-
 services:
-  girici-web-proxy:
+  girici:
     image: halitsever/girici-web-proxy:latest
-    deploy:
-      replicas: 3
-      restart_policy:
-        condition: on-failure
+    build: .
+    restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      LOG_LEVEL: info
+      # SOURCE_URL: https://github.com/you/your-fork
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    restart: unless-stopped
+    depends_on: [girici]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      GIRICI_DOMAIN: ${GIRICI_DOMAIN:-localhost}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
