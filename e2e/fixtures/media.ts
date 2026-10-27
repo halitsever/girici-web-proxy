@@ -44,6 +44,15 @@ export function abortableRoutes() {
   return { stream, count };
 }
 
+/** Writes one chunk at once and another after a delay, so a test can see the proxy stream the first before the last. */
+export function slowStreamRoute(delayMs: number) {
+  return (_req: IncomingMessage, res: ServerResponse): void => {
+    res.writeHead(200, { "content-type": "application/octet-stream" });
+    res.write("first");
+    setTimeout(() => res.end("last"), delayMs);
+  };
+}
+
 type Range = { start: number; end: number };
 
 function parseRange(header: string | undefined, total: number): Range | "unsatisfiable" | null {

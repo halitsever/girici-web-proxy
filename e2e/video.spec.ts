@@ -48,6 +48,20 @@ test("leaves a MediaSource blob url untouched", async ({ page }) => {
   await expect(page.locator("#result")).toHaveText(/^blob:/);
 });
 
+test("streams the first chunk before the last", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  const gap = await page.evaluate(async () => {
+    const response = await fetch("/~/https/site-a.test/slow-stream");
+    const reader = response.body!.getReader();
+    const first = await reader.read();
+    const afterFirst = performance.now();
+    await reader.read();
+    return { gotFirst: !first.done, delay: performance.now() - afterFirst };
+  });
+  expect(gap.gotFirst).toBe(true);
+  expect(gap.delay).toBeGreaterThan(400);
+});
+
 test("aborts the upstream when a media fetch is cancelled", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/");
   await page.evaluate(async () => {

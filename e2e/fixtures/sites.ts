@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { abortableRoutes, rangeRoute } from "./media.ts";
+import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
 
 const abortable = abortableRoutes();
 
@@ -514,6 +514,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/mse": html(MSE),
     "/abortable": abortable.stream,
     "/abortable/aborts": abortable.count,
+    "/slow-stream": slowStreamRoute(800),
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),
