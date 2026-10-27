@@ -15,6 +15,9 @@ import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
 import { installStorage } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
+import { installMessaging } from "./messaging.ts";
+import { installPermissions } from "./permissions.ts";
+import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { createUrlContext, type InheritedContext, type Realm } from "./url-context.ts";
 
@@ -94,6 +97,9 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
     ["storage isolation", () => installStorageIsolation(win, ctx)],
+    ["messaging", () => installMessaging(win, ctx)],
+    ["permissions", () => installPermissions(win)],
+    ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
     ["frames", () => installFrames(win, ctx, config, install)],
   ];

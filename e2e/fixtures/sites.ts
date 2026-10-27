@@ -392,6 +392,28 @@ const IDB_STORE = page(
 </script>`,
 );
 
+const POSTMESSAGE = page(
+  "PostMessage",
+  `<p id="got"></p><iframe src="/pm-child"></iframe>
+<script>
+  window.addEventListener("message", (event) => {
+    document.getElementById("got").textContent = event.data + " from " + event.origin;
+  });
+</script>`,
+);
+
+const PM_CHILD = page("PM child", `<script>parent.postMessage("hello", location.origin);</script>`);
+
+const NOTIFY = page(
+  "Notify",
+  `<p id="perm"></p>
+<script>
+  Notification.requestPermission().then((p) => {
+    document.getElementById("perm").textContent = p;
+  });
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -443,6 +465,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
       page("Nav API", `<button id="go" onclick="navigation.navigate('https://site-b.test/')">go</button>`),
     ),
     "/frames": html(FRAMES),
+    "/postmessage": html(POSTMESSAGE),
+    "/pm-child": html(PM_CHILD),
+    "/notify": html(NOTIFY),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
     "/worker-classic.js": script("postMessage(self.location.href);"),

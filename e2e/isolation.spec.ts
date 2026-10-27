@@ -17,3 +17,13 @@ test("keeps IndexedDB apart per site", async ({ page }) => {
   await page.goto("/~/https/site-a.test/idb-store");
   await expect(page.locator("#value")).toHaveText("a");
 });
+
+test("passes postMessage between proxied frames", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/postmessage");
+  await expect(page.locator("#got")).toHaveText("hello from https://site-a.test");
+});
+
+test("denies notifications", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/notify");
+  await expect(page.locator("#perm")).toHaveText("denied");
+});
