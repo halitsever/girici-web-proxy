@@ -529,6 +529,16 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/raw-attr": html(RAW_ATTR),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
+    "/worker-origin": html(
+      page(
+        "Worker origin",
+        `<pre id="result"></pre><script>
+  const w = new Worker("/worker-origin.js");
+  w.onmessage = (e) => { document.getElementById("result").textContent = e.data; };
+</script>`,
+      ),
+    ),
+    "/worker-origin.js": script("postMessage(self.origin);"),
     "/worker-classic.js": script("postMessage(self.location.href);"),
     "/worker-module.js": script("postMessage(self.location.href);"),
   },

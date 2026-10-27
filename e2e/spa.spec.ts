@@ -32,6 +32,11 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   expect(out.toString).toBe(true);
 });
 
+test("shows a worker its real origin", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/worker-origin");
+  await expect(page.locator("#result")).toHaveText("https://site-a.test");
+});
+
 test("keeps classic, module and blob workers inside the proxy", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/worker2");
   await expect(page.locator("#results")).not.toBeEmpty();

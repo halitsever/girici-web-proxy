@@ -69,6 +69,13 @@ function install(): void {
   });
   Object.defineProperty(scope, "__g$", { value: helpers });
 
+  // self.origin is a separate global from self.location, so it is masked too or integrity checks see the proxy origin.
+  try {
+    Object.defineProperty(scope, "origin", { configurable: true, get: () => realBase().origin });
+  } catch {
+    // Some engines make the global origin non-configurable; the leak then stands.
+  }
+
   hookImportScripts();
   hookFetch();
   hookXhr();
