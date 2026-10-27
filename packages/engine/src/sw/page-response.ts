@@ -11,6 +11,7 @@ import {
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
+import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
 import { clientTag } from "./client-tag.ts";
 import { errorPage } from "./error-page.ts";
 import type { TransportResult } from "./transport.ts";
@@ -61,12 +62,17 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   const contentType = headers.get("content-type");
   const kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
   if (!kind) return new Response(body, { status, headers });
+  const validators: Validators = {
+    etag: envelope.find(([name]) => name === "etag")?.[1] ?? null,
+    lastModified: envelope.find(([name]) => name === "last-modified")?.[1] ?? null,
+    length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
+  };
   const text = decodeText(await new Response(body).arrayBuffer(), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
-  return new Response(await rewriteBody(kind, text, ctx), { status, headers });
+  return new Response(await rewriteBody(kind, text, ctx, validators), { status, headers });
 }
 
-async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext): Promise<string> {
+async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, validators: Validators): Promise<string> {
   switch (kind) {
     case "html": {
       const inject = clientTag(ctx.clientScript, { v: PROTOCOL_VERSION, cookies: await ctx.cookies() });
@@ -76,8 +82,20 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext): Prom
       return rewriteCss(text, ctx.target, ctx.origin);
     case "js":
       // Workers and blank frames load scripts too, and they have no runtime to call into.
-      return rewriteJs(text, { standalone: true });
+      return cachedRewrite(ctx.target, validators, () => rewriteJs(text, { standalone: true }));
   }
+}
+
+/** Reuses a stored rewrite when the script carries a validator, so a repeat visit skips re-parsing a large bundle. */
+async function cachedRewrite(target: URL, validators: Validators, rewrite: () => string): Promise<string> {
+  const key = cacheKey(target, "js", validators);
+  if (!key) return rewrite();
+  const cache = await caches.open(REWRITE_CACHE);
+  const cached = await readRewritten(key, cache);
+  if (cached !== null) return cached;
+  const rewritten = rewrite();
+  await writeRewritten(key, rewritten, cache);
+  return rewritten;
 }
 
 function redirectTo(location: string, status: number, ctx: PageContext): Response {
