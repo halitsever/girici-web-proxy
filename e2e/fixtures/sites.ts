@@ -414,6 +414,21 @@ const NOTIFY = page(
 </script>`,
 );
 
+const RAW_ATTR = page(
+  "Raw attr",
+  `<a id="link" href="/api">x</a><p id="raw"></p><p id="fetched"></p>
+<script>
+  (async () => {
+    const link = document.getElementById("link");
+    const raw = link.getAttributeNode("href").value;
+    document.getElementById("raw").textContent = raw;
+    const response = await fetch(new URL(raw, document.baseURI).href);
+    const data = await response.json();
+    document.getElementById("fetched").textContent = data.method;
+  })();
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -468,6 +483,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/notify": html(NOTIFY),
+    "/raw-attr": html(RAW_ATTR),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
     "/worker-classic.js": script("postMessage(self.location.href);"),

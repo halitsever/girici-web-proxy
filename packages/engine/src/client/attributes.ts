@@ -70,6 +70,24 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
     return value === null ? value : restore(this, attributeName(namespace, name), value);
   };
 
+  // Reading the Attr node directly (getAttributeNode, the attributes map) must show the real URL like getAttribute does.
+  const attrValue = Object.getOwnPropertyDescriptor(win.Attr.prototype, "value");
+  if (attrValue?.get && attrValue.set) {
+    const { get, set } = attrValue;
+    Object.defineProperty(win.Attr.prototype, "value", {
+      ...attrValue,
+      get(this: Attr) {
+        const value = get.call(this);
+        const owner = this.ownerElement;
+        return owner && typeof value === "string" ? restore(owner, this.name, value) : value;
+      },
+      set(this: Attr, value: unknown) {
+        const owner = this.ownerElement;
+        set.call(this, owner ? rewrite(owner, this.name, String(value)) : String(value));
+      },
+    });
+  }
+
   function rewrite(target: Element, name: string, value: string): string {
     return attributeKind(target.localName, name)
       ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin)

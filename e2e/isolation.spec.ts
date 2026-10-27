@@ -27,3 +27,9 @@ test("denies notifications", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/notify");
   await expect(page.locator("#perm")).toHaveText("denied");
 });
+
+test("does not double-prefix raw attribute reads", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/raw-attr");
+  await expect(page.locator("#raw")).toHaveText("https://site-a.test/api");
+  await expect(page.locator("#fetched")).toHaveText("GET");
+});
