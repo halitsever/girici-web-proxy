@@ -21,6 +21,7 @@ describe("engine, bootstrap and legacy routes", () => {
     webDir = mkdtempSync(join(tmpdir(), "girici-web-"));
     writeFileSync(join(engineDir, "sw.js"), "self.addEventListener('fetch', () => {});");
     writeFileSync(join(engineDir, "boot.js"), "console.log('boot');");
+    writeFileSync(join(engineDir, "client.abc123.js"), "console.log('client');");
     server = createHttpServer(
       createApp({
         webDistDir: webDir,
@@ -48,6 +49,13 @@ describe("engine, bootstrap and legacy routes", () => {
     expect(res.headers.get("cache-control")).toBe("no-cache");
     expect(res.headers.get("content-type")).toMatch(/^text\/javascript/);
     expect((await fetch(`${base}/_g/boot.js`)).headers.get("cache-control")).toBe("no-cache");
+  });
+
+  it("serves hashed client bundles as immutable", async () => {
+    const res = await fetch(`${base}/_g/client.abc123.js`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect((await fetch(`${base}/_g/sw.js`)).headers.get("cache-control")).toBe("no-cache");
   });
 
   it("answers direct document hits on proxy paths with the bootstrap page", async () => {

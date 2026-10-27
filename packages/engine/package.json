@@ -16,7 +16,7 @@
     "dev": "run-p --print-label \"dev:*\"",
     "dev:lib": "tsc -p tsconfig.lib.json --watch --preserveWatchOutput",
     "dev:bundles": "node scripts/build.mjs --watch",
-    "typecheck": "npm run build:lib && tsc -p tsconfig.sw.json && tsc -p tsconfig.boot.json && tsc -p tsconfig.test.json"
+    "typecheck": "npm run build:lib && tsc -p tsconfig.sw.json && tsc -p tsconfig.boot.json && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",

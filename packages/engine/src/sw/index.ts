@@ -6,13 +6,32 @@ import { buildRelayRequest } from "./relay-request.ts";
 import { classifyRequest, realUrlOf } from "./route.ts";
 
 declare const self: ServiceWorkerGlobalScope;
+declare const __GIRICI_CLIENT__: string;
+
+const CLIENT_PATH = __GIRICI_CLIENT__;
+// Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
+const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(self.skipWaiting());
+  event.waitUntil(
+    caches
+      .open(CLIENT_CACHE)
+      .then((cache) => cache.add(CLIENT_PATH))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches
+      .keys()
+      .then((keys) =>
+        Promise.all(
+          keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  );
 });
 
 self.addEventListener("message", (event) => {
@@ -22,6 +41,10 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (url.origin === self.location.origin && url.pathname === CLIENT_PATH) {
+    event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request)));
+    return;
+  }
   if (url.origin === self.location.origin && isReservedPath(url.pathname)) return;
   event.respondWith(handle(event));
 });
