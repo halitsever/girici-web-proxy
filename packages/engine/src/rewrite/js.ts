@@ -4,9 +4,9 @@ import { isParseError, parseModule, parseScript, type ESTree } from "meriyah";
 export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
-// Indirect eval is written as a computed access, so re-rewriting the shim leaves it untouched (R10).
+// Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){return globalThis["eval"](c)},I:function(v){return v},H:function(v){return v},M:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
@@ -103,14 +103,14 @@ class LocationRewriter {
         if (isHelperCall(node)) return;
         const callee = node.callee;
         const directEval = callee.type === "Identifier" && callee.name === "eval";
-        // `window.eval`/`globalThis.eval`/`self.eval` is the global eval; an unrelated `obj.eval` is left alone.
+        // `window.eval`/`window["eval"]` on a global is the global eval; an unrelated `obj.eval` is left alone.
         const globalEval =
           callee.type === "MemberExpression" &&
-          !callee.computed &&
-          callee.property.type === "Identifier" &&
-          callee.property.name === "eval" &&
           callee.object.type === "Identifier" &&
-          GLOBAL_NAMES.has(callee.object.name);
+          GLOBAL_NAMES.has(callee.object.name) &&
+          (callee.computed
+            ? callee.property.type === "Literal" && callee.property.value === "eval"
+            : callee.property.type === "Identifier" && callee.property.name === "eval");
         const first = node.arguments[0];
         if ((directEval || globalEval) && first && first.type !== "SpreadElement" && !isHelperCall(first)) {
           this.#call("__g$.E(", ")", first);

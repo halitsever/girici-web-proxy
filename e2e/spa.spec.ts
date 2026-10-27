@@ -25,6 +25,7 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   await expect(page.locator("#results")).not.toBeEmpty();
   const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
   expect(out.fn).toBe("https://site-a.test/exec");
+  expect(out.ctor).toBe("https://site-a.test/exec");
   expect(out.timer).toBe("https://site-a.test/exec");
   expect(out.nested).toBe("site-a.test");
   expect(out.evalDirect).toBe("https://site-a.test/exec");
@@ -38,6 +39,11 @@ test("keeps classic, module and blob workers inside the proxy", async ({ page })
   expect(out.classicHref).toBe("https://site-a.test/worker-classic.js");
   expect(out.moduleHref).toBe("https://site-a.test/worker-module.js");
   expect(out.blobApi).toBe("GET");
+});
+
+test("keeps blob worker subresources inside the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/worker-escape");
+  await expect(page.locator("#results")).toHaveText("done");
 });
 
 test("proxies Navigation API navigations", async ({ page, browserName }) => {

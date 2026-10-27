@@ -15,6 +15,10 @@ interface WorkerScope {
   WebTransport?: unknown;
   eval: (code: string) => unknown;
   Request?: new (input: unknown, init?: unknown) => { url: string };
+  EventSource?: new (url: string, init?: unknown) => object;
+  navigator?: { sendBeacon?: (url: string, data?: unknown) => boolean };
+  Worker?: new (url: string, options?: unknown) => object;
+  SharedWorker?: new (url: string, options?: unknown) => object;
 }
 
 // globalThis is the worker scope at runtime; typed through WorkerScope to avoid the DOM and WebWorker libs.
@@ -68,7 +72,30 @@ function install(): void {
   hookImportScripts();
   hookFetch();
   hookXhr();
+  hookSubresources();
   blockRealtime();
+}
+
+/** Other network sinks a worker can reach, so none of them leaves the proxy or the cookie jar. */
+function hookSubresources(): void {
+  const EventSource = scope.EventSource;
+  if (EventSource) {
+    scope.EventSource = new Proxy(EventSource, {
+      construct: (target, args: [string, unknown?]) => Reflect.construct(target, [toProxy(String(args[0])), args[1]]),
+    });
+  }
+  const navigator = scope.navigator;
+  const sendBeacon = navigator?.sendBeacon;
+  if (navigator && sendBeacon) {
+    navigator.sendBeacon = (url: string, data?: unknown) => sendBeacon.call(navigator, toProxy(String(url)), data);
+  }
+  for (const name of ["Worker", "SharedWorker"] as const) {
+    const Native = scope[name];
+    if (!Native) continue;
+    scope[name] = new Proxy(Native, {
+      construct: (target, args: [string, unknown?]) => Reflect.construct(target, [toProxy(String(args[0])), args[1]]),
+    });
+  }
 }
 
 function hookImportScripts(): void {

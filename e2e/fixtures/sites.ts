@@ -298,6 +298,7 @@ const EXEC = page(
 <script>
   const out = {};
   out.fn = (new Function("return location.href"))();
+  out.ctor = (function () {}).constructor("return location.href")();
   out.timer = "pending";
   setTimeout("window.__t = location.href", 0);
   const dyn = new Function("return (new Function('return location.host'))()")();
@@ -328,6 +329,22 @@ const WORKER2 = page(
   const blobCode = 'fetch("/api").then((r) => r.json()).then((d) => postMessage(d.method));';
   const blobWorker = new Worker(URL.createObjectURL(new Blob([blobCode], { type: "text/javascript" })));
   blobWorker.onmessage = (event) => done("blobApi", event.data);
+</script>`,
+);
+
+const WORKER_ESCAPE = page(
+  "Worker escape",
+  `<pre id="results"></pre>
+<script>
+  const code =
+    'if (typeof EventSource === "function") new EventSource("https://site-b.test/sse");' +
+    'if (self.navigator && self.navigator.sendBeacon) self.navigator.sendBeacon("https://site-b.test/beacon", "x");' +
+    'if (typeof Worker === "function") new Worker("https://site-b.test/w.js");' +
+    'postMessage("done");';
+  const worker = new Worker(URL.createObjectURL(new Blob([code], { type: "text/javascript" })));
+  worker.onmessage = (event) => {
+    document.getElementById("results").textContent = event.data;
+  };
 </script>`,
 );
 
@@ -381,6 +398,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
       page("Nav API", `<button id="go" onclick="navigation.navigate('https://site-b.test/')">go</button>`),
     ),
     "/worker2": html(WORKER2),
+    "/worker-escape": html(WORKER_ESCAPE),
     "/worker-classic.js": script("postMessage(self.location.href);"),
     "/worker-module.js": script("postMessage(self.location.href);"),
   },

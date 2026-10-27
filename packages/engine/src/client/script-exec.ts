@@ -25,7 +25,14 @@ export function installScriptExec(
   };
 
   const FunctionCtor = win.Function as unknown as AnyFunction;
-  win.Function = wrapConstructor(FunctionCtor) as unknown as FunctionConstructor;
+  const hookedFunction = wrapConstructor(FunctionCtor);
+  win.Function = hookedFunction as unknown as FunctionConstructor;
+  // `(function(){}).constructor` reaches the native ctor through the shared prototype, so route it too.
+  Object.defineProperty(win.Function.prototype, "constructor", {
+    configurable: true,
+    writable: true,
+    value: hookedFunction,
+  });
 
   // Generator and async constructors are reached through a sample function's `constructor`, not a global.
   for (const sample of [function* () {}, async function () {}, async function* () {}]) {

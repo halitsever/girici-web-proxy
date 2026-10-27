@@ -23,6 +23,8 @@ describe("rewriteJs", () => {
     ["eval(code)", "eval(__g$.E(code))"],
     ["eval(a, b)", "eval(__g$.E(a), b)"],
     ["window.eval(code)", "window.eval(__g$.E(code))"],
+    ["window['eval'](code)", "window['eval'](__g$.E(code))"],
+    ["globalThis['eval'](code)", "globalThis['eval'](__g$.E(code))"],
     ["const e = eval; e(x)", "const e = __g$.ev; e(x)"],
     ["[eval][0](x)", "[__g$.ev][0](x)"],
     ["import(spec)", "import(__g$.I(spec))"],
