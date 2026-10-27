@@ -12,24 +12,46 @@ export interface UrlContext {
   fromProxy(value: string): string;
 }
 
+/** What a blank or srcdoc frame inherits from its parent, since its own origin is opaque and it has no proxy URL. */
+export interface InheritedContext {
+  origin: string;
+  base: string;
+}
+
 /** Must be created before the hooks so it keeps reading the browser's own proxy URLs. */
-export function createUrlContext(win: Realm): UrlContext {
-  const origin = win.location.origin;
+export function createUrlContext(win: Realm, inherited?: InheritedContext): UrlContext {
+  const origin = inherited?.origin ?? win.location.origin;
   const nativeBaseUri = Object.getOwnPropertyDescriptor(win.Node.prototype, "baseURI")?.get;
 
   const realUrl = (): URL => {
-    const native = new URL(win.location.href);
-    const real = native.origin === origin ? decodeUrl(native.pathname + native.search) : null;
-    if (!real) return native;
-    real.hash = native.hash;
-    return real;
+    let native: URL | null = null;
+    try {
+      native = new URL(win.location.href);
+    } catch {
+      // A frame with an opaque address cannot be parsed; the inherited base stands in.
+    }
+    const real = native && native.origin === origin ? decodeUrl(native.pathname + native.search) : null;
+    if (native && real) {
+      real.hash = native.hash;
+      return real;
+    }
+    if (inherited) {
+      try {
+        return new URL(inherited.base);
+      } catch {
+        // An unusable inherited base falls back to the frame's own address.
+      }
+    }
+    return native ?? new URL(origin);
   };
 
   const realBase = (): URL => {
     const page = realUrl();
     const nativeBase = nativeBaseUri ? String(nativeBaseUri.call(win.document)) : page.href;
     try {
-      return new URL(unrewriteUrl(nativeBase, page, origin));
+      const base = new URL(unrewriteUrl(nativeBase, page, origin));
+      // A blank or srcdoc frame reports an about: base that cannot resolve relative URLs; use the real page instead.
+      return base.protocol === "http:" || base.protocol === "https:" ? base : page;
     } catch {
       return page;
     }

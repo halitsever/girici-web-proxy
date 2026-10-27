@@ -3,6 +3,7 @@ import type { ClientConfig } from "../shared/protocol.ts";
 import { installAttributes } from "./attributes.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
+import { installFrames } from "./frames.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
@@ -14,10 +15,12 @@ import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
 import { installStorage } from "./storage.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
-import { createUrlContext, type Realm } from "./url-context.ts";
+import { createUrlContext, type InheritedContext, type Realm } from "./url-context.ts";
 
-export function install(win: Realm, config: ClientConfig): void {
-  const ctx = createUrlContext(win);
+export function install(win: Realm, config: ClientConfig, inherited?: InheritedContext): void {
+  // A realm is set up once; a child frame that already carries the runtime is left alone.
+  if (Object.getOwnPropertyDescriptor(win, "__g$")) return;
+  const ctx = createUrlContext(win, inherited);
   const nativeLocation = win.location;
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
   let cookies: CookieBridge = { currentSeq: () => 0, pendingWrites: () => null, applySync: () => {} };
@@ -90,6 +93,7 @@ export function install(win: Realm, config: ClientConfig): void {
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
+    ["frames", () => installFrames(win, ctx, config, install)],
   ];
   for (const [name, step] of steps) {
     try {

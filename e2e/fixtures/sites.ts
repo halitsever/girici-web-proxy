@@ -348,6 +348,30 @@ const WORKER_ESCAPE = page(
 </script>`,
 );
 
+const FRAMES = page(
+  "Frames",
+  `<pre id="results"></pre>
+<script>
+  const out = {};
+  let pending = 2;
+  const done = (key, value) => {
+    out[key] = value;
+    if (--pending === 0) document.getElementById("results").textContent = JSON.stringify(out);
+  };
+  window.addEventListener("message", (event) => done("blankLocation", event.data));
+  const blank = document.createElement("iframe");
+  document.body.appendChild(blank);
+  blank.contentDocument.open();
+  blank.contentDocument.write('<script>parent.postMessage(location.href, "*")<\\/script>');
+  blank.contentDocument.close();
+  const srcdoc = document.createElement("iframe");
+  srcdoc.id = "srcdoc";
+  srcdoc.srcdoc = '<a id="l" href="https://site-b.test/x">x</a>';
+  srcdoc.onload = () => done("srcdocLinkAttr", srcdoc.contentDocument.getElementById("l").href);
+  document.body.appendChild(srcdoc);
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -397,6 +421,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/nav-api": html(
       page("Nav API", `<button id="go" onclick="navigation.navigate('https://site-b.test/')">go</button>`),
     ),
+    "/frames": html(FRAMES),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
     "/worker-classic.js": script("postMessage(self.location.href);"),
