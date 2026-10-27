@@ -1,3 +1,4 @@
+import { maskNative } from "./native-mask.ts";
 import type { Realm } from "./url-context.ts";
 
 type AnyFunction = (...args: unknown[]) => unknown;
@@ -8,9 +9,6 @@ export function installScriptExec(
   rewriteScript: (code: string) => string,
   rewriteBody: (code: string) => string,
 ): void {
-  // Hooked functions map to their natives, so a masked toString() can report the native source.
-  const natives = new WeakMap<object, AnyFunction>();
-
   const wrapConstructor = (native: AnyFunction): AnyFunction => {
     const hooked = function (this: unknown, ...args: unknown[]): unknown {
       const body = args[args.length - 1];
@@ -20,7 +18,7 @@ export function installScriptExec(
     } as AnyFunction;
     // Sharing the native prototype keeps `instanceof` and `.prototype` intact.
     (hooked as { prototype: unknown }).prototype = (native as { prototype: unknown }).prototype;
-    natives.set(hooked, native);
+    maskNative(hooked, native);
     return hooked;
   };
 
@@ -49,14 +47,7 @@ export function installScriptExec(
     const hooked = function (this: unknown, handler: unknown, ...rest: unknown[]): unknown {
       return native.call(win, typeof handler === "string" ? rewriteScript(handler) : handler, ...rest);
     } as AnyFunction;
-    natives.set(hooked, native);
+    maskNative(hooked, native);
     win[name] = hooked as unknown as Window[typeof name];
   }
-
-  const nativeToString = win.Function.prototype.toString;
-  const maskedToString = function (this: object): string {
-    return nativeToString.call(natives.get(this) ?? this);
-  };
-  natives.set(maskedToString, nativeToString as AnyFunction);
-  win.Function.prototype.toString = maskedToString;
 }

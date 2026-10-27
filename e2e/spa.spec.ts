@@ -32,6 +32,18 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   expect(out.toString).toBe(true);
 });
 
+test("hooked functions report native source to tamper checks", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/native-tostring");
+  await expect(page.locator("#result")).not.toBeEmpty();
+  expect(JSON.parse((await page.locator("#result").textContent()) ?? "{}")).toEqual({
+    fetch: true,
+    xhrOpen: true,
+    xhrSend: true,
+    toString: true,
+    setTimeout: true,
+  });
+});
+
 test("shows a worker its real origin", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/worker-origin");
   await expect(page.locator("#result")).toHaveText("https://site-a.test");

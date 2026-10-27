@@ -9,6 +9,7 @@ import { createFakeLocation } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
 import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installScriptExec } from "./script-exec.ts";
+import { installToStringMask } from "./native-mask.ts";
 import { installWorkers } from "./workers.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
@@ -102,6 +103,8 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
     ["frames", () => installFrames(win, ctx, config, install)],
+    // Last, so every hook installed above is registered before tamper checks can read a masked toString.
+    ["native mask", () => installToStringMask(win)],
   ];
   for (const [name, step] of steps) {
     try {

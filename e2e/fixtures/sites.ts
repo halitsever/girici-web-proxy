@@ -529,6 +529,21 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/raw-attr": html(RAW_ATTR),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
+    "/native-tostring": html(
+      page(
+        "Native toString",
+        `<pre id="result"></pre><script>
+  const native = (fn) => /\\[native code\\]/.test(Function.prototype.toString.call(fn));
+  document.getElementById("result").textContent = JSON.stringify({
+    fetch: native(fetch),
+    xhrOpen: native(XMLHttpRequest.prototype.open),
+    xhrSend: native(XMLHttpRequest.prototype.send),
+    toString: native(Function.prototype.toString),
+    setTimeout: native(setTimeout),
+  });
+</script>`,
+      ),
+    ),
     "/worker-origin": html(
       page(
         "Worker origin",

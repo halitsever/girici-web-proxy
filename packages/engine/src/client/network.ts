@@ -1,5 +1,6 @@
 import { HEADER } from "../shared/protocol.ts";
 import type { CookieBridge } from "./cookies.ts";
+import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
@@ -20,6 +21,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
       return response;
     });
   };
+  maskNative(win.fetch, nativeFetch);
 
   // A Request built from an already proxied URL is passed on unchanged.
   const proxiedInput = (input: RequestInfo | URL): RequestInfo => {
@@ -39,6 +41,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   xhr.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
     nativeOpen.call(this, method, ctx.toProxy(String(url)), ...rest);
   } as typeof xhr.open;
+  maskNative(xhr.open, nativeOpen);
   const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
   const syncing = new WeakSet<XMLHttpRequest>();
   xhr.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
@@ -53,12 +56,14 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
     }
     nativeSend.call(this, body);
   };
+  maskNative(xhr.send, nativeSend);
 
   const navigatorProto = win.Navigator.prototype;
   const nativeBeacon = navigatorProto.sendBeacon;
   navigatorProto.sendBeacon = function (this: Navigator, url: string | URL, data?: BodyInit | null) {
     return nativeBeacon.call(this, ctx.toProxy(String(url)), data);
   };
+  maskNative(navigatorProto.sendBeacon, nativeBeacon);
 
   win.EventSource = new Proxy(win.EventSource, {
     construct: (target, args: [string | URL, EventSourceInit?], newTarget: NewableFunction) =>
