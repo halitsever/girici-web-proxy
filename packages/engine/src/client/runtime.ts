@@ -1,4 +1,6 @@
+import type { ClientConfig } from "../shared/protocol.ts";
 import { installAttributes } from "./attributes.ts";
+import { installCookies, pendingWrites } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
@@ -8,13 +10,19 @@ import { installStorage } from "./storage.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { createUrlContext, type Realm } from "./url-context.ts";
 
-export function install(win: Realm): void {
+export function install(win: Realm, config: ClientConfig): void {
   const ctx = createUrlContext(win);
   const nativeLocation = win.location;
   const fakeLocation = createFakeLocation(
     {
       real: () => ctx.realUrl(),
-      navigate: (url, mode) => (mode === "replace" ? nativeLocation.replace(url) : nativeLocation.assign(url)),
+      navigate: (url, mode) => {
+        const go = () => (mode === "replace" ? nativeLocation.replace(url) : nativeLocation.assign(url));
+        // The next page must already see cookies this one has just written.
+        const writes = pendingWrites();
+        if (writes) void writes.then(go);
+        else go();
+      },
       reload: () => nativeLocation.reload(),
       setHash: (hash) => {
         nativeLocation.hash = hash;
@@ -44,6 +52,7 @@ export function install(win: Realm): void {
     ["attributes", () => installAttributes(win, ctx)],
     ["navigation", () => installNavigation(win, ctx)],
     ["service worker mask", () => installServiceWorkerMask(win)],
+    ["cookies", () => installCookies(win, ctx, config)],
     ["network", () => installNetwork(win, ctx)],
     ["storage", () => installStorage(win, ctx)],
   ];

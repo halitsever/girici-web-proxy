@@ -22,3 +22,28 @@ test("keeps cookies when the service worker restarts", async ({ page, browserNam
   await page.reload();
   await expect(page.locator("#server")).toHaveText("sid=abc; theme=dark");
 });
+
+test("shows scripts their own cookies but never HttpOnly ones", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/login");
+  await expect(page.locator("#client")).toHaveText("theme=dark");
+});
+
+test("sends cookies a script just set", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/script");
+  await expect(page.locator("#echo")).toHaveText("js=1");
+});
+
+test("updates document.cookie from fetch responses", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/api-page");
+  await expect(page.locator("#after")).toHaveText("api=1");
+});
+
+test("shares cookie changes with other tabs", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/whoami");
+  const other = await context.newPage();
+  await other.goto("/~/https/site-a.test/cookie/whoami");
+  await other.evaluate(() => {
+    document.cookie = "shared=1; path=/cookie";
+  });
+  await expect.poll(() => page.evaluate(() => document.cookie)).toContain("shared=1");
+});

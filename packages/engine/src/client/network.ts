@@ -1,10 +1,24 @@
+import { HEADER } from "../shared/protocol.ts";
+import { applySync, currentSeq } from "./cookies.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
 export function installNetwork(win: Realm, ctx: UrlContext): void {
   const nativeFetch = win.fetch;
   win.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    return nativeFetch.call(win, proxiedInput(input), init);
+    const seq = currentSeq();
+    let request: RequestInfo = proxiedInput(input);
+    if (seq > 0) {
+      const withSeq = new win.Request(request, init);
+      // no-cors requests cannot carry custom headers; they simply skip the wait.
+      if (withSeq.mode !== "no-cors") withSeq.headers.set(HEADER.cookieSeq, String(seq));
+      request = withSeq;
+      init = undefined;
+    }
+    return nativeFetch.call(win, request, init).then((response) => {
+      applySync(response.headers.get(HEADER.cookieSync));
+      return response;
+    });
   };
 
   // A Request built from an already proxied URL is passed on unchanged.
@@ -25,6 +39,20 @@ export function installNetwork(win: Realm, ctx: UrlContext): void {
   xhr.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
     nativeOpen.call(this, method, ctx.toProxy(String(url)), ...rest);
   } as typeof xhr.open;
+  const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
+  const syncing = new WeakSet<XMLHttpRequest>();
+  xhr.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+    const seq = currentSeq();
+    if (seq > 0) nativeSetRequestHeader.call(this, HEADER.cookieSeq, String(seq));
+    if (!syncing.has(this)) {
+      syncing.add(this);
+      // Headers arrive before load, so cookies are in place by the time the page's handlers run.
+      this.addEventListener("readystatechange", () => {
+        if (this.readyState === this.HEADERS_RECEIVED) applySync(this.getResponseHeader(HEADER.cookieSync));
+      });
+    }
+    nativeSend.call(this, body);
+  };
 
   const navigatorProto = win.Navigator.prototype;
   const nativeBeacon = navigatorProto.sendBeacon;

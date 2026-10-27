@@ -3,7 +3,13 @@ import { rewriteHtml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { rewriteRefresh } from "../rewrite/refresh.ts";
 import { encodeUrl } from "../shared/codec.ts";
-import { PROTOCOL_VERSION, type CookieSnapshot, type RelayErrorCode } from "../shared/protocol.ts";
+import {
+  encodeHeaderValue,
+  HEADER,
+  PROTOCOL_VERSION,
+  type CookieSnapshot,
+  type RelayErrorCode,
+} from "../shared/protocol.ts";
 import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
 import { clientTag } from "./client-tag.ts";
 import { errorPage } from "./error-page.ts";
@@ -16,6 +22,7 @@ export interface PageContext {
   navigation: boolean;
   clientScript: string;
   cookies(): Promise<CookieSnapshot[]>;
+  syncCookies?: CookieSnapshot[];
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -47,6 +54,8 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
       // A value the Headers API rejects would otherwise fail the whole response.
     }
   }
+  // The runtime applies these before the page sees the response, as browsers update document.cookie.
+  if (ctx.syncCookies?.length) headers.set(HEADER.cookieSync, encodeHeaderValue(JSON.stringify(ctx.syncCookies)));
   if (NULL_BODY_STATUSES.has(status) || !body) return new Response(null, { status, headers });
 
   const contentType = headers.get("content-type");

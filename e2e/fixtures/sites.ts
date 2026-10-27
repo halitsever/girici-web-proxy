@@ -135,6 +135,36 @@ const NETWORK = page(
 
 type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
+const cookieEcho: Route = (req, res) => {
+  res.writeHead(200, { "content-type": "text/plain" });
+  res.end(req.headers.cookie ?? "");
+};
+const cookieApi: Route = (_req, res) => {
+  res.writeHead(200, { "content-type": "text/plain", "set-cookie": "api=1; Path=/" });
+  res.end("ok");
+};
+const COOKIE_SCRIPT = page(
+  "Cookie script",
+  `<pre id="echo"></pre>
+<script>
+  document.cookie = "js=1; path=/";
+  fetch("/cookie/echo")
+    .then((r) => r.text())
+    .then((t) => {
+      document.getElementById("echo").textContent = t;
+    });
+</script>`,
+);
+const COOKIE_API_PAGE = page(
+  "Cookie API",
+  `<pre id="after"></pre>
+<script>
+  fetch("/cookie/set-api").then(() => {
+    document.getElementById("after").textContent = document.cookie;
+  });
+</script>`,
+);
+
 const api: Route = (req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ method: req.method, origin: req.headers.origin ?? null }));
@@ -228,6 +258,10 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/storage": html(STORAGE),
     "/api": api,
     "/sse": sse,
+    "/cookie/echo": cookieEcho,
+    "/cookie/script": html(COOKIE_SCRIPT),
+    "/cookie/set-api": cookieApi,
+    "/cookie/api-page": html(COOKIE_API_PAGE),
     "/network": html(NETWORK),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },

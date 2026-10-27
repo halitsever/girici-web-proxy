@@ -1,4 +1,5 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
+import { pendingWrites } from "./cookies.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
@@ -73,6 +74,76 @@ export function installNavigation(win: Realm, ctx: UrlContext): void {
     if (submitter) fix(submitter, "formaction");
     requestSubmit.call(this, submitter);
   };
+
+  // These run after the page's own handlers, so links and forms a page handles itself are left alone.
+  win.addEventListener("click", (event) => {
+    const writes = pendingWrites();
+    if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
+    const link = event
+      .composedPath()
+      .find((target) => target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement);
+    if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+    const url = resolve(link.getAttributeNode("href")?.value, ctx);
+    if (!url) return;
+    event.preventDefault();
+    // The next page must already see cookies this one has just written.
+    void writes.then(() => win.location.assign(url));
+  });
+  win.addEventListener("submit", (event) => {
+    const writes = pendingWrites();
+    const target = event.target;
+    if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
+    const submitter = (event as SubmitEvent).submitter;
+    if ((target.target && target.target !== "_self") || overridesForm(submitter)) return;
+    event.preventDefault();
+    void writes.then(() => {
+      const extra = submitterField(win, submitter);
+      if (extra) target.append(extra);
+      fix(target, "action");
+      submit.call(target);
+      extra?.remove();
+    });
+  });
+}
+
+function isPlainClick(event: Event): boolean {
+  return (
+    event instanceof MouseEvent &&
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey
+  );
+}
+
+function resolve(raw: string | undefined, ctx: UrlContext): string | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A submitter that redirects the form elsewhere is left to the browser rather than replayed without its overrides. */
+function overridesForm(submitter: HTMLElement | null): boolean {
+  return (
+    !!submitter &&
+    ["formaction", "formmethod", "formenctype", "formtarget"].some((name) => submitter.hasAttribute(name))
+  );
+}
+
+/** form.submit() leaves out the clicked button, so its name and value travel in a hidden field instead. */
+function submitterField(win: Realm, submitter: HTMLElement | null): HTMLInputElement | null {
+  const name = submitter?.getAttribute("name");
+  if (!submitter || !name) return null;
+  const field = win.document.createElement("input");
+  field.type = "hidden";
+  field.name = name;
+  field.value = (submitter as HTMLButtonElement).value;
+  return field;
 }
 
 function escapes(raw: string, ctx: UrlContext): boolean {
