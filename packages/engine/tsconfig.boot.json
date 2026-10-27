@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "dom"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/boot", "src/shared"]
+}

@@ -9,5 +9,12 @@ export default defineConfigWithVueTs(
   vueTsConfigs.recommended,
   { files: ["packages/web/src/**/*.{ts,vue}"], languageOptions: { globals: globals.browser } },
   { files: ["packages/server/**/*.ts", "packages/web/*.ts", "*.{js,ts}"], languageOptions: { globals: globals.node } },
+  { files: ["packages/engine/src/sw/**/*.ts"], languageOptions: { globals: globals.serviceworker } },
+  { files: ["packages/engine/src/boot/**/*.ts"], languageOptions: { globals: globals.browser } },
+  { files: ["packages/engine/src/shared/**/*.ts"], languageOptions: { globals: globals["shared-node-browser"] } },
+  {
+    files: ["packages/engine/{scripts,test}/**/*.{ts,mjs}", "e2e/**/*.ts"],
+    languageOptions: { globals: globals.node },
+  },
   skipFormatting,
 );

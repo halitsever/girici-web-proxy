@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["es2023", "webworker"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": ["src/sw", "src/shared"]
+}
