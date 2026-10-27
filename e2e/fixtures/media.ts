@@ -26,6 +26,24 @@ export function rangeRoute(body: Buffer, contentType: string) {
   };
 }
 
+/** A never-ending stream plus a counter route, so a test can see a cancelled fetch reach and abort the upstream. */
+export function abortableRoutes() {
+  let aborts = 0;
+  const stream = (_req: IncomingMessage, res: ServerResponse): void => {
+    res.on("close", () => {
+      if (!res.writableFinished) aborts++;
+    });
+    res.writeHead(200, { "content-type": "application/octet-stream" });
+    res.write("start");
+    // The response is held open on purpose; only the client aborting ends it.
+  };
+  const count = (_req: IncomingMessage, res: ServerResponse): void => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ aborts }));
+  };
+  return { stream, count };
+}
+
 type Range = { start: number; end: number };
 
 function parseRange(header: string | undefined, total: number): Range | "unsatisfiable" | null {

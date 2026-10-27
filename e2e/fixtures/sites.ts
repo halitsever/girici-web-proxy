@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { rangeRoute } from "./media.ts";
+import { abortableRoutes, rangeRoute } from "./media.ts";
+
+const abortable = abortableRoutes();
 
 const sampleWebm = readFileSync(new URL("./sample.webm", import.meta.url));
 const sampleMp4 = readFileSync(new URL("./sample.mp4", import.meta.url));
@@ -510,6 +512,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sample.webm": rangeRoute(sampleWebm, "video/webm"),
     "/sample.mp4": rangeRoute(sampleMp4, "video/mp4"),
     "/mse": html(MSE),
+    "/abortable": abortable.stream,
+    "/abortable/aborts": abortable.count,
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),
