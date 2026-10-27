@@ -32,12 +32,15 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
     win.CacheStorage?.prototype,
     "match",
     (native) =>
-      function (this: CacheStorage, request: unknown, options?: { cacheName?: string }) {
-        if (options?.cacheName)
+      function (this: unknown, request: unknown, rawOptions?: unknown) {
+        const caches = this as CacheStorage;
+        const options = rawOptions as CacheQueryOptions & { cacheName?: string };
+        if (options?.cacheName) {
           return native.call(this, request, { ...options, cacheName: prefix() + options.cacheName });
+        }
         return (async () => {
-          for (const name of await this.keys()) {
-            const hit = await (await this.open(name)).match(request as RequestInfo, options);
+          for (const name of await caches.keys()) {
+            const hit = await (await caches.open(name)).match(request as RequestInfo, options);
             if (hit) return hit;
           }
           return undefined;
