@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { createServer } from "node:http";
+import { createHttpServer } from "./http/server.ts";
 import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { loadConfig, type Config } from "./config.ts";
@@ -19,7 +19,7 @@ if (!existsSync(join(webDistDir, "index.html"))) {
   logger.warn("Web UI is not built; / returns 503 until you run npm run build");
 }
 
-const server = createServer(createApp({ webDistDir, sourceUrl: config.sourceUrl, logger }));
+const server = createHttpServer(createApp({ webDistDir, sourceUrl: config.sourceUrl, logger }));
 server.on("error", (error) => {
   logger.error(error.message);
   process.exit(1);
