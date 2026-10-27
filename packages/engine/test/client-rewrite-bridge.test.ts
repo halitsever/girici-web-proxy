@@ -17,4 +17,9 @@ describe("createRewriteBridge", () => {
     expect(bridge.importSpecifier("mod.js")).toBe("/~/https/site.test/mod.js");
     expect(bridge.metaUrl("/~/https/site.test/a/b")).toBe("https://site.test/a/b");
   });
+
+  it("restores real urls in html the page reads back", () => {
+    const bridge = createRewriteBridge(ctx);
+    expect(bridge.unhtml('<a href="/~/https/site.test/x">y</a>')).toBe('<a href="https://site.test/x">y</a>');
+  });
 });

@@ -5,6 +5,7 @@ import { installCookies, pendingWrites } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
+import { installHtmlSinks } from "./html-sinks.ts";
 import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
@@ -76,6 +77,7 @@ export function install(win: Realm, config: ClientConfig): void {
   const steps: Array<[string, () => void]> = [
     ["document", () => installDocument(win, ctx)],
     ["attributes", () => installAttributes(win, ctx)],
+    ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["navigation", () => installNavigation(win, ctx)],
     ["service worker mask", () => installServiceWorkerMask(win)],
     ["cookies", () => installCookies(win, ctx, config)],

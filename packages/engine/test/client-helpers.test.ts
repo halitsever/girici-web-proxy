@@ -15,7 +15,7 @@ function setup() {
     fakeFor: (location) => (location === frameLocation ? frameFake : null),
     isWindowOrDocument: (value) => value === win || value === win.document || value === frame,
     toProxy: (raw) => `/~/proxied/${raw}`,
-    rewrite: { js: (c) => c, html: (h) => h, importSpecifier: (s) => s, metaUrl: (u) => u },
+    rewrite: { js: (c) => c, html: (h) => h, unhtml: (h) => h, importSpecifier: (s) => s, metaUrl: (u) => u },
     indirectEval: (code) => code,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
@@ -73,6 +73,7 @@ describe("createHelpers", () => {
       rewrite: {
         js: (c) => `/*rw*/${c}`,
         html: (h) => `/*rw*/${h}`,
+        unhtml: (h) => h,
         importSpecifier: (s) => `proxied:${s}`,
         metaUrl: (u) => `real:${u}`,
       },

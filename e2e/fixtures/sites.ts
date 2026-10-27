@@ -263,6 +263,35 @@ const search: Route = (req, res) => {
   res.end(page("Search", `<h1 id="query">${escapeHtml(query)}</h1>`));
 };
 
+const SINKS = page(
+  "Sinks",
+  `<div id="host"></div><pre id="results"></pre>
+<script>
+  const host = document.getElementById("host");
+  host.innerHTML = '<a id="inner" href="https://site-b.test/x">b</a>';
+  host.insertAdjacentHTML("beforeend", '<img id="iadj" src="https://cdn.site-a.test/b.png">');
+  const frag = document.createRange().createContextualFragment('<a id="frag" href="https://site-b.test/y">y</a>');
+  host.append(frag);
+  const parsed = new DOMParser().parseFromString('<a id="dom" href="https://site-b.test/z">z</a>', "text/html");
+  const results = {
+    innerAttr: host.querySelector("#inner").getAttribute("href"),
+    innerProp: host.querySelector("#inner").href,
+    innerReadBack: host.innerHTML.includes("https://site-b.test/x"),
+    iadjAttr: host.querySelector("#iadj").getAttribute("src"),
+    fragAttr: host.querySelector("#frag").getAttribute("href"),
+    domAttr: parsed.getElementById("dom").getAttribute("href"),
+  };
+  document.getElementById("results").textContent = JSON.stringify(results);
+</script>`,
+);
+
+const SINKS_WRITE = page(
+  "Sinks write",
+  `<script>
+  document.write('<p id="written"></p><scr' + 'ipt>document.getElementById("written").textContent=location.href<\\/scr' + 'ipt>');
+</script>`,
+);
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -306,6 +335,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/worker.js": script('importScripts("lib.js");\npostMessage(self.answer);'),
     "/lib.js": script('self.answer = typeof self.location.href === "string" ? 42 : 0;'),
     "/realtime": html(REALTIME),
+    "/sinks": html(SINKS),
+    "/sinks-write": html(SINKS_WRITE),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
