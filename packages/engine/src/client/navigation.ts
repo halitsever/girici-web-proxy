@@ -1,11 +1,11 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
-import { pendingWrites } from "./cookies.ts";
+import type { CookieBridge } from "./cookies.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
-export function installNavigation(win: Realm, ctx: UrlContext): void {
+export function installNavigation(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
   const history = win.History.prototype;
   for (const method of ["pushState", "replaceState"] as const) {
     const native = history[method];
@@ -85,7 +85,7 @@ export function installNavigation(win: Realm, ctx: UrlContext): void {
 
   // These run after the page's own handlers, so links and forms a page handles itself are left alone.
   win.addEventListener("click", (event) => {
-    const writes = pendingWrites();
+    const writes = cookies.pendingWrites();
     if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
     const link = event
       .composedPath()
@@ -98,7 +98,7 @@ export function installNavigation(win: Realm, ctx: UrlContext): void {
     void writes.then(() => win.location.assign(url));
   });
   win.addEventListener("submit", (event) => {
-    const writes = pendingWrites();
+    const writes = cookies.pendingWrites();
     const target = event.target;
     if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
     const submitter = (event as SubmitEvent).submitter;

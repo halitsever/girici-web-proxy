@@ -1,7 +1,7 @@
 import { decodeUrl } from "../shared/codec.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import { installAttributes } from "./attributes.ts";
-import { installCookies, pendingWrites } from "./cookies.ts";
+import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
@@ -19,13 +19,15 @@ import { createUrlContext, type Realm } from "./url-context.ts";
 export function install(win: Realm, config: ClientConfig): void {
   const ctx = createUrlContext(win);
   const nativeLocation = win.location;
+  // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
+  let cookies: CookieBridge = { currentSeq: () => 0, pendingWrites: () => null, applySync: () => {} };
   const fakeLocation = createFakeLocation(
     {
       real: () => ctx.realUrl(),
       navigate: (url, mode) => {
         const go = () => (mode === "replace" ? nativeLocation.replace(url) : nativeLocation.assign(url));
         // The next page must already see cookies this one has just written.
-        const writes = pendingWrites();
+        const writes = cookies.pendingWrites();
         if (writes) void writes.then(go);
         else go();
       },
@@ -82,10 +84,10 @@ export function install(win: Realm, config: ClientConfig): void {
     ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx)],
-    ["navigation", () => installNavigation(win, ctx)],
+    ["cookies", () => (cookies = installCookies(win, ctx, config))],
+    ["navigation", () => installNavigation(win, ctx, cookies)],
     ["service worker mask", () => installServiceWorkerMask(win)],
-    ["cookies", () => installCookies(win, ctx, config)],
-    ["network", () => installNetwork(win, ctx)],
+    ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
   ];

@@ -1,12 +1,12 @@
 import { HEADER } from "../shared/protocol.ts";
-import { applySync, currentSeq } from "./cookies.ts";
+import type { CookieBridge } from "./cookies.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
-export function installNetwork(win: Realm, ctx: UrlContext): void {
+export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
   const nativeFetch = win.fetch;
   win.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    const seq = currentSeq();
+    const seq = cookies.currentSeq();
     let request: RequestInfo = proxiedInput(input);
     if (seq > 0) {
       const withSeq = new win.Request(request, init);
@@ -16,7 +16,7 @@ export function installNetwork(win: Realm, ctx: UrlContext): void {
       init = undefined;
     }
     return nativeFetch.call(win, request, init).then((response) => {
-      applySync(response.headers.get(HEADER.cookieSync));
+      cookies.applySync(response.headers.get(HEADER.cookieSync));
       return response;
     });
   };
@@ -42,13 +42,13 @@ export function installNetwork(win: Realm, ctx: UrlContext): void {
   const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
   const syncing = new WeakSet<XMLHttpRequest>();
   xhr.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
-    const seq = currentSeq();
+    const seq = cookies.currentSeq();
     if (seq > 0) nativeSetRequestHeader.call(this, HEADER.cookieSeq, String(seq));
     if (!syncing.has(this)) {
       syncing.add(this);
       // Headers arrive before load, so cookies are in place by the time the page's handlers run.
       this.addEventListener("readystatechange", () => {
-        if (this.readyState === this.HEADERS_RECEIVED) applySync(this.getResponseHeader(HEADER.cookieSync));
+        if (this.readyState === this.HEADERS_RECEIVED) cookies.applySync(this.getResponseHeader(HEADER.cookieSync));
       });
     }
     nativeSend.call(this, body);

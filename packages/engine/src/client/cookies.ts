@@ -10,33 +10,21 @@ import {
 import type { Realm, UrlContext } from "./url-context.ts";
 import { allowVersionReload } from "./version.ts";
 
-let seq = 0;
-let inflight = 0;
-let pending: Promise<void> | null = null;
-let apply: (changes: CookieSnapshot[]) => void = () => {};
-
-/** The sequence number of the latest document.cookie write, sent along so the worker can wait for it. */
-export function currentSeq(): number {
-  return seq;
-}
-
-/** Settles once every cookie write still on its way to the worker has landed; null when none is. */
-export function pendingWrites(): Promise<void> | null {
-  return pending;
-}
-
-export function applySync(header: string | null): void {
-  if (!header) return;
-  try {
-    apply(JSON.parse(decodeHeaderValue(header)) as CookieSnapshot[]);
-  } catch {
-    // A malformed header only costs the mirror one update.
-  }
+/** The per-realm cookie mirror state the network and navigation hooks read. */
+export interface CookieBridge {
+  /** The sequence number of the latest document.cookie write, sent along so the worker can wait for it. */
+  currentSeq(): number;
+  /** Settles once every cookie write still on its way to the worker has landed; null when none is. */
+  pendingWrites(): Promise<void> | null;
+  applySync(header: string | null): void;
 }
 
 /** document.cookie must answer synchronously, so it reads a local mirror of the worker's jar. */
-export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig): void {
+export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig): CookieBridge {
   let mirror = [...config.cookies];
+  let seq = 0;
+  let inflight = 0;
+  let pending: Promise<void> | null = null;
   // Captured before the network hooks and storage partitioning wrap these.
   const nativeFetch = win.fetch.bind(win);
   let nativeSession: Storage | null = null;
@@ -46,7 +34,7 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     // Blocked storage only disables the reload guard.
   }
 
-  apply = (changes) => {
+  const apply = (changes: CookieSnapshot[]) => {
     const host = ctx.realUrl().hostname;
     mirror = applyCookieChanges(
       mirror,
@@ -99,4 +87,17 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
   } catch {
     // Without BroadcastChannel only other tabs' changes are missed.
   }
+
+  return {
+    currentSeq: () => seq,
+    pendingWrites: () => pending,
+    applySync: (header) => {
+      if (!header) return;
+      try {
+        apply(JSON.parse(decodeHeaderValue(header)) as CookieSnapshot[]);
+      } catch {
+        // A malformed header only costs the mirror one update.
+      }
+    },
+  };
 }
