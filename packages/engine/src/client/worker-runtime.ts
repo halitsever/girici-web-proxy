@@ -24,9 +24,16 @@ const scope = globalThis as unknown as WorkerScope & Record<string, unknown>;
 const base = scope.__giriciBase ?? scope.location.href;
 const origin = scope.location.origin;
 const realBase = (): URL => new URL(base);
-// A worker loads from a blob address, so proxy URLs must be absolute for the worker to resolve them.
+// A worker loads from a blob address, so a relative URL is resolved against the real base and proxied absolutely.
 const toProxy = (raw: string): string => {
-  const proxied = rewriteUrl(raw, realBase(), origin);
+  let absolute: URL;
+  try {
+    absolute = new URL(raw, realBase());
+  } catch {
+    return raw;
+  }
+  if (absolute.protocol !== "http:" && absolute.protocol !== "https:") return raw;
+  const proxied = rewriteUrl(absolute.href, realBase(), origin);
   return proxied.startsWith("/") ? origin + proxied : proxied;
 };
 const fromProxy = (value: string): string => unrewriteUrl(value, realBase(), origin);

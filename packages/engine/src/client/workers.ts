@@ -36,7 +36,8 @@ function bootstrap(
     scriptUrl = rawUrl;
     base = ctx.realUrl().href;
   } else {
-    scriptUrl = new URL(ctx.toProxy(rawUrl), win.location.origin).href;
+    // A relative worker URL resolves against the document, so the proxied value is resolved against its proxy URL.
+    scriptUrl = new URL(ctx.toProxy(rawUrl), win.location.href).href;
     base = ctx.fromProxy(scriptUrl);
   }
   const b = JSON.stringify(base);
