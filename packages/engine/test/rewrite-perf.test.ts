@@ -20,7 +20,8 @@ describe("rewrite performance", () => {
     const source = chunk.repeat(Math.ceil((3 * 1024 * 1024) / chunk.length));
     const started = performance.now();
     const output = rewriteJs(source, { standalone: true });
-    expect(performance.now() - started).toBeLessThan(1500);
+    // A generous bound: locally ~300ms, so it still catches a gross regression without flaking on a loaded CI runner.
+    expect(performance.now() - started).toBeLessThan(5000);
     expect(output).toContain("__g$.L(location)");
   });
 
