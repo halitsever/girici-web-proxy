@@ -1,5 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { decodeHeaderList, decodeHeaderValue, encodeHeaderList, encodeHeaderValue } from "../src/shared/protocol.ts";
+import {
+  BROADCAST_CHANNEL,
+  COOKIE_RPC_PATH,
+  decodeHeaderList,
+  decodeHeaderValue,
+  encodeHeaderList,
+  encodeHeaderValue,
+  HEADER,
+  PROTOCOL_VERSION,
+} from "../src/shared/protocol.ts";
+
+describe("cookie protocol", () => {
+  it("names the cookie protocol", () => {
+    expect([HEADER.cookie, HEADER.cookieSeq, HEADER.cookieSync]).toEqual([
+      "x-girici-cookie",
+      "x-girici-cseq",
+      "x-girici-cookie-sync",
+    ]);
+    expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, BROADCAST_CHANNEL]).toEqual([1, "/_g/rpc/cookie", "__girici"]);
+  });
+});
 
 describe("header values", () => {
   it("round-trips non-ASCII", () => {

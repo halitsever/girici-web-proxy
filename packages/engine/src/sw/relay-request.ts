@@ -1,6 +1,7 @@
 import { relayPathFor } from "../shared/codec.ts";
 import { encodeHeaderList, encodeHeaderValue, HEADER } from "../shared/protocol.ts";
-import { refererFor, secFetchSite } from "./fetch-meta.ts";
+import { refererFor } from "../shared/referrer.ts";
+import { secFetchSite } from "./fetch-meta.ts";
 
 export interface RelayContext {
   target: URL;

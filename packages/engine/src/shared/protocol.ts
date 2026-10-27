@@ -8,7 +8,32 @@ export const HEADER = {
   status: "x-girici-status",
   setCookie: "x-girici-set-cookie",
   error: "x-girici-error",
+  cookie: "x-girici-cookie",
+  cookieSeq: "x-girici-cseq",
+  cookieSync: "x-girici-cookie-sync",
 } as const;
+
+/** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
+export const PROTOCOL_VERSION = 1;
+export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
+export const BROADCAST_CHANNEL = "__girici";
+
+/** A cookie as page scripts may see it; times are epoch milliseconds and a null expiry marks a session cookie. */
+export interface CookieSnapshot {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  hostOnly: boolean;
+  secure: boolean;
+  expires: number | null;
+  creation: number;
+}
+
+export interface ClientConfig {
+  v: number;
+  cookies: CookieSnapshot[];
+}
 
 export type RelayErrorCode =
   "bad_request" | "ssrf_blocked" | "dns" | "connect" | "tls" | "timeout" | "too_large" | "header_overflow";

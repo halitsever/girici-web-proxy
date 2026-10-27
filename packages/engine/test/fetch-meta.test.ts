@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { refererFor, secFetchSite } from "../src/sw/fetch-meta.ts";
+import { refererFor } from "../src/shared/referrer.ts";
+import { secFetchSite } from "../src/sw/fetch-meta.ts";
 
 describe("secFetchSite", () => {
   it.each([
