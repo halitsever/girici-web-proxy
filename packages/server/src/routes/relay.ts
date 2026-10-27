@@ -41,7 +41,7 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
     fail(res, "bad_request", 403);
     return;
   }
-  if (req.method === "POST" && req.get("origin") !== `${req.protocol}://${req.get("host")}`) {
+  if (req.method === "POST" && !isOwnHost(req.get("origin"), req.get("host"))) {
     fail(res, "bad_request", 403);
     return;
   }
@@ -61,10 +61,14 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
     const method = upstreamMethod(req);
     if (Number(req.get("content-length") ?? 0) > options.maxRequestBody) throw new RelayRequestError("too_large", 413);
     const body = method === "GET" || method === "HEAD" ? undefined : req.pipe(new ByteLimit(options.maxRequestBody));
+    const headers = buildUpstreamHeaders(req.headers);
+    // Presigned storage URLs and many other upload endpoints refuse chunked bodies.
+    const length = req.get("content-length");
+    if (body && length) headers["content-length"] = length;
     const upstream = await request(target, {
       dispatcher: options.agent,
       method: method as Dispatcher.HttpMethod,
-      headers: buildUpstreamHeaders(req.headers),
+      headers,
       body,
       signal: controller.signal,
     });
@@ -99,6 +103,12 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
     }
     fail(res, code, status);
   }
+}
+
+/** Compares hosts only: behind a TLS terminator the server sees plain http while the page's Origin says https. */
+function isOwnHost(origin: string | undefined, host: string | undefined): boolean {
+  const url = origin ? URL.parse(origin) : null;
+  return !!url && (url.protocol === "http:" || url.protocol === "https:") && url.host === host?.toLowerCase();
 }
 
 function upstreamMethod(req: Request): string {

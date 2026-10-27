@@ -22,9 +22,11 @@ export function isPublicAddress(address: string): boolean {
   if (!ipaddr.isValid(address)) return false;
   const parsed = ipaddr.process(address);
   const range = parsed.range();
-  if (range === "unicast") return true;
-  if (parsed.kind() === "ipv4") return false;
+  if (parsed.kind() === "ipv4") return range === "unicast";
   const bytes = parsed.toByteArray();
+  // ipaddr calls the deprecated IPv4-compatible block (::/96) unicast, but no public host uses it.
+  if (bytes.slice(0, 12).every((byte) => byte === 0)) return false;
+  if (range === "unicast") return true;
   // NAT64 and 6to4 addresses carry the IPv4 address the packet is really sent to.
   if (range === "rfc6052") return isPublicAddress(bytes.slice(12, 16).join("."));
   if (range === "6to4") return isPublicAddress(bytes.slice(2, 6).join("."));

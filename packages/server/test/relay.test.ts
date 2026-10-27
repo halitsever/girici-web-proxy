@@ -181,6 +181,38 @@ describe("relay", () => {
     expect(await res.json()).toEqual({ method: "PUT", body: "data" });
   });
 
+  it("accepts a POST from its own host behind a TLS terminator", async () => {
+    const { base } = await setup((req, res) => {
+      req.resume();
+      req.on("end", () => res.end(req.method));
+    });
+    const res = await relayFetch(base, "https/site-a.test/api", {
+      method: "POST",
+      body: "data",
+      headers: { origin: base.replace("http:", "https:"), "x-forwarded-proto": "https" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("POST");
+  });
+
+  it("keeps the content length of uploads", async () => {
+    const { base } = await setup((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(req.headers));
+      });
+    });
+    const res = await relayFetch(base, "https/site-a.test/upload", {
+      method: "POST",
+      body: "a".repeat(300 * 1024),
+      headers: { "x-girici-method": "PUT", origin: base },
+    });
+    const seen = (await res.json()) as Record<string, string>;
+    expect(seen["content-length"]).toBe(String(300 * 1024));
+    expect(seen["transfer-encoding"]).toBeUndefined();
+  });
+
   it("rejects requests without the marker, from other sites, or with other methods", async () => {
     const { base } = await setup((_req, res) => res.end("ok"));
     const noMarker = await fetch(`${base}/_g/r/https/site-a.test/`);
