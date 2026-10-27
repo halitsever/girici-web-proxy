@@ -12,6 +12,8 @@
 </p>
 </p>
 
+> **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is being developed on
+> `main`. The Docker image tagged `latest` is still v1.
 
 <a align="center">
 <img src="https://halitsever-api.vercel.app/api/details"/>
@@ -25,34 +27,18 @@
 
 
 
-<a align="center" >
-<img src="https://halitsever-api.vercel.app/api/installation"/>
-</a>
+## Run from source
 
-
-<p align="center">
-<b>Build & run from source</b>
-</p>
+Requires Node.js 22.19 or newer (24 LTS recommended).
 
 ```
-npm run install-modules
+npm ci
+npm run build
+npm start
 ```
 
-<p align="center">
-This command installs all dependencies for front-end & back-end folders
-</p>
+Girici listens on http://localhost:3000.
 
-```
-npm run build-all
-```
-
-<p align="center">This command builds front-end and back-end</p>
-
-```
-npm run start
-```
-
-<p align="center">and this command serves express server on specific port (default 3000)</p>
 <p align="center">
 <b>Screenshot</b>
 </p>
@@ -60,20 +46,33 @@ npm run start
 <img src="https://assets.halit.org/assets/github-repos/screenshots/girici-screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
 </p>
 
-<p align="center">
-<b>Running on docker</b>
-</p>
-<p align="center">Running in swarm mode:</p>
-
-```
-docker stack deploy -c docker-compose.yml
-```
-
-<p align="center">Run with CLI:</p>
+## Run with Docker
 
 ```
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
+
+Until v2.0.0 is released, the `latest` image is still v1. To build and run v2 locally:
+
+```
+docker compose up --build
+```
+
+Service workers need HTTPS outside localhost. To get automatic certificates, point a domain at your server, remove
+the `ports` mapping of the `girici` service and run:
+
+```
+GIRICI_DOMAIN=proxy.example.com docker compose --profile https up -d --build
+```
+
+## Configuration
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | Port to listen on. `LISTENER_PORT` is accepted as an alias. |
+| `HOST` | `0.0.0.0` | Interface to bind. |
+| `LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. |
+| `SOURCE_URL` | this repository | Where the UI's source code link points. |
 
 
 
@@ -87,11 +86,12 @@ docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 <img src="https://halitsever-api.vercel.app/api/sponsor"/>
 </a>
 
+## License
 
-<a align="center">
-<img src="https://halitsever-api.vercel.app/api/license"/>
-</a>
+Copyright (C) 2021-2026 Halit Sever
 
-<p align="center">
-  MIT License © 2021 <a href="https://www.github.com/halitsever">Halit Sever</a>
-</p>
+Girici is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
+License, version 3, as published by the Free Software Foundation. See [LICENSE](LICENSE).
+
+If you run a modified version of Girici as a network service, the AGPL requires you to offer its users the source
+code of your version. Set `SOURCE_URL` to point to it; the UI links there.
