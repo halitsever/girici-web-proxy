@@ -1,7 +1,10 @@
-<p align="center" class="logo-section">
-<img src="https://i.ibb.co/nsmYYSc/Group-39.png" height="150"/>
-</br>
-<img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="packages/web/src/assets/brand/girici-icon-dark.svg">
+    <img src="packages/web/src/assets/brand/girici-icon.svg" height="120" alt="Girici">
+  </picture>
+</p>
+<h1 align="center">Girici</h1>
 
 <p align="center">
 🌐 Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.

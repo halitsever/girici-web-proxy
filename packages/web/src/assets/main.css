@@ -1,1 +1,10 @@
 @import "./base.css";
+@import "./brand/tokens.css";
+
+body {
+  /* The self-hosted variable font registers as "Geist Variable"; the brand stack follows as fallback. */
+  font-family: "Geist Variable", var(--girici-font-sans);
+  color: var(--girici-midnight);
+  /* The page is light only; this also keeps base.css's dark background from showing below short content. */
+  background: var(--girici-mist);
+}

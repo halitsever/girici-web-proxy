@@ -1,17 +1,48 @@
-/* Values carried over from the Webpixels theme this page used to load. */
+/* Colors and type follow the Girici brand tokens; Route Blue is kept for focus and the logo's route bar. */
 .home {
   padding: 1.25rem;
-  background-color: #f5f9fc;
+  background-color: var(--girici-mist);
 }
 
 .home-aside {
   padding: 3rem;
   height: 100vh;
-  background-color: #5c60f5;
+  background-color: var(--girici-midnight);
 }
 
-.home-aside__logo {
-  height: 3rem;
+/* Icon to wordmark proportions come from the horizontal lockup: 64 units of icon, 60 of type, 14 of gap. */
+.home-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: var(--girici-white);
+  text-decoration: none;
+}
+
+.home-brand__icon {
+  height: 2.5rem;
+}
+
+.home-brand__wordmark {
+  font-size: 2.35rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.045em;
+}
+
+/* Small screens hide the dark aside, so the lockup shows above the form in its light colors. */
+.home-brand--light {
+  gap: 0.45rem;
+  margin-bottom: 2rem;
+  color: var(--girici-midnight);
+}
+
+.home-brand--light .home-brand__icon {
+  height: 2rem;
+}
+
+.home-brand--light .home-brand__wordmark {
+  font-size: 1.9rem;
 }
 
 .home-aside p {
@@ -25,19 +56,21 @@
 
 .home-aside__title {
   margin-bottom: 1.25rem;
-  color: #fff;
+  color: var(--girici-white);
   font-size: calc(1.375rem + 1.5vw);
-  font-weight: bolder;
-  line-height: 1.3;
-  letter-spacing: -0.025em;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
-.home-aside__circle {
-  width: 14rem;
-  height: 14rem;
-  right: 5rem;
-  background-color: #ff8c00;
-  transform: translateY(33.333333%);
+.home-aside__fact {
+  color: var(--girici-line);
+}
+
+.home .home-aside__source {
+  color: var(--girici-white);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
 .home-panel {
@@ -48,55 +81,59 @@
 .home-wave {
   display: inline-block;
   margin-right: 0.75rem;
-  color: #16192c;
   font-size: calc(1.35rem + 1.2vw);
-  font-weight: 600;
   line-height: 1.3;
 }
 
 .home-title {
   margin: 0 0 1.25rem;
-  color: #16192c;
+  color: var(--girici-midnight);
   font-size: calc(1.3rem + 0.6vw);
-  font-weight: bolder;
-  line-height: 1.3;
-  letter-spacing: -0.025em;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
 }
 
 .alert.home-alert {
-  --bs-alert-color: #e62e5c;
-  --bs-alert-bg: #ffebf0;
-  --bs-alert-border-color: #ffd6e0;
+  --bs-alert-color: #b42318;
+  --bs-alert-bg: #fef3f2;
+  --bs-alert-border-color: #fecdca;
   margin-bottom: 1.25rem;
 }
 
 .form-control.home-input {
   padding: 0.75rem 1.25rem;
-  color: #16192c;
+  color: var(--girici-midnight);
   line-height: 1.3;
-  border-color: #e7eaf0;
+  background-color: var(--girici-white);
+  border-color: var(--girici-line);
+}
+
+.form-control.home-input:focus {
+  border-color: var(--girici-accent);
+  box-shadow: 0 0 0 0.2rem rgb(61 107 255 / 25%);
 }
 
 .form-control.home-input::placeholder {
-  color: #8898a9;
+  color: var(--girici-slate);
   opacity: 1;
 }
 
 .btn.home-submit {
   --bs-btn-padding-y: 0.75rem;
   --bs-btn-padding-x: 1.25rem;
-  --bs-btn-font-weight: 500;
+  --bs-btn-font-weight: 600;
   --bs-btn-line-height: 1.3;
-  --bs-btn-color: #fff;
-  --bs-btn-bg: #5c60f5;
-  --bs-btn-border-color: #5c60f5;
-  --bs-btn-hover-color: #fff;
-  --bs-btn-hover-bg: #4e52d0;
-  --bs-btn-hover-border-color: #4a4dc4;
-  --bs-btn-active-color: #fff;
-  --bs-btn-active-bg: #4a4dc4;
-  --bs-btn-active-border-color: #4548b8;
-  --bs-btn-focus-shadow-rgb: 116, 120, 247;
+  --bs-btn-color: var(--girici-white);
+  --bs-btn-bg: var(--girici-midnight);
+  --bs-btn-border-color: var(--girici-midnight);
+  --bs-btn-hover-color: var(--girici-white);
+  --bs-btn-hover-bg: #1b2236;
+  --bs-btn-hover-border-color: #1b2236;
+  --bs-btn-active-color: var(--girici-white);
+  --bs-btn-active-bg: #262e45;
+  --bs-btn-active-border-color: #262e45;
+  --bs-btn-focus-shadow-rgb: 61, 107, 255;
   margin-top: 1.25rem;
   width: 100%;
 }
@@ -106,13 +143,14 @@
   font-size: 0.875rem;
 }
 
-.home a {
-  color: #5c60f5;
+.home-footer a {
+  color: var(--girici-slate);
   text-decoration: none;
 }
 
-.home a:hover {
-  color: #4e52d0;
+.home-footer a:hover {
+  color: var(--girici-midnight);
+  text-decoration: underline;
 }
 
 @media (min-width: 992px) {

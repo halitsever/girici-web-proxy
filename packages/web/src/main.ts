@@ -1,4 +1,5 @@
 import "bootstrap/dist/css/bootstrap.min.css";
+import "@fontsource-variable/geist";
 import "./assets/main.css";
 
 import { createApp } from "vue";

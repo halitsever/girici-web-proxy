@@ -10,6 +10,7 @@
     "typecheck": "vue-tsc --build"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
     "@girici/engine": "2.0.0-dev",
     "bootstrap": "^5.3.8",
     "vue": "^3.5.44"
