@@ -5,6 +5,7 @@ import { installCookies, pendingWrites } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
+import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
@@ -52,6 +53,7 @@ export function install(win: Realm, config: ClientConfig): void {
     }
     return fake;
   };
+  const rewrite = createRewriteBridge(ctx);
   const helpers = createHelpers({
     nativeLocation,
     fakeLocation,
@@ -65,6 +67,8 @@ export function install(win: Realm, config: ClientConfig): void {
       }
     },
     toProxy: (raw) => ctx.toProxy(raw),
+    rewrite,
+    indirectEval: (code) => (0, win.eval)(code as string),
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted.
   Object.defineProperty(win, "__g$", { value: helpers, enumerable: false });

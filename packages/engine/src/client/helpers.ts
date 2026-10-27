@@ -1,3 +1,5 @@
+import type { RewriteBridge } from "./rewrite-bridge.ts";
+
 export interface HelperEnv {
   nativeLocation: object;
   fakeLocation: object;
@@ -5,6 +7,8 @@ export interface HelperEnv {
   fakeFor(location: object): object | null;
   isWindowOrDocument(value: unknown): boolean;
   toProxy(raw: string): string;
+  rewrite: RewriteBridge;
+  indirectEval(code: unknown): unknown;
 }
 
 export interface GiriciHelpers {
@@ -12,6 +16,11 @@ export interface GiriciHelpers {
   N(target: unknown, value: unknown): unknown;
   S(object: unknown, key: string, value: unknown): unknown;
   D(object: unknown): unknown;
+  E(code: unknown): unknown;
+  ev(code: unknown): unknown;
+  I(spec: unknown): string;
+  H(html: unknown): string;
+  M(url: unknown): string;
 }
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
@@ -49,5 +58,11 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
         },
       });
     },
+    // eval returns non-string arguments untouched, so only code strings are rewritten.
+    E: (code) => (typeof code === "string" ? env.rewrite.js(code) : code),
+    ev: (code) => env.indirectEval(typeof code === "string" ? env.rewrite.js(code) : code),
+    I: (spec) => env.rewrite.importSpecifier(String(spec)),
+    H: (html) => env.rewrite.html(String(html)),
+    M: (url) => env.rewrite.metaUrl(String(url)),
   };
 }
