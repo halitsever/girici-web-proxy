@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "es2023",
+    "lib": ["es2023"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@girici/web",
+  "version": "2.0.0-dev",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "build": "vue-tsc --build && vite build",
+    "dev": "vite build --watch",
+    "typecheck": "vue-tsc --build"
+  },
+  "dependencies": {
+    "bootstrap": "^5.3.8",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@tsconfig/node24": "^24.0.5",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/tsconfig": "^0.9.1",
+    "vite": "^8.3.5",
+    "vue-tsc": "^3.3.13"
+  }
+}

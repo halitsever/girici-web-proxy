@@ -1,17 +1,39 @@
 {
   "name": "girici-web-proxy",
-  "version": "1.0.0",
-  "description": "A web proxy application for unblock websites",
-  "scripts": {
-    "build-all": "cd front-end && npm run build && cd .. && cd back-end && npm run build && cd ..",
-    "start": "cd back-end && node dist/index.js",
-    "dev": "cd back-end && DEV_MODE=true ts-node-dev ./src/index.ts",
-    "install-modules": "npm i && cd back-end && npm i && cd .. && cd front-end && npm i",
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "version": "2.0.0-dev",
+  "private": true,
+  "type": "module",
+  "description": "A web proxy for unblocking websites",
   "author": "Halit Sever",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "start": "node packages/server/dist/index.js",
+    "dev": "run-p --print-label \"dev:*\"",
+    "dev:server": "npm run dev -w @girici/server",
+    "dev:web": "npm run dev -w @girici/web",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
   "devDependencies": {
-    "ts-node-dev": "^2.0.0"
+    "@types/node": "^24.19.2",
+    "@vue/eslint-config-prettier": "^10.2.0",
+    "@vue/eslint-config-typescript": "^14.9.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-vue": "^10.12.0",
+    "globals": "^17.13.0",
+    "npm-run-all2": "^9.0.4",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
   }
 }
