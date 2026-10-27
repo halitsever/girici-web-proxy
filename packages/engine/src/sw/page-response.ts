@@ -1,58 +1,89 @@
+import { rewriteCss } from "../rewrite/css.ts";
+import { rewriteHtml } from "../rewrite/html.ts";
+import { rewriteJs } from "../rewrite/js.ts";
+import { rewriteRefresh } from "../rewrite/refresh.ts";
 import { encodeUrl } from "../shared/codec.ts";
-import { decodeHeaderList, HEADER, type RelayErrorCode } from "../shared/protocol.ts";
+import { PROTOCOL_VERSION, type CookieSnapshot, type RelayErrorCode } from "../shared/protocol.ts";
+import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
+import { clientTag } from "./client-tag.ts";
 import { errorPage } from "./error-page.ts";
+import type { TransportResult } from "./transport.ts";
 
-export type ResponseKind = "navigation" | "subresource";
+export interface PageContext {
+  target: URL;
+  origin: string;
+  destination: RequestDestination;
+  navigation: boolean;
+  clientScript: string;
+  cookies(): Promise<CookieSnapshot[]>;
+}
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 // The browser already decoded the relay body, so the upstream encoding and length no longer apply.
 const DROPPED_HEADERS = new Set(["content-encoding", "content-length", "set-cookie"]);
+const REWRITTEN_TYPES: Record<BodyKind, string> = {
+  html: "text/html; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+};
 
-export function buildPageResponse(relay: Response, target: URL, kind: ResponseKind, origin: string): Response {
-  const error = relay.headers.get(HEADER.error);
-  if (error) return failure(error as RelayErrorCode, relay.status, target, kind);
-
-  const status = Number(relay.headers.get(HEADER.status) ?? relay.status);
-  let envelope: Array<[string, string]>;
-  try {
-    envelope = decodeHeaderList(relay.headers.get(HEADER.headers) ?? "");
-  } catch {
-    return failure("connect", 502, target, kind);
-  }
+export async function buildPageResponse(result: TransportResult, ctx: PageContext): Promise<Response> {
+  if (!result.ok) return failure(result.code, result.status, ctx);
+  const { status, headers: envelope, body } = result.response;
 
   if (REDIRECT_STATUSES.has(status)) {
     const location = envelope.find(([name]) => name === "location")?.[1];
-    if (location) return redirectTo(location, status, target, kind, origin);
+    if (location) return redirectTo(location, status, ctx);
   }
-  if (!Number.isInteger(status) || status < 200 || status > 599) return failure("connect", 502, target, kind);
+  if (!Number.isInteger(status) || status < 200 || status > 599) return failure("connect", 502, ctx);
 
   const headers = new Headers();
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      headers.append(name, value);
+      headers.append(name, name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value);
     } catch {
       // A value the Headers API rejects would otherwise fail the whole response.
     }
   }
-  return new Response(NULL_BODY_STATUSES.has(status) ? null : relay.body, { status, headers });
+  if (NULL_BODY_STATUSES.has(status) || !body) return new Response(null, { status, headers });
+
+  const contentType = headers.get("content-type");
+  const kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
+  if (!kind) return new Response(body, { status, headers });
+  const text = decodeText(await new Response(body).arrayBuffer(), contentType);
+  headers.set("content-type", REWRITTEN_TYPES[kind]);
+  return new Response(await rewriteBody(kind, text, ctx), { status, headers });
 }
 
-function redirectTo(location: string, status: number, target: URL, kind: ResponseKind, origin: string): Response {
+async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext): Promise<string> {
+  switch (kind) {
+    case "html": {
+      const inject = clientTag(ctx.clientScript, { v: PROTOCOL_VERSION, cookies: await ctx.cookies() });
+      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
+    }
+    case "css":
+      return rewriteCss(text, ctx.target, ctx.origin);
+    case "js":
+      return rewriteJs(text);
+  }
+}
+
+function redirectTo(location: string, status: number, ctx: PageContext): Response {
   let resolved: URL;
   try {
-    resolved = new URL(location, target);
+    resolved = new URL(location, ctx.target);
   } catch {
-    return failure("connect", 502, target, kind);
+    return failure("connect", 502, ctx);
   }
   const web = resolved.protocol === "http:" || resolved.protocol === "https:";
-  return Response.redirect(web ? new URL(encodeUrl(resolved), origin).href : resolved.href, status);
+  return Response.redirect(web ? new URL(encodeUrl(resolved), ctx.origin).href : resolved.href, status);
 }
 
-function failure(code: RelayErrorCode, status: number, target: URL, kind: ResponseKind): Response {
-  if (kind === "subresource") return Response.error();
-  return new Response(errorPage(code, target), {
+function failure(code: RelayErrorCode, status: number, ctx: PageContext): Response {
+  if (!ctx.navigation) return Response.error();
+  return new Response(errorPage(code, ctx.target), {
     status: status >= 400 && status <= 599 ? status : 502,
     headers: { "content-type": "text/html; charset=utf-8" },
   });

@@ -11,3 +11,7 @@ None yet.
 
 The web UI bundle includes Vue (MIT) and Bootstrap CSS (MIT). The server depends on Express (MIT). Their license
 texts ship with their npm packages.
+
+The engine bundles (`/_g/sw.js`, `/_g/client.*.js`) include tldts and tldts-core (MIT), meriyah (ISC), magic-string (MIT),
+@jridgewell/sourcemap-codec (MIT), htmlparser2 (MIT) and entities (BSD-2-Clause). The build writes their license texts
+to `/_g/THIRD_PARTY_LICENSES.txt`.

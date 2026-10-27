@@ -2,8 +2,8 @@ import { isReservedPath } from "../shared/codec.ts";
 import type { RelayErrorCode } from "../shared/protocol.ts";
 import { errorPage } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
-import { buildRelayRequest } from "./relay-request.ts";
 import { classifyRequest, realUrlOf } from "./route.ts";
+import { HttpRelayTransport } from "./transport.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
@@ -11,6 +11,7 @@ declare const __GIRICI_CLIENT__: string;
 const CLIENT_PATH = __GIRICI_CLIENT__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
+const transport = new HttpRelayTransport();
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -67,13 +68,20 @@ async function handle(event: FetchEvent): Promise<Response> {
     case "proxy": {
       const clientUrl = realUrlOf(navigation ? referrer : (client?.url ?? null), origin);
       try {
-        const { url, init } = await buildRelayRequest(request, {
+        const result = await transport.send(request, {
           target: route.target,
           clientUrl,
           isNavigation: navigation,
+          cookie: null,
         });
-        const relay = await fetch(url, init);
-        return buildPageResponse(relay, route.target, navigation ? "navigation" : "subresource", origin);
+        return await buildPageResponse(result, {
+          target: route.target,
+          origin,
+          destination: request.destination,
+          navigation,
+          clientScript: CLIENT_PATH,
+          cookies: async () => [],
+        });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
       }

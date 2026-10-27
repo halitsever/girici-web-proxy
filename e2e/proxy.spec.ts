@@ -13,9 +13,9 @@ test("loads a fixture page through the UI", async ({ page }) => {
   await expect(page.locator("#title")).toHaveCSS("color", "rgb(1, 2, 3)");
 });
 
-test("proxies relative, root-relative and absolute subresources", async ({ page }) => {
+test("proxies relative, root-relative, absolute and protocol-relative subresources", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/");
-  for (const id of ["relative", "root", "absolute"]) {
+  for (const id of ["relative", "root", "absolute", "protocol-relative"]) {
     await expect.poll(() => page.locator(`#${id}`).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
   }
 });

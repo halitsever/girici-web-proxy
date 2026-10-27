@@ -63,6 +63,8 @@ export function splitUpstreamHeaders(headers: Record<string, string | string[] |
     if (NATIVE.has(name)) split.native[name] = value;
     if (name === "vary") split.native.vary = mapVary(values.join(", "));
   }
+  // Keeps caches from answering a request without the relay marker, such as a direct visit, with a relay response.
+  split.native.vary ??= mapVary(undefined);
   return split;
 }
 

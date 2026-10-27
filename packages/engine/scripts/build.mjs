@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { build, context } from "esbuild";
 
@@ -30,6 +30,7 @@ function workerOptions(clientPath) {
     ...common,
     entryPoints: { sw: "src/sw/index.ts", boot: "src/boot/index.ts" },
     define: { __GIRICI_CLIENT__: JSON.stringify(clientPath) },
+    metafile: true,
   };
 }
 
@@ -37,6 +38,27 @@ function clientPathOf(result) {
   const output = Object.keys(result.metafile.outputs).find((file) => /client\.[^/]+\.js$/.test(file));
   if (!output) throw new Error("The client bundle was not written");
   return `/_g/${basename(output)}`;
+}
+
+/** Bundling copies third-party code into our files, so their license texts have to ship next to them. */
+function writeLicenses(results) {
+  const packages = new Set();
+  for (const result of results) {
+    for (const output of Object.values(result.metafile.outputs)) {
+      for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+        // Tree-shaken modules contribute nothing, and nested node_modules hold separate packages.
+        const match = bytesInOutput > 0 && /.*node_modules\/(?:@[^/]+\/)?[^/]+\//.exec(input);
+        if (match) packages.add(match[0].slice(0, -1));
+      }
+    }
+  }
+  const entries = [...packages].sort().map((dir) => {
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    const file = readdirSync(dir).find((name) => /^licen[cs]e(\.md|\.txt)?$/i.test(name));
+    const text = file ? readFileSync(join(dir, file), "utf8").trim() : `License: ${manifest.license}`;
+    return `== ${manifest.name}@${manifest.version} (${manifest.license}) ==\n\n${text}\n`;
+  });
+  writeFileSync(join(OUT_DIR, "THIRD_PARTY_LICENSES.txt"), entries.join("\n"));
 }
 
 function removeOldClients() {
@@ -66,5 +88,6 @@ if (process.argv.includes("--watch")) {
   await clientContext.watch();
 } else {
   const client = await build(clientOptions);
-  await build(workerOptions(clientPathOf(client)));
+  const workers = await build(workerOptions(clientPathOf(client)));
+  writeLicenses([client, workers]);
 }

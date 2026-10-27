@@ -23,7 +23,7 @@ describe("splitUpstreamHeaders", () => {
       ["x-custom", "1"],
       ["location", "/next"],
     ]);
-    expect(split.native).toEqual({ "content-type": "text/html; charset=utf-8" });
+    expect(split.native).toEqual({ "content-type": "text/html; charset=utf-8", vary: "x-girici-relay" });
   });
 
   it("copies content, cache and range headers natively", () => {
@@ -47,6 +47,10 @@ describe("splitUpstreamHeaders", () => {
       "last-modified": "Tue, 27 Oct 2026 08:00:00 GMT",
       vary: "x-girici-relay, accept-encoding",
     });
+  });
+
+  it("varies on the relay marker even when upstream sends no Vary", () => {
+    expect(splitUpstreamHeaders({ "content-type": "text/html" }).native.vary).toBe("x-girici-relay");
   });
 });
 
