@@ -1,5 +1,7 @@
 import { isReservedPath } from "../shared/codec.ts";
 import type { RelayErrorCode } from "../shared/protocol.ts";
+import { createIdbCookieStore } from "./cookies/idb-store.ts";
+import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
 import { errorPage } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { classifyRequest, realUrlOf } from "./route.ts";
@@ -12,6 +14,7 @@ const CLIENT_PATH = __GIRICI_CLIENT__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
 const transport = new HttpRelayTransport();
+const cookies = new CookieService(createIdbCookieStore());
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -68,19 +71,27 @@ async function handle(event: FetchEvent): Promise<Response> {
     case "proxy": {
       const clientUrl = realUrlOf(navigation ? referrer : (client?.url ?? null), origin);
       try {
+        await cookies.ready();
+        const cookieContext: CookieRequestContext = {
+          initiator: clientUrl,
+          credentials: request.credentials,
+          topLevel: request.destination === "document",
+          method: request.method,
+        };
         const result = await transport.send(request, {
           target: route.target,
           clientUrl,
           isNavigation: navigation,
-          cookie: null,
+          cookie: await cookies.header(route.target, cookieContext),
         });
+        if (result.ok) await cookies.store(route.target, result.response.setCookies, cookieContext);
         return await buildPageResponse(result, {
           target: route.target,
           origin,
           destination: request.destination,
           navigation,
           clientScript: CLIENT_PATH,
-          cookies: async () => [],
+          cookies: () => cookies.snapshot(route.target),
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();

@@ -85,6 +85,24 @@ const FRAME = page(
 
 type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
+const whoami: Route = (req, res) => {
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(
+    page(
+      "Who am I",
+      `<p id="server">${escapeHtml(req.headers.cookie ?? "")}</p><p id="client"></p>
+<script>document.getElementById("client").textContent = document.cookie;</script>`,
+    ),
+  );
+};
+const login: Route = (_req, res) => {
+  res.writeHead(302, {
+    location: "/cookie/whoami",
+    "set-cookie": ["sid=abc; HttpOnly; Path=/", "theme=dark; Domain=site-a.test; Path=/"],
+  });
+  res.end();
+};
+
 const html =
   (body: string): Route =>
   (_req, res) => {
@@ -146,13 +164,16 @@ const ROUTES: Record<string, Record<string, Route>> = {
       ),
     ),
     "/runtime": html(RUNTIME),
+    "/cookie/login": login,
+    "/cookie/whoami": whoami,
   },
-  "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")) },
+  "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
     "/search": search,
     "/frame": html(FRAME),
+    "/cookie/whoami": whoami,
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

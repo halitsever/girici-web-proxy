@@ -152,6 +152,7 @@ describe("relay", () => {
     const res = await relayFetch(base, "https/site-a.test/echo", {
       headers: {
         cookie: "girici=1",
+        "x-girici-cookie": encodeHeaderValue("sid=abc"),
         "x-girici-headers": encodeHeaderList([["x-test", "1"]]),
         "x-girici-fetch": encodeHeaderValue("empty;cors;same-origin;"),
       },
@@ -160,7 +161,7 @@ describe("relay", () => {
     expect(seen["x-test"]).toBe("1");
     expect(seen["sec-fetch-site"]).toBe("same-origin");
     expect(seen.host).toBe("site-a.test");
-    expect(seen.cookie).toBeUndefined();
+    expect(seen.cookie).toBe("sid=abc");
     expect(Object.keys(seen).filter((name) => name.startsWith("x-girici-"))).toEqual([]);
   });
 

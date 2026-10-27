@@ -56,6 +56,13 @@ export function buildUpstreamHeaders(relayHeaders: IncomingHttpHeaders): Record<
     headers[name] = value;
   }
 
+  const cookie = decodeOptional(relayHeaders[HEADER.cookie]);
+  if (cookie) {
+    // The jar's value goes out as a raw header line, so a line break would smuggle in headers of its own.
+    if (/[\r\n\0]/.test(cookie)) throw new RelayRequestError("bad_request", 400);
+    headers.cookie = cookie;
+  }
+
   const origin = decodeOptional(relayHeaders[HEADER.origin]);
   if (origin) headers.origin = origin;
   const referer = decodeOptional(relayHeaders[HEADER.referer]);

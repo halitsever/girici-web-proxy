@@ -27,6 +27,14 @@ describe("buildUpstreamHeaders", () => {
     });
   });
 
+  it("turns the jar's cookies into the upstream Cookie header and never forwards ours", () => {
+    const headers = buildUpstreamHeaders({ "x-girici-cookie": encodeHeaderValue("a=1; b=2"), cookie: "girici=1" });
+    expect(headers.cookie).toBe("a=1; b=2");
+    expect(() => buildUpstreamHeaders({ "x-girici-cookie": encodeHeaderValue("a=1\r\nx: y") })).toThrow(
+      RelayRequestError,
+    );
+  });
+
   it("applies the page's headers from the envelope, minus forbidden ones", () => {
     expect(
       buildUpstreamHeaders({
