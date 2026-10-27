@@ -20,6 +20,13 @@ describe("rewriteJs", () => {
     ["x.location.location", "__g$.L(__g$.L(x.location).location)"],
     ["document.location = location.href", '__g$.S(document, "location", (__g$.L(location).href))'],
     ["function f(location) { return location.host }", "function f(location) { return __g$.L(location).host }"],
+    ["eval(code)", "eval(__g$.E(code))"],
+    ["eval(a, b)", "eval(__g$.E(a), b)"],
+    ["window.eval(code)", "window.eval(__g$.E(code))"],
+    ["const e = eval; e(x)", "const e = __g$.ev; e(x)"],
+    ["[eval][0](x)", "[__g$.ev][0](x)"],
+    ["import(spec)", "import(__g$.I(spec))"],
+    ["import(spec, { with: { type: 'json' } })", "import(__g$.I(spec), { with: { type: 'json' } })"],
   ])("rewrites %s", (input, output) => {
     expect(rewriteJs(input)).toBe(output);
   });
@@ -34,6 +41,29 @@ describe("rewriteJs", () => {
     "x = __g$.L(location).href",
   ])("leaves %s alone", (input) => {
     expect(rewriteJs(input)).toBe(input);
+  });
+
+  it("leaves eval calls and bare eval tokens apart", () => {
+    expect(rewriteJs("eval()")).toBe("eval()");
+    expect(rewriteJs("obj.eval(x)")).toBe("obj.eval(x)");
+    expect(rewriteJs('var s = "eval";')).toBe('var s = "eval";');
+  });
+
+  it("rewrites import.meta.url reads as modules", () => {
+    expect(rewriteJs("const u = import.meta.url;", { kind: "module" })).toBe("const u = __g$.M(import.meta.url);");
+    expect(rewriteJs("import.meta.resolve('x')", { kind: "module" })).toBe("import.meta.resolve('x')");
+  });
+
+  it("skips sources without a trigger keyword", () => {
+    expect(rewriteJs("const a = 1 + 2;")).toBe("const a = 1 + 2;");
+  });
+
+  it("standalone shim defines the phase 2 helpers", () => {
+    expect(STANDALONE_SHIM).toContain("ev:");
+    expect(STANDALONE_SHIM).toContain("E:");
+    expect(STANDALONE_SHIM).toContain("I:");
+    expect(STANDALONE_SHIM).toContain("H:");
+    expect(STANDALONE_SHIM).toContain("M:");
   });
 
   it("leaves module bindings alone", () => {
@@ -64,6 +94,9 @@ describe("rewriteJs", () => {
       "const { location } = window;",
       "a?.location.href",
       'location = "x"',
+      "eval(code)",
+      "import(spec)",
+      "const e = eval; e(x)",
     ]) {
       const once = rewriteJs(source);
       expect(rewriteJs(once)).toBe(once);

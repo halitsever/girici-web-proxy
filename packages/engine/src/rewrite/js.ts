@@ -4,8 +4,9 @@ import { isParseError, parseModule, parseScript, type ESTree } from "meriyah";
 export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
+// Indirect eval is written as a computed access, so re-rewriting the shim leaves it untouched (R10).
 export const STANDALONE_SHIM =
-  "globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o}});";
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){return globalThis["eval"](c)},I:function(v){return v},H:function(v){return v},M:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
@@ -15,11 +16,13 @@ export interface JsRewriteOptions {
 type Role = "read" | "target" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
-const HELPERS = new Set(["L", "N", "S", "D"]);
+const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M"]);
+const GLOBAL_NAMES = new Set(["window", "globalThis", "self"]);
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
-  if (source.length > MAX_REWRITE_LENGTH || !source.includes("location")) return source;
+  if (source.length > MAX_REWRITE_LENGTH) return source;
+  if (!source.includes("location") && !source.includes("eval") && !source.includes("import")) return source;
   const program = parse(source, options.kind ?? "classic");
   if (!program) return source;
   const output = new MagicString(source);
@@ -74,6 +77,8 @@ class LocationRewriter {
     switch (node.type) {
       case "Identifier":
         if (role === "read" && node.name === "location") this.#wrap(node);
+        // A bare `eval` read is indirect eval; the wrapper rewrites the code before running it.
+        else if (role === "read" && node.name === "eval") this.#output.overwrite(start(node), end(node), "__g$.ev");
         return;
       case "MemberExpression":
         this.#member(node, role, inChain);
@@ -94,10 +99,31 @@ class LocationRewriter {
         for (let index = rights.length - 1; index >= 0; index--) this.visit(rights[index], "read", false);
         return;
       }
-      case "CallExpression":
+      case "CallExpression": {
         if (isHelperCall(node)) return;
-        this.visit(node.callee, "callee", inChain);
+        const callee = node.callee;
+        const directEval = callee.type === "Identifier" && callee.name === "eval";
+        // `window.eval`/`globalThis.eval`/`self.eval` is the global eval; an unrelated `obj.eval` is left alone.
+        const globalEval =
+          callee.type === "MemberExpression" &&
+          !callee.computed &&
+          callee.property.type === "Identifier" &&
+          callee.property.name === "eval" &&
+          callee.object.type === "Identifier" &&
+          GLOBAL_NAMES.has(callee.object.name);
+        const first = node.arguments[0];
+        if ((directEval || globalEval) && first && first.type !== "SpreadElement" && !isHelperCall(first)) {
+          this.#call("__g$.E(", ")", first);
+        }
+        // A direct eval must keep its callee bare, or it would become an indirect eval and lose scope.
+        if (!directEval) this.visit(callee, "callee", inChain);
         for (const argument of node.arguments) this.visit(argument, "read", false);
+        return;
+      }
+      case "ImportExpression":
+        if (!isHelperCall(node.source)) this.#call("__g$.I(", ")", node.source);
+        this.visit(node.source, "read", false);
+        if (node.options) this.visit(node.options, "read", false);
         return;
       case "NewExpression":
         // `new __g$.L(x).y()` would construct the helper, so a callee that gets wrapped is parenthesised first.
@@ -199,6 +225,10 @@ class LocationRewriter {
   }
 
   #member(node: ESTree.MemberExpression, role: Role, inChain: boolean): void {
+    if (role === "read" && isImportMetaUrl(node)) {
+      this.#call("__g$.M(", ")", node);
+      return;
+    }
     if (role === "read" && isLocationMember(node)) this.#wrap(node);
     // A wrapped link would stop an optional chain from short-circuiting, so the next access becomes optional too.
     if (inChain && !node.optional && isLocationMember(node.object) && hasOptionalLink(node.object)) {
@@ -284,6 +314,18 @@ function isNode(value: unknown): value is ESTree.Node {
 
 function isLocationIdentifier(node: ESTree.Node): boolean {
   return node.type === "Identifier" && node.name === "location";
+}
+
+function isImportMetaUrl(node: ESTree.MemberExpression): boolean {
+  const { object, property } = node;
+  return (
+    !node.computed &&
+    property.type === "Identifier" &&
+    property.name === "url" &&
+    object.type === "MetaProperty" &&
+    object.meta.name === "import" &&
+    object.property.name === "meta"
+  );
 }
 
 function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
