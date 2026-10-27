@@ -34,3 +34,16 @@ test("returns 416 for an unsatisfiable range", async ({ page }) => {
   expect(res.status).toBe(416);
   expect(res.contentRange).toBe("bytes */10000");
 });
+
+test("plays a proxied video", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/video-page");
+  await expect
+    .poll(() => page.locator("#v").evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 15000 })
+    .toBeGreaterThanOrEqual(1);
+  await expect(page.locator('#v source[src^="/~/https/site-a.test/"]').first()).toHaveCount(1);
+});
+
+test("leaves a MediaSource blob url untouched", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/mse");
+  await expect(page.locator("#result")).toHaveText(/^blob:/);
+});

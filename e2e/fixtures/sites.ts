@@ -1,5 +1,30 @@
+import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { rangeRoute } from "./media.ts";
+
+const sampleWebm = readFileSync(new URL("./sample.webm", import.meta.url));
+const sampleMp4 = readFileSync(new URL("./sample.mp4", import.meta.url));
+
+const VIDEO_PAGE = page(
+  "Video",
+  `<video id="v" preload="auto">
+  <source src="/sample.webm" type="video/webm">
+  <source src="/sample.mp4" type="video/mp4">
+</video>`,
+);
+
+const MSE = page(
+  "MSE",
+  `<p id="result"></p>
+<script>
+  const ms = new MediaSource();
+  const v = document.createElement("video");
+  document.body.appendChild(v);
+  v.src = URL.createObjectURL(ms);
+  document.getElementById("result").textContent = v.src;
+  fetch("/sample.webm").catch(function () {});
+</script>`,
+);
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -481,6 +506,10 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/lib.js": script('self.answer = typeof self.location.href === "string" ? 42 : 0;'),
     "/realtime": html(REALTIME),
     "/range": rangeRoute(Buffer.alloc(10000, 65), "application/octet-stream"),
+    "/video-page": html(VIDEO_PAGE),
+    "/sample.webm": rangeRoute(sampleWebm, "video/webm"),
+    "/sample.mp4": rangeRoute(sampleMp4, "video/mp4"),
+    "/mse": html(MSE),
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),

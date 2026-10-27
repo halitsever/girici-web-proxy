@@ -35,6 +35,9 @@ export function rewriteUrl(raw: string, base: URL, origin: string): string {
 /** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */
 export function unrewriteUrl(value: string, base: URL, origin: string): string {
   if (!isWeb(base)) return value;
+  // blob:, data: and other non-web schemes are the page's own and never one of our proxy URLs.
+  const scheme = SCHEME.exec(value)?.[0].toLowerCase();
+  if (scheme && scheme !== "http:" && scheme !== "https:") return value;
   const url = parse(value, new URL(encodeUrl(base), origin));
   if (!url || url.origin !== origin) return value;
   const real = decodeUrl(url.pathname + url.search);
