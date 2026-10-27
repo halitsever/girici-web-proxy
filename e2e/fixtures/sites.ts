@@ -377,6 +377,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
     "/exec": html(EXEC),
+    "/nav-api": html(
+      page("Nav API", `<button id="go" onclick="navigation.navigate('https://site-b.test/')">go</button>`),
+    ),
     "/worker2": html(WORKER2),
     "/worker-classic.js": script("postMessage(self.location.href);"),
     "/worker-module.js": script("postMessage(self.location.href);"),

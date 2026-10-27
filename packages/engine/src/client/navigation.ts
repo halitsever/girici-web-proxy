@@ -29,6 +29,14 @@ export function installNavigation(win: Realm, ctx: UrlContext): void {
     return nativeOpen.call(this ?? win, proxied, target, features);
   };
 
+  // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.
+  const navigation = (win as unknown as { navigation?: { navigate?: (url: string, options?: unknown) => unknown } })
+    .navigation;
+  if (navigation && typeof navigation.navigate === "function") {
+    const nativeNavigate = navigation.navigate.bind(navigation);
+    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(String(url)), options);
+  }
+
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
   const fix = (element: Element, name: string) => {
     const attribute = element.getAttributeNode(name);

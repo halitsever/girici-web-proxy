@@ -39,3 +39,10 @@ test("keeps classic, module and blob workers inside the proxy", async ({ page })
   expect(out.moduleHref).toBe("https://site-a.test/worker-module.js");
   expect(out.blobApi).toBe("GET");
 });
+
+test("proxies Navigation API navigations", async ({ page, browserName }) => {
+  test.skip(browserName === "webkit", "WebKit has no Navigation API");
+  await openThroughUi(page, "https://site-a.test/nav-api");
+  await page.click("#go");
+  await expect(page).toHaveURL(/\/~\/https\/site-b\.test\//);
+});
