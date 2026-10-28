@@ -44,6 +44,10 @@ features:
     details: A single image, a persistent volume for its database, and an optional Caddy profile for HTTPS.
 ---
 
+<script setup>
+import { withBase } from "vitepress";
+</script>
+
 <div class="gi-home">
 
 <section class="gi-section">
@@ -101,8 +105,8 @@ features:
   <div class="gi-reveal">
     <pre class="gi-code"><span class="gi-code-prompt">$</span>docker run -d -p 3000:3000 -v girici_data:/data halitsever/girici-web-proxy:latest</pre>
     <div class="gi-cta-actions">
-      <a class="gi-btn gi-btn-primary" href="/guide/getting-started">Get started</a>
-      <a class="gi-btn" href="/guide/docker">Run with Docker</a>
+      <a class="gi-btn gi-btn-primary" :href="withBase('/guide/getting-started')">Get started</a>
+      <a class="gi-btn" :href="withBase('/guide/docker')">Run with Docker</a>
     </div>
   </div>
 </section>
