@@ -28,7 +28,9 @@ export { expect };
 
 export async function openThroughUi(page: Page, url: string): Promise<void> {
   await page.goto("/");
-  await page.getByLabel("Website address").fill(url);
-  await page.getByRole("button", { name: "Unblock" }).click();
+  const input = page.getByLabel("URL or search");
+  await input.fill(url);
+  // A typed URL is the first row; Enter submits the command palette and opens it.
+  await input.press("Enter");
   await page.waitForURL(/\/~\//);
 }

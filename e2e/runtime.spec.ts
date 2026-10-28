@@ -63,11 +63,11 @@ test("runs scripts that workers import", async ({ page }) => {
 test("keeps sockets and WebRTC from going around the proxy", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/realtime");
   await expect(page.locator("#results")).not.toBeEmpty();
+  // The relay cannot send 1006 (reserved), so an upstream failure reaches the page as a 1011 close.
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
     rtc: "undefined",
     transport: "undefined",
-    error: true,
-    closed: 1006,
+    closed: 1011,
     state: 3,
   });
 });

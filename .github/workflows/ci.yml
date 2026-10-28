@@ -39,7 +39,7 @@ jobs:
           docker run -d --name girici -p 3000:3000 girici:ci
           for i in $(seq 1 30); do curl -fsS http://localhost:3000/healthz && break; sleep 1; done
           curl -fsS http://localhost:3000/healthz
-          curl -fsS http://localhost:3000/ | grep -q '<div id="app">'
+          curl -fsSL http://localhost:3000/ | grep -q '<div id="app">'
           curl -fsS -o /dev/null http://localhost:3000/_g/sw.js
           docker stop -t 5 girici
           test "$(docker inspect -f '{{.State.ExitCode}}' girici)" = 0
