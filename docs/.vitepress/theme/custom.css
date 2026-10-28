@@ -1,0 +1,49 @@
+/* Girici brand: Midnight #0A0F1E background, Route Blue #3D6BFF accent. */
+:root {
+  --vp-c-brand-1: #2e54cc;
+  --vp-c-brand-2: #3d6bff;
+  --vp-c-brand-3: #3d6bff;
+  --vp-c-brand-soft: rgba(61, 107, 255, 0.14);
+
+  --vp-button-brand-bg: #3d6bff;
+  --vp-button-brand-hover-bg: #2e54cc;
+  --vp-button-brand-active-bg: #2749ad;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #ffffff;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #6e90ff 10%, #3d6bff);
+  --vp-home-hero-image-background-image: linear-gradient(120deg, rgba(61, 107, 255, 0.5), rgba(110, 144, 255, 0.35));
+  --vp-home-hero-image-filter: blur(56px);
+}
+
+/* Dark is the default; Midnight scale with cool neutral text. */
+.dark {
+  --vp-c-brand-1: #6e90ff;
+  --vp-c-brand-2: #3d6bff;
+  --vp-c-brand-3: #3d6bff;
+  --vp-c-brand-soft: rgba(61, 107, 255, 0.16);
+
+  --vp-c-bg: #0a0f1e;
+  --vp-c-bg-alt: #070b16;
+  --vp-c-bg-soft: #121829;
+  --vp-c-bg-elv: #121829;
+
+  --vp-c-divider: #1e2638;
+  --vp-c-border: #222b40;
+  --vp-c-gutter: #060913;
+
+  --vp-c-text-1: #eef1f5;
+  --vp-c-text-2: #aab2c5;
+  --vp-c-text-3: #5b6478;
+
+  --vp-button-brand-text: #ffffff;
+  --vp-home-hero-image-background-image: linear-gradient(120deg, rgba(61, 107, 255, 0.45), rgba(110, 144, 255, 0.25));
+}
+
+/* Keep the single accent restrained, matching the app's "use Route Blue sparingly" rule. */
+.VPNavBar.has-sidebar .content-body {
+  background-color: transparent;
+}

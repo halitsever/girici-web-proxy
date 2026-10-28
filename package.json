@@ -21,6 +21,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p e2e/tsconfig.json",
     "test": "npm run build:lib -w @girici/engine && vitest run",
     "lint": "eslint . --max-warnings=0",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test:e2e": "npm run build -w @girici/engine && npm run build -w @girici/web && playwright test",
@@ -39,6 +42,7 @@
     "prettier": "^3.9.10",
     "selfsigned": "^5.5.0",
     "typescript": "~6.0.3",
+    "vitepress": "^1.6.4",
     "vitest": "^5.0.5"
   }
 }

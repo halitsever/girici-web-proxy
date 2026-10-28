@@ -30,6 +30,11 @@
 
 
 
+## Documentation
+
+Full docs live in [`docs/`](docs/) (a VitePress site): getting started, how it works, admin and auth,
+configuration, and Docker. Run it locally with `npm run docs:dev`.
+
 ## Run from source
 
 Requires Node.js 22.19 or newer (24 LTS recommended).
@@ -46,7 +51,7 @@ Girici listens on http://localhost:3000.
 <b>Screenshot</b>
 </p>
 <p align="center">
-<img src="https://assets.halit.org/assets/github-repos/screenshots/girici-screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
+<img src="docs/public/screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
 </p>
 
 ## Run with Docker
