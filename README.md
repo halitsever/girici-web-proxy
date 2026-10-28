@@ -81,7 +81,22 @@ GIRICI_DOMAIN=proxy.example.com docker compose --profile https up -d --build
 | `HOST` | `0.0.0.0` | Interface to bind. |
 | `LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. |
 | `SOURCE_URL` | this repository | Where the UI's source code link points. |
+| `GIRICI_DATA_DIR` | `/data` in Docker, `.data` locally | Directory for the SQLite database (`girici.db`). |
+| `GIRICI_TRUST_PROXY` | `false` | Trust `X-Forwarded-For`. Behind a proxy, set the hop count (e.g. `1`), not `true`. |
+| `GIRICI_SESSION_SECRET` | unset | Overrides the stored session secret; set the same value on every replica. |
 | `GIRICI_YT_POTOKEN` | `on` | Mint YouTube GVS poTokens server-side to help video playback. Set `off` to disable. |
+
+## Admin and access
+
+On first run, Girici sends you to a setup screen to create a single admin account, stored in SQLite
+(`${GIRICI_DATA_DIR}/girici.db`). After that, the proxy requires a login. Turn on **Public access** in
+Settings to let anyone browse without signing in. Forgot the password? Reset it from the command line:
+
+```
+node ./reset-admin-password.js
+```
+
+See the [documentation](https://halitsever.github.io/girici-web-proxy/guide/admin-and-auth) for details.
 
 ## Known limitations
 
