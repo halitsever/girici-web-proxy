@@ -8,7 +8,8 @@ export default defineConfig({
   description: "A self-hosted web proxy built on its own service worker engine.",
   // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
   base: process.env.DOCS_BASE || "/",
-  appearance: "dark",
+  // The app is dark-only; drop the toggle so the docs match it.
+  appearance: "force-dark",
   cleanUrls: true,
   lastUpdated: true,
   head: [

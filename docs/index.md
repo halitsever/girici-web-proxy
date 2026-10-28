@@ -18,16 +18,28 @@ hero:
       text: GitHub
       link: https://github.com/halitsever/girici-web-proxy
 features:
-  - icon: 🌐
+  - icon:
+      src: /icons/globe.svg
+      width: 28
+      height: 28
     title: HTTP, HTTPS and WebSocket
     details: Classic sites, single-page apps, media, and realtime connections all route through one origin.
-  - icon: 🔒
+  - icon:
+      src: /icons/shield.svg
+      width: 28
+      height: 28
     title: Safe by default
     details: An SSRF guard, CSRF checks, no sensitive logging, and an admin login gate are on out of the box.
-  - icon: 🧑‍💻
+  - icon:
+      src: /icons/server.svg
+      width: 28
+      height: 28
     title: Your server's connection
     details: Run Girici on a server and browse through its network, wherever you deploy it.
-  - icon: 🐳
+  - icon:
+      src: /icons/box.svg
+      width: 28
+      height: 28
     title: One-command Docker
     details: A single image, a persistent volume for its database, and an optional Caddy profile for HTTPS.
 ---

@@ -1,49 +1,133 @@
-/* Girici brand: Midnight #0A0F1E background, Route Blue #3D6BFF accent. */
+/*
+ * Girici docs theme: the app's own surface ported to VitePress.
+ * Midnight base, zinc panels, Geist, Route Blue as the one thin accent.
+ */
+
 :root {
-  --vp-c-brand-1: #2e54cc;
-  --vp-c-brand-2: #3d6bff;
-  --vp-c-brand-3: #3d6bff;
-  --vp-c-brand-soft: rgba(61, 107, 255, 0.14);
-
-  --vp-button-brand-bg: #3d6bff;
-  --vp-button-brand-hover-bg: #2e54cc;
-  --vp-button-brand-active-bg: #2749ad;
-  --vp-button-brand-border: transparent;
-  --vp-button-brand-text: #ffffff;
-  --vp-button-brand-hover-border: transparent;
-  --vp-button-brand-hover-text: #ffffff;
-
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #6e90ff 10%, #3d6bff);
-  --vp-home-hero-image-background-image: linear-gradient(120deg, rgba(61, 107, 255, 0.5), rgba(110, 144, 255, 0.35));
-  --vp-home-hero-image-filter: blur(56px);
+  --vp-font-family-base: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --vp-font-family-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
 }
 
-/* Dark is the default; Midnight scale with cool neutral text. */
+/* Dark is the only mode (appearance: force-dark), matching the app. */
+:root,
 .dark {
-  --vp-c-brand-1: #6e90ff;
-  --vp-c-brand-2: #3d6bff;
-  --vp-c-brand-3: #3d6bff;
-  --vp-c-brand-soft: rgba(61, 107, 255, 0.16);
+  --gi-midnight: #0a0f1e;
+  --gi-panel: #111113;
+  --gi-raised: #18181b;
+  --gi-border: #27272a;
+  --gi-border-strong: #3f3f46;
+  --gi-text: #fafafa;
+  --gi-text-2: #a1a1aa;
+  --gi-text-3: #71717a;
+  --gi-brand: #3d6bff;
+  --gi-brand-hover: #6e90ff;
 
-  --vp-c-bg: #0a0f1e;
-  --vp-c-bg-alt: #070b16;
-  --vp-c-bg-soft: #121829;
-  --vp-c-bg-elv: #121829;
+  /* Surfaces */
+  --vp-c-bg: var(--gi-midnight);
+  --vp-c-bg-alt: #0b0f1c;
+  --vp-c-bg-soft: var(--gi-panel);
+  --vp-c-bg-elv: var(--gi-raised);
 
-  --vp-c-divider: #1e2638;
-  --vp-c-border: #222b40;
+  /* Lines */
+  --vp-c-divider: var(--gi-raised);
+  --vp-c-border: var(--gi-border);
   --vp-c-gutter: #060913;
 
-  --vp-c-text-1: #eef1f5;
-  --vp-c-text-2: #aab2c5;
-  --vp-c-text-3: #5b6478;
+  /* Text */
+  --vp-c-text-1: var(--gi-text);
+  --vp-c-text-2: var(--gi-text-2);
+  --vp-c-text-3: var(--gi-text-3);
 
-  --vp-button-brand-text: #ffffff;
-  --vp-home-hero-image-background-image: linear-gradient(120deg, rgba(61, 107, 255, 0.45), rgba(110, 144, 255, 0.25));
+  /* Brand: Route Blue for links and focus only. */
+  --vp-c-brand-1: var(--gi-brand-hover);
+  --vp-c-brand-2: var(--gi-brand);
+  --vp-c-brand-3: var(--gi-brand);
+  --vp-c-brand-soft: rgba(61, 107, 255, 0.14);
+
+  /* Primary button is white on Midnight, like the app's primary action. */
+  --vp-button-brand-bg: var(--gi-text);
+  --vp-button-brand-text: var(--gi-midnight);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-bg: #ffffff;
+  --vp-button-brand-hover-text: var(--gi-midnight);
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-bg: #e4e4e7;
+  --vp-button-brand-active-text: var(--gi-midnight);
+
+  /* Secondary button reads as an app panel. */
+  --vp-button-alt-bg: var(--gi-panel);
+  --vp-button-alt-text: var(--gi-text);
+  --vp-button-alt-border: var(--gi-border);
+  --vp-button-alt-hover-bg: var(--gi-raised);
+  --vp-button-alt-hover-border: var(--gi-border-strong);
+  --vp-button-alt-hover-text: var(--gi-text);
+
+  /* Inline code and blocks on the zinc panel. */
+  --vp-c-bg-soft-up: var(--gi-raised);
+  --vp-code-bg: rgba(255, 255, 255, 0.05);
+  --vp-code-block-bg: #0b0d14;
 }
 
-/* Keep the single accent restrained, matching the app's "use Route Blue sparingly" rule. */
+/* Radius matches the app's 0.75rem. */
+:root {
+  --vp-code-block-radius: 12px;
+}
+
+/* Hero: drop the VitePress gradient blob and the gradient wordmark. */
+.VPHero .name {
+  --vp-home-hero-name-color: var(--gi-text);
+  --vp-home-hero-name-background: transparent;
+  letter-spacing: -0.02em;
+}
+.VPHero .image-bg {
+  display: none;
+}
+.VPHero .VPImage {
+  filter: none;
+  max-width: 220px;
+}
+.VPHero .text {
+  color: var(--gi-text-2);
+}
+
+/* Feature cards become Midnight panels with a hairline border. */
+.VPFeature {
+  background-color: var(--gi-panel);
+  border: 1px solid var(--gi-border);
+  border-radius: 14px;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+.VPFeature:hover {
+  border-color: var(--gi-brand);
+  background-color: var(--gi-raised);
+}
+.VPFeature .icon {
+  background-color: var(--gi-raised);
+  border: 1px solid var(--gi-border);
+  border-radius: 10px;
+}
+
+/* Nav and sidebar sit flush on Midnight, no translucent wash. */
+.VPNavBar,
 .VPNavBar.has-sidebar .content-body {
+  background-color: transparent !important;
+}
+.VPNavBar.has-sidebar .title {
   background-color: transparent;
+  border-right-color: var(--gi-border);
+}
+
+/* Local search box reads as an app input with a Route Blue focus ring. */
+.DocSearch-Button,
+.VPNavBarSearchButton {
+  border: 1px solid var(--gi-border);
+  border-radius: 10px;
+  background-color: var(--gi-panel);
+}
+
+/* The one accent: thin Route Blue edge on the active sidebar item. */
+.VPSidebarItem.is-active > .item .text {
+  color: var(--gi-brand-hover);
 }
