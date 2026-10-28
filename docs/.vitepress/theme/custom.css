@@ -133,10 +133,10 @@
 }
 
 /* Home showcase: framed app screenshots instead of one bare full-width image. */
+/* The home content already carries the page gutter; cap at the features width and center so the frames line up with the cards. */
 .gi-showcase {
-  max-width: 1100px;
+  max-width: 1152px;
   margin: 12px auto 0;
-  padding: 0 24px;
   display: flex;
   flex-direction: column;
   gap: 20px;
