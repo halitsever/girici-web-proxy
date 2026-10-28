@@ -12,6 +12,8 @@
 <br/>
 <img src="https://img.shields.io/github/sponsors/halitsever"/> 
   <img src="https://img.shields.io/github/license/halitsever/girici-web-proxy"/> 
+  <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/pulls/halitsever/girici-web-proxy"/></a> 
+  <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker"/></a> 
 </p>
 </p>
 
