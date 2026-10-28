@@ -5,6 +5,7 @@ import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import { loadHistory, rememberVisit, relativeTime, type HistoryEntry } from "@/lib/history";
 import { loadSettings } from "@/lib/settings";
 import { classifyInput, toProxyPath } from "@/lib/target";
+import { getRandomTagline } from "@/data/taglines";
 
 interface Row {
   index: number;
@@ -26,6 +27,7 @@ const SUGGESTIONS = [
 
 const settings = ref(loadSettings());
 const history = ref<HistoryEntry[]>([]);
+const tagline = getRandomTagline();
 const query = ref("");
 const selectedIndex = ref(0);
 const error = ref<string | null>(null);
@@ -171,7 +173,7 @@ onMounted(() => {
     style="padding-top: clamp(40px, 12vh, 120px)"
   >
     <h1 class="text-center text-[clamp(26px,5vw,36px)] font-semibold tracking-[-0.035em] text-balance">
-      It's a nice day to unblock websites.
+      {{ tagline }}
     </h1>
     <p class="mt-3 mb-8 text-[15px] text-muted-foreground">Type a URL or search. Everything routes through Girici.</p>
 
