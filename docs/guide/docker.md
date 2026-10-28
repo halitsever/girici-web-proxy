@@ -30,8 +30,8 @@ volumes:
 ```
 
 ::: tip
-Until v2.0.0 is released, the published `latest` tag is still v1. Use `build: .` to run v2 from this
-repository, as the compose file does.
+`latest` is v2 (v2.0.0 and newer); the last v1 image stays available as `halitsever/girici-web-proxy:v1`.
+Keep `build: .` to run v2 from this repository instead of the published image.
 :::
 
 ## Plain docker run

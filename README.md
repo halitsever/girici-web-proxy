@@ -15,8 +15,8 @@
 </p>
 </p>
 
-> **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is being developed on
-> `main`. The Docker image tagged `latest` is still v1.
+> **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.
+> `latest` now points to v2; the last v1 image stays available as `halitsever/girici-web-proxy:v1`.
 
 <a align="center">
 <img src="https://halitsever-api.vercel.app/api/details"/>
@@ -60,7 +60,8 @@ Girici listens on http://localhost:3000.
 docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
 ```
 
-Until v2.0.0 is released, the `latest` image is still v1. To build and run v2 locally:
+`latest` runs v2 (v2.0.0 and newer). The last v1 image stays available as `halitsever/girici-web-proxy:v1`. To
+build and run from source instead:
 
 ```
 docker compose up --build
