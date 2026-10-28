@@ -23,7 +23,13 @@ async function withAdmin(): Promise<{ base: string; store: AuthStore; cookie: st
   return { base, store, cookie: `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}` };
 }
 
-function post(base: string, path: string, body: unknown, cookie?: string, origin: string | null = base): Promise<Response> {
+function post(
+  base: string,
+  path: string,
+  body: unknown,
+  cookie?: string,
+  origin: string | null = base,
+): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (origin) headers.origin = origin;
   if (cookie) headers.cookie = cookie;
@@ -53,7 +59,9 @@ describe("adminRouter account", () => {
 
   it("rejects a cross-origin update", async () => {
     const { base, cookie } = await withAdmin();
-    expect((await post(base, "/_g/account", { name: "X", email: "x@x.x" }, cookie, "https://evil.test")).status).toBe(403);
+    expect((await post(base, "/_g/account", { name: "X", email: "x@x.x" }, cookie, "https://evil.test")).status).toBe(
+      403,
+    );
   });
 
   it("does not change the profile when the new password is too short", async () => {

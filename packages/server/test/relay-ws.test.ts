@@ -10,7 +10,8 @@ import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
 import { attachWsRelay, mapCloseCode, validateWsTarget } from "../src/ws/relay-ws.ts";
 
 const policy = { allowedTestHosts: new Set<string>() };
-const noopLookup = ((_h: string, _o: unknown, cb: (e: null, a: string, f: number) => void) => cb(null, "127.0.0.1", 4)) as never;
+const noopLookup = ((_h: string, _o: unknown, cb: (e: null, a: string, f: number) => void) =>
+  cb(null, "127.0.0.1", 4)) as never;
 const logger = createLogger("error", () => {});
 const cleanups: Array<() => void> = [];
 afterEach(() => {

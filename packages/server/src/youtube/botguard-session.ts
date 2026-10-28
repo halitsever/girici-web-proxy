@@ -17,8 +17,10 @@ function ensureDom(): void {
   if (domReady) return;
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://www.youtube.com/" });
   Object.assign(globalThis, { window: dom.window, document: dom.window.document });
-  if (!(globalThis as { origin?: string }).origin) (globalThis as { origin?: string }).origin = "https://www.youtube.com";
-  if (!globalThis.navigator) Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
+  if (!(globalThis as { origin?: string }).origin)
+    (globalThis as { origin?: string }).origin = "https://www.youtube.com";
+  if (!globalThis.navigator)
+    Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
   domReady = true;
 }
 
@@ -38,7 +40,11 @@ export async function createBotGuardSession(): Promise<PoSession> {
   if (!challenge?.program || !challenge.globalName) throw new Error("botguard challenge incomplete");
 
   new Function(await interpreterSource(challenge))();
-  const client = await BotGuardClient.create({ program: challenge.program, globalName: challenge.globalName, globalObject: globalThis });
+  const client = await BotGuardClient.create({
+    program: challenge.program,
+    globalName: challenge.globalName,
+    globalObject: globalThis,
+  });
   const webPoSignalOutput: Parameters<typeof WebPoMinter.create>[1] = [];
   const botguardResponse = await client.snapshot({ webPoSignalOutput });
 

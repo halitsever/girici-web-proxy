@@ -19,6 +19,11 @@ export async function buildWsPrep(
   if (!ws || (ws.protocol !== "ws:" && ws.protocol !== "wss:")) return null;
   const target = new URL(ws.href);
   target.protocol = ws.protocol === "wss:" ? "https:" : "http:";
-  const cookie = await cookies.header(target, { initiator: pageUrl, credentials: "include", topLevel: false, method: "GET" });
+  const cookie = await cookies.header(target, {
+    initiator: pageUrl,
+    credentials: "include",
+    topLevel: false,
+    method: "GET",
+  });
   return { cookie, origin: pageUrl?.origin ?? target.origin };
 }

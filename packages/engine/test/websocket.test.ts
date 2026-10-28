@@ -87,7 +87,11 @@ describe("installWebSocket", () => {
     const inner = MockWs.instances[0]!;
 
     inner.onopen!();
-    expect(JSON.parse(inner.sent[0] as string)).toMatchObject({ u: "wss://gateway.discord.gg/", c: "sess=1", o: "https://discord.com" });
+    expect(JSON.parse(inner.sent[0] as string)).toMatchObject({
+      u: "wss://gateway.discord.gg/",
+      c: "sess=1",
+      o: "https://discord.com",
+    });
     expect(events).toEqual([]);
     expect(ws.readyState).toBe(0);
 

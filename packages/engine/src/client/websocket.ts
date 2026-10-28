@@ -97,7 +97,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
         else this.#inner?.close();
         return;
       }
-      if (data instanceof ArrayBuffer && this.binaryType === "blob") this.#emit(new win.MessageEvent("message", { data: new win.Blob([data]) }));
+      if (data instanceof ArrayBuffer && this.binaryType === "blob")
+        this.#emit(new win.MessageEvent("message", { data: new win.Blob([data]) }));
       else this.#emit(new win.MessageEvent("message", { data }));
     }
 

@@ -56,7 +56,11 @@ export async function spliceDirectStreams(
   const headers = new Headers(request.headers);
   headers.set("x-youtube-client-name", SPLICE_CLIENT.id);
   headers.set("x-youtube-client-version", SPLICE_CLIENT.version);
-  const replay = new Request(request.url, { method: "POST", headers, body: new TextEncoder().encode(JSON.stringify(body)) });
+  const replay = new Request(request.url, {
+    method: "POST",
+    headers,
+    body: new TextEncoder().encode(JSON.stringify(body)),
+  });
 
   const result = await transport.send(replay, { target, clientUrl, isNavigation: false, cookie });
   if (!result.ok || !result.response.body) return null;

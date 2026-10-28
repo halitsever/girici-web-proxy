@@ -25,7 +25,16 @@ interface ControlFrame {
   o?: string;
 }
 
-export type Dial = (target: URL, init: { headers: Record<string, string>; protocols: string[]; lookup: LookupFunction; maxPayload: number; handshakeTimeout: number }) => WebSocket;
+export type Dial = (
+  target: URL,
+  init: {
+    headers: Record<string, string>;
+    protocols: string[];
+    lookup: LookupFunction;
+    maxPayload: number;
+    handshakeTimeout: number;
+  },
+) => WebSocket;
 
 export interface WsRelayOptions {
   allowedTestHosts: ReadonlySet<string>;
@@ -47,7 +56,8 @@ export function mapCloseCode(code: number): number {
 
 /** ws/wss only, with the same SSRF rules as the HTTP relay, checked against the http(s) equivalent. */
 export function validateWsTarget(url: URL, policy: TargetPolicy): void {
-  if (url.protocol !== "ws:" && url.protocol !== "wss:") throw new SsrfBlockedError(`Scheme ${url.protocol} is not allowed`);
+  if (url.protocol !== "ws:" && url.protocol !== "wss:")
+    throw new SsrfBlockedError(`Scheme ${url.protocol} is not allowed`);
   const httpEquivalent = new URL(url.href);
   httpEquivalent.protocol = url.protocol === "wss:" ? "https:" : "http:";
   validateTarget(httpEquivalent, policy);
@@ -114,7 +124,11 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): void {
   });
 }
 
-function bridge(client: WebSocket, req: IncomingMessage, options: Required<Pick<WsRelayOptions, "dial" | "maxPayload">> & WsRelayOptions): void {
+function bridge(
+  client: WebSocket,
+  req: IncomingMessage,
+  options: Required<Pick<WsRelayOptions, "dial" | "maxPayload">> & WsRelayOptions,
+): void {
   const firstFrameTimer = setTimeout(() => client.close(1008, "no control frame"), FIRST_FRAME_MS);
   client.once("message", (data, isBinary) => {
     clearTimeout(firstFrameTimer);

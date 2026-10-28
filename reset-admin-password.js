@@ -52,4 +52,8 @@ console.log(`Password reset for admin "${admin.username}".`);
 console.log();
 console.log(`  New password:  ${password}`);
 console.log();
-console.log(envSecret ? "Sign in with it on the login page." : "All other sessions have been signed out. Sign in with it on the login page.");
+console.log(
+  envSecret
+    ? "Sign in with it on the login page."
+    : "All other sessions have been signed out. Sign in with it on the login page.",
+);

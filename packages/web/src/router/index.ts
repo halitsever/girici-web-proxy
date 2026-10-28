@@ -9,9 +9,24 @@ const router = createRouter({
   routes: [
     { path: "/", name: "browse", component: () => import("@/views/Browse/BrowseView.vue") },
     { path: "/settings", name: "settings", component: () => import("@/views/Settings/SettingsView.vue") },
-    { path: "/account", name: "account", component: () => import("@/views/Account/AccountView.vue"), meta: { auth: true } },
-    { path: SETUP_PATH, name: "setup", component: () => import("@/views/Setup/SetupView.vue"), meta: { chromeless: true } },
-    { path: LOGIN_PATH, name: "login", component: () => import("@/views/Login/LoginView.vue"), meta: { chromeless: true } },
+    {
+      path: "/account",
+      name: "account",
+      component: () => import("@/views/Account/AccountView.vue"),
+      meta: { auth: true },
+    },
+    {
+      path: SETUP_PATH,
+      name: "setup",
+      component: () => import("@/views/Setup/SetupView.vue"),
+      meta: { chromeless: true },
+    },
+    {
+      path: LOGIN_PATH,
+      name: "login",
+      component: () => import("@/views/Login/LoginView.vue"),
+      meta: { chromeless: true },
+    },
     { path: "/:pathMatch(.*)*", redirect: "/" },
   ],
 });

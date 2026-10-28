@@ -71,7 +71,9 @@ onMounted(async () => {
 <template>
   <div class="mx-auto flex w-full max-w-[680px] flex-col gap-6 px-4" style="padding-top: clamp(28px, 6vh, 56px)">
     <div class="flex items-center gap-4">
-      <div class="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-gi-brand text-[20px] font-semibold text-white">
+      <div
+        class="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-gi-brand text-[20px] font-semibold text-white"
+      >
         {{ monogram }}
       </div>
       <div class="min-w-0">

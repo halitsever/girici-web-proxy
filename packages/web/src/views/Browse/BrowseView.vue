@@ -52,15 +52,36 @@ const rows = computed<Row[]>(() => {
   const push = (row: Omit<Row, "index">) => out.push({ ...row, index: out.length });
   const res = resolution.value;
   if (res.kind === "url") push({ group: "Open", key: "open", kind: "open-url", label: res.display, path: res.path });
-  else if (res.kind === "search") push({ group: "Open", key: "open", kind: "open-search", label: `Search ${res.engine} for “${query.value.trim()}”`, path: res.path });
+  else if (res.kind === "search")
+    push({
+      group: "Open",
+      key: "open",
+      kind: "open-search",
+      label: `Search ${res.engine} for “${query.value.trim()}”`,
+      path: res.path,
+    });
   if (!q && history.value.length) {
     for (const entry of history.value.slice(0, 3)) {
-      push({ group: "Recent", key: `r:${entry.name}`, kind: "recent", label: entry.name, time: relativeTime(entry.t), path: toProxyPath(entry.name) ?? "" });
+      push({
+        group: "Recent",
+        key: `r:${entry.name}`,
+        kind: "recent",
+        label: entry.name,
+        time: relativeTime(entry.t),
+        path: toProxyPath(entry.name) ?? "",
+      });
     }
   }
   for (const s of SUGGESTIONS) {
     if (!q || s.name.toLowerCase().includes(q) || s.host.includes(q)) {
-      push({ group: "Suggestions", key: `s:${s.host}`, kind: "suggestion", label: s.name, host: s.host, path: toProxyPath(s.host) ?? "" });
+      push({
+        group: "Suggestions",
+        key: `s:${s.host}`,
+        kind: "suggestion",
+        label: s.name,
+        host: s.host,
+        path: toProxyPath(s.host) ?? "",
+      });
     }
   }
   return out;
@@ -92,7 +113,10 @@ function move(delta: number) {
 
 async function openRow(row: Row | undefined) {
   if (!row || !row.path) return;
-  const support = serviceWorkerSupport({ isSecureContext: window.isSecureContext, hasServiceWorker: "serviceWorker" in navigator });
+  const support = serviceWorkerSupport({
+    isSecureContext: window.isSecureContext,
+    hasServiceWorker: "serviceWorker" in navigator,
+  });
   if (support === "insecure") {
     error.value = "Girici needs HTTPS (or localhost) to run in this browser.";
     return;
@@ -142,7 +166,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-[1120px] flex-col items-center px-4" style="padding-top: clamp(40px, 12vh, 120px)">
+  <div
+    class="mx-auto flex w-full max-w-[1120px] flex-col items-center px-4"
+    style="padding-top: clamp(40px, 12vh, 120px)"
+  >
     <h1 class="text-center text-[clamp(26px,5vw,36px)] font-semibold tracking-[-0.035em] text-balance">
       It's a nice day to unblock websites.
     </h1>
@@ -218,13 +245,19 @@ onMounted(() => {
               <span v-if="row.host" class="truncate font-mono text-[12px] text-gi-subtle">{{ row.host }}</span>
             </span>
 
-            <span v-if="row.kind === 'open-url' || row.kind === 'open-search'" class="shrink-0 font-mono text-[12px] text-gi-subtle">↵</span>
+            <span
+              v-if="row.kind === 'open-url' || row.kind === 'open-search'"
+              class="shrink-0 font-mono text-[12px] text-gi-subtle"
+              >↵</span
+            >
             <span v-else-if="row.time" class="shrink-0 font-mono text-[12px] text-gi-subtle">{{ row.time }}</span>
           </button>
         </template>
       </div>
 
-      <div class="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 font-mono text-[12px]">
+      <div
+        class="flex min-h-10 flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 font-mono text-[12px]"
+      >
         <span v-if="error" class="text-gi-danger">{{ error }}</span>
         <span v-else-if="success" class="text-gi-success">{{ success }}</span>
         <span v-else class="text-gi-subtle">Routed via Girici</span>

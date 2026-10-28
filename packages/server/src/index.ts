@@ -27,7 +27,9 @@ try {
   mkdirSync(config.dataDir, { recursive: true });
   authStore = new AuthStore(openDb(join(config.dataDir, "girici.db")), config.sessionSecret);
 } catch (error) {
-  logger.error(`Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`);
+  logger.error(
+    `Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`,
+  );
   process.exit(1);
 }
 if (!existsSync(join(webDistDir, "index.html"))) {

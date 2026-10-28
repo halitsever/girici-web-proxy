@@ -15,7 +15,10 @@ export default defineConfig({
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["meta", { name: "theme-color", content: "#0A0F1E" }],
     ["meta", { property: "og:title", content: "Girici" }],
-    ["meta", { property: "og:description", content: "A self-hosted web proxy built on its own service worker engine." }],
+    [
+      "meta",
+      { property: "og:description", content: "A self-hosted web proxy built on its own service worker engine." },
+    ],
   ],
   themeConfig: {
     logo: "/girici-icon-dark.svg",

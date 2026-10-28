@@ -127,7 +127,9 @@ describe("buildPageResponse", () => {
       context({ target: new URL("https://site-a.test/dir/page"), navigation: true, destination: "document" }),
     );
     expect(nav.status).toBe(303);
-    expect(nav.headers.get("location")).toBe(`${origin}/_g/login?next=${encodeURIComponent("https://site-a.test/dir/page")}`);
+    expect(nav.headers.get("location")).toBe(
+      `${origin}/_g/login?next=${encodeURIComponent("https://site-a.test/dir/page")}`,
+    );
     expect((await buildPageResponse(unauth, context())).type).toBe("error");
   });
 

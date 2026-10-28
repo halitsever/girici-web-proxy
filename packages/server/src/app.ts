@@ -28,7 +28,16 @@ export interface AppOptions {
   poToken?: PoTokenSource;
 }
 
-export function createApp({ webDistDir, engineBundlesDir, sourceUrl, logger, authStore, trustProxy, relay, poToken }: AppOptions): Express {
+export function createApp({
+  webDistDir,
+  engineBundlesDir,
+  sourceUrl,
+  logger,
+  authStore,
+  trustProxy,
+  relay,
+  poToken,
+}: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
   // req.ip (the login rate-limit key) comes from X-Forwarded-For when this is set. Behind a proxy

@@ -41,14 +41,29 @@ describe("isYtPlayer", () => {
 });
 
 describe("spliceDirectStreams", () => {
-  const body = { context: { client: { clientName: "WEB", visitorData: "VD" } }, videoId: "B1", serviceIntegrityDimensions: { poToken: "WEBTOK" } };
+  const body = {
+    context: { client: { clientName: "WEB", visitorData: "VD" } },
+    videoId: "B1",
+    serviceIntegrityDimensions: { poToken: "WEBTOK" },
+  };
 
   it("swaps to MWEB, carries a minted poToken, drops SABR and progressive", async () => {
-    const alt = { streamingData: { serverAbrStreamingUrl: "x", adaptiveFormats: [{ itag: 251 }], formats: [{ itag: 18 }] } };
+    const alt = {
+      streamingData: { serverAbrStreamingUrl: "x", adaptiveFormats: [{ itag: 251 }], formats: [{ itag: 18 }] },
+    };
     const { transport, sent } = altTransport(alt);
     const { bytes, request } = playerRequest(body);
 
-    const result = await spliceDirectStreams(bytes, WEB, request, new URL("https://www.youtube.com/youtubei/v1/player"), null, null, transport, async () => "POT123");
+    const result = await spliceDirectStreams(
+      bytes,
+      WEB,
+      request,
+      new URL("https://www.youtube.com/youtubei/v1/player"),
+      null,
+      null,
+      transport,
+      async () => "POT123",
+    );
 
     expect(sent().context).toMatchObject({ client: { clientName: "MWEB" } });
     expect(sent().serviceIntegrityDimensions).toEqual({ poToken: "POT123" });
@@ -63,17 +78,39 @@ describe("spliceDirectStreams", () => {
     const { transport, sent } = altTransport(alt);
     const { bytes, request } = playerRequest(body);
 
-    const result = await spliceDirectStreams(bytes, WEB, request, new URL("https://www.youtube.com/youtubei/v1/player"), null, null, transport, async () => null);
+    const result = await spliceDirectStreams(
+      bytes,
+      WEB,
+      request,
+      new URL("https://www.youtube.com/youtubei/v1/player"),
+      null,
+      null,
+      transport,
+      async () => null,
+    );
 
     expect(sent().serviceIntegrityDimensions).toBeUndefined();
     expect(result).not.toBeNull();
   });
 
   it("falls back when the alt request fails at the relay", async () => {
-    const transport: Transport = { async send() { return { ok: false, code: "connect", status: 502 }; } };
+    const transport: Transport = {
+      async send() {
+        return { ok: false, code: "connect", status: 502 };
+      },
+    };
     const { bytes, request } = playerRequest(body);
 
-    const result = await spliceDirectStreams(bytes, WEB, request, new URL("https://www.youtube.com/youtubei/v1/player"), null, null, transport, async () => "POT123");
+    const result = await spliceDirectStreams(
+      bytes,
+      WEB,
+      request,
+      new URL("https://www.youtube.com/youtubei/v1/player"),
+      null,
+      null,
+      transport,
+      async () => "POT123",
+    );
 
     expect(result).toBeNull();
   });
@@ -82,7 +119,16 @@ describe("spliceDirectStreams", () => {
     const { transport } = altTransport({ playabilityStatus: { status: "ERROR" } });
     const { bytes, request } = playerRequest(body);
 
-    const result = await spliceDirectStreams(bytes, WEB, request, new URL("https://www.youtube.com/youtubei/v1/player"), null, null, transport, async () => "POT123");
+    const result = await spliceDirectStreams(
+      bytes,
+      WEB,
+      request,
+      new URL("https://www.youtube.com/youtubei/v1/player"),
+      null,
+      null,
+      transport,
+      async () => "POT123",
+    );
 
     expect(result).toBeNull();
   });

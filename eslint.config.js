@@ -4,7 +4,17 @@ import pluginVue from "eslint-plugin-vue";
 import globals from "globals";
 
 export default defineConfigWithVueTs(
-  { ignores: ["**/dist/**", "**/node_modules/**", "coverage/**", "test-results/**", "playwright-report/**", "packages/web/src/components/ui/**", "docs/**"] },
+  {
+    ignores: [
+      "**/dist/**",
+      "**/node_modules/**",
+      "coverage/**",
+      "test-results/**",
+      "playwright-report/**",
+      "packages/web/src/components/ui/**",
+      "docs/**",
+    ],
+  },
   pluginVue.configs["flat/essential"],
   vueTsConfigs.recommended,
   { files: ["packages/web/src/**/*.{ts,vue}"], languageOptions: { globals: globals.browser } },

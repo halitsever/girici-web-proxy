@@ -69,13 +69,20 @@ onMounted(async () => {
           <p class="text-[14px] font-medium">Search engine</p>
           <p class="text-[13px] text-muted-foreground">Used when what you type isn't a URL.</p>
         </div>
-        <div class="grid gap-1 rounded-[10px] border border-border bg-card p-1" style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))">
+        <div
+          class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
+          style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
+        >
           <button
             v-for="engine in engines"
             :key="engine"
             type="button"
             class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
-            :class="settings.engine === engine ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'"
+            :class="
+              settings.engine === engine
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            "
             @click="settings.engine = engine"
           >
             {{ engine }}
@@ -140,12 +147,10 @@ onMounted(async () => {
           Clear all
         </button>
       </div>
-      <div
-        v-for="entry in history"
-        :key="entry.name"
-        class="flex items-center gap-3 border-t border-border px-5 py-3"
-      >
-        <span class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]">
+      <div v-for="entry in history" :key="entry.name" class="flex items-center gap-3 border-t border-border px-5 py-3">
+        <span
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
+        >
           {{ entry.name.charAt(0).toUpperCase() }}
         </span>
         <span class="min-w-0 flex-1 truncate text-[14px]">{{ entry.name }}</span>

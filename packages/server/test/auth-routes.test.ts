@@ -80,7 +80,9 @@ describe("authRouter login and logout", () => {
     const base = await withAdmin();
     const res = await post(base, "/_g/logout", {});
     expect(res.status).toBe(204);
-    expect(res.headers.getSetCookie().some((c) => c.startsWith("__Host-girici=") && /Expires=|Max-Age=0/.test(c))).toBe(true);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith("__Host-girici=") && /Expires=|Max-Age=0/.test(c))).toBe(
+      true,
+    );
   });
 
   it("rate-limits repeated login attempts", async () => {

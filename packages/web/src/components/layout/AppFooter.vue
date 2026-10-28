@@ -10,7 +10,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <footer class="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-5 text-[13px] text-gi-subtle">
+  <footer
+    class="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-x-6 gap-y-3 px-4 py-5 text-[13px] text-gi-subtle"
+  >
     <p class="min-w-0">
       {{ fact.text }}
       <a
