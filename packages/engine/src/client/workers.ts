@@ -1,10 +1,12 @@
+import { encodeUrl } from "../shared/codec.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 declare const __GIRICI_WORKER__: string;
 
 /** Workers load through a bootstrap that installs the worker runtime first, so their code stays inside the proxy. */
 export function installWorkers(win: Realm, ctx: UrlContext): void {
-  const runtimeUrl = win.location.origin + __GIRICI_WORKER__;
+  // A blank frame's own location is about:blank, whose origin is "null"; the runtime lives on our origin.
+  const runtimeUrl = ctx.origin + __GIRICI_WORKER__;
   for (const name of ["Worker", "SharedWorker"] as const) wrap(win, name, ctx, runtimeUrl);
 }
 
@@ -36,8 +38,8 @@ function bootstrap(
     scriptUrl = rawUrl;
     base = ctx.realUrl().href;
   } else {
-    // A relative worker URL resolves against the document, so the proxied value is resolved against its proxy URL.
-    scriptUrl = new URL(ctx.toProxy(rawUrl), win.location.href).href;
+    // A blank frame's address is about:blank, so relative worker URLs resolve against the proxy URL of the page's base.
+    scriptUrl = new URL(ctx.toProxy(rawUrl), new URL(encodeUrl(ctx.realBase()), ctx.origin)).href;
     base = ctx.fromProxy(scriptUrl);
   }
   const b = JSON.stringify(base);

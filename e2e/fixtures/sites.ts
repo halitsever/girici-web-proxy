@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
@@ -432,6 +433,86 @@ const POSTMESSAGE = page(
 
 const PM_CHILD = page("PM child", `<script>parent.postMessage("hello", location.origin);</script>`);
 
+// The page touches the frame before it loads, as reCAPTCHA does, and both sides check who sent each message.
+const PM_SOURCE = page(
+  "PostMessage source",
+  `<pre id="results"></pre>
+<script>
+  const frame = document.createElement("iframe");
+  frame.src = "https://site-b.test/pm-source-child";
+  document.body.appendChild(frame);
+  const child = frame.contentWindow;
+  const out = {};
+  window.addEventListener("message", (event) => {
+    if (event.data === "ready") {
+      out.readyOrigin = event.origin;
+      out.readyFromChild = event.source === child;
+      child.postMessage("ping", "https://site-b.test");
+    } else {
+      Object.assign(out, event.data);
+      document.getElementById("results").textContent = JSON.stringify(out);
+    }
+  });
+</script>`,
+);
+
+const PM_SOURCE_CHILD = page(
+  "PostMessage source child",
+  `<script>
+  window.addEventListener("message", (event) => {
+    if (event.data !== "ping") return;
+    parent.postMessage({ pingFromParent: event.source === parent, pingOrigin: event.origin }, "https://site-a.test");
+  });
+  parent.postMessage("ready", "https://site-a.test");
+</script>`,
+);
+
+// Workers come from a blank frame's constructor, the way anti-tamper code reaches for untouched natives.
+const FRAME_WORKER = page(
+  "Frame worker",
+  `<pre id="results"></pre>
+<script>
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const FrameWorker = frame.contentWindow.Worker;
+  const out = {};
+  let pending = 2;
+  const done = (key, value) => {
+    out[key] = value;
+    if (--pending === 0) document.getElementById("results").textContent = JSON.stringify(out);
+  };
+  const blob = new FrameWorker(URL.createObjectURL(new Blob(['postMessage("blob ok")'], { type: "text/javascript" })));
+  blob.onmessage = (event) => done("blob", event.data);
+  blob.onerror = () => done("blob", "error");
+  try {
+    const classic = new FrameWorker("/worker-classic.js");
+    classic.onmessage = (event) => done("classic", event.data);
+    classic.onerror = () => done("classic", "error");
+  } catch (error) {
+    done("classic", "threw " + error.name);
+  }
+</script>`,
+);
+
+// Both scripts read location, so the proxy rewrites them and the hashes below stop matching what it serves.
+const SRI_A = 'document.getElementById("a").textContent = location.hostname;';
+const SRI_B = 'document.getElementById("b").textContent = location.hostname;';
+const sha384 = (body: string) => `sha384-${createHash("sha384").update(body).digest("base64")}`;
+const SRI = page(
+  "SRI",
+  `<p id="a"></p><p id="b"></p>
+<script>
+  const a = document.createElement("script");
+  a.src = "/sri-a.js";
+  a.integrity = "${sha384(SRI_A)}";
+  document.head.appendChild(a);
+  const b = document.createElement("script");
+  b.setAttribute("src", "/sri-b.js");
+  b.setAttribute("integrity", "${sha384(SRI_B)}");
+  document.head.appendChild(b);
+</script>`,
+);
+
 const SRCDOC_ESCAPE = page(
   "Srcdoc escape",
   `<iframe srcdoc="<script>fetch('https://site-b.test/api').catch(function(){})<\/script>"></iframe>`,
@@ -524,6 +605,11 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/frames": html(FRAMES),
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
+    "/pm-source": html(PM_SOURCE),
+    "/frame-worker": html(FRAME_WORKER),
+    "/sri": html(SRI),
+    "/sri-a.js": script(SRI_A),
+    "/sri-b.js": script(SRI_B),
     "/notify": html(NOTIFY),
     "/srcdoc-escape": html(SRCDOC_ESCAPE),
     "/raw-attr": html(RAW_ATTR),
@@ -567,6 +653,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/storage": html(STORAGE),
     "/idb-store": html(IDB_STORE),
     "/api": api,
+    "/pm-source-child": html(PM_SOURCE_CHILD),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

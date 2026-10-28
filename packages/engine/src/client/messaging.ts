@@ -1,18 +1,12 @@
-import { decodeUrl } from "../shared/codec.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+
+type Send = (...args: unknown[]) => void;
 
 /** Every proxied page runs on our origin, so postMessage targets and the origin reported to receivers are translated. */
 export function installMessaging(win: Realm, ctx: UrlContext): void {
-  const nativePost = win.postMessage.bind(win) as (...args: unknown[]) => void;
+  const nativePost = win.postMessage.bind(win) as Send;
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
-    if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
-      const options = targetOrigin as { targetOrigin?: unknown };
-      const decision = resolveTarget(options.targetOrigin, ctx);
-      if (decision.deliver) nativePost(message, { ...options, targetOrigin: decision.target }, ...rest);
-      return;
-    }
-    const decision = resolveTarget(targetOrigin, ctx);
-    if (decision.deliver) nativePost(message, decision.target, ...rest);
+    post(nativePost, ctx.realUrl().origin, ctx.origin, message, targetOrigin, rest);
   } as typeof win.postMessage;
 
   const descriptor = Object.getOwnPropertyDescriptor(win.MessageEvent.prototype, "origin");
@@ -21,28 +15,70 @@ export function installMessaging(win: Realm, ctx: UrlContext): void {
   Object.defineProperty(win.MessageEvent.prototype, "origin", {
     ...descriptor,
     get(this: MessageEvent) {
-      // The sender is on our origin too, so its real origin is read from its own address when reachable.
+      const origin = String(nativeOrigin.call(this));
+      if (origin !== ctx.origin) return origin;
+      // The sender is on our origin too; its own runtime knows its real origin, blank frames included.
       try {
-        const source = this.source as Window | null;
-        if (source) {
-          const href = source.location.href;
-          const real =
-            new URL(href).origin === ctx.origin ? decodeUrl(new URL(href).pathname + new URL(href).search) : null;
-          if (real) return real.origin;
-        }
+        if (isWindow(this.source)) return String(this.source.origin);
       } catch {
-        // A cross-origin or detached sender keeps the browser's own value.
+        // A detached sender keeps the browser's own value.
       }
-      return String(nativeOrigin.call(this));
+      return origin;
     },
   });
 }
 
 /**
- * The receiver (this window) runs on our origin, so a message addressed to a real origin is delivered as our origin
- * only when that origin is this page's real one; otherwise it is dropped, as the native origin check would.
+ * Rewritten `x.postMessage()` calls land here. The browser takes event.source from the realm that calls the native
+ * postMessage, so a window gets a stand-in that sends from this realm.
  */
-function resolveTarget(targetOrigin: unknown, ctx: UrlContext): { deliver: boolean; target?: unknown } {
+export function createMessageSender(win: Realm, ctx: UrlContext): (value: unknown) => unknown {
+  // Captured before installMessaging replaces it; window methods live on the window itself, not on Window.prototype.
+  const native = win.postMessage as unknown as (this: unknown, ...args: unknown[]) => void;
+  return (value) => {
+    let realOrigin: string;
+    try {
+      if (!isWindow(value)) return value;
+      realOrigin = String(value.origin);
+    } catch {
+      // A cross-origin window hides its origin, and its own postMessage needs no translation.
+      return value;
+    }
+    const send: Send = (...args) => native.apply(value, args);
+    return {
+      postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
+        post(send, realOrigin, ctx.origin, message, targetOrigin, rest),
+    };
+  };
+}
+
+function post(
+  send: Send,
+  realOrigin: string,
+  proxyOrigin: string,
+  message: unknown,
+  targetOrigin: unknown,
+  rest: unknown[],
+): void {
+  if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
+    const options = targetOrigin as { targetOrigin?: unknown };
+    const decision = resolveTarget(options.targetOrigin, realOrigin, proxyOrigin);
+    if (decision.deliver) send(message, { ...options, targetOrigin: decision.target }, ...rest);
+    return;
+  }
+  const decision = resolveTarget(targetOrigin, realOrigin, proxyOrigin);
+  if (decision.deliver) send(message, decision.target, ...rest);
+}
+
+/**
+ * The receiver runs on our origin, so a message addressed to a real origin is delivered as our origin only when that
+ * origin is the receiver's real one; otherwise it is dropped, as the native origin check would.
+ */
+function resolveTarget(
+  targetOrigin: unknown,
+  realOrigin: string,
+  proxyOrigin: string,
+): { deliver: boolean; target?: unknown } {
   if (typeof targetOrigin !== "string" || targetOrigin === "*" || targetOrigin === "/") {
     return { deliver: true, target: targetOrigin };
   }
@@ -53,5 +89,9 @@ function resolveTarget(targetOrigin: unknown, ctx: UrlContext): { deliver: boole
     return { deliver: true, target: targetOrigin };
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return { deliver: true, target: targetOrigin };
-  return url.origin === ctx.realUrl().origin ? { deliver: true, target: ctx.origin } : { deliver: false };
+  return url.origin === realOrigin ? { deliver: true, target: proxyOrigin } : { deliver: false };
+}
+
+function isWindow(value: unknown): value is Window {
+  return typeof value === "object" && value !== null && (value as { window?: unknown }).window === value;
 }

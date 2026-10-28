@@ -9,6 +9,7 @@ export interface HelperEnv {
   toProxy(raw: string): string;
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
+  messageTarget(value: unknown): unknown;
 }
 
 export interface GiriciHelpers {
@@ -21,6 +22,7 @@ export interface GiriciHelpers {
   I(spec: unknown): string;
   H(html: unknown): string;
   M(url: unknown): string;
+  P(value: unknown): unknown;
 }
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
@@ -64,5 +66,6 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     I: (spec) => env.rewrite.importSpecifier(String(spec)),
     H: (html) => env.rewrite.html(String(html)),
     M: (url) => env.rewrite.metaUrl(String(url)),
+    P: (value) => env.messageTarget(value),
   };
 }

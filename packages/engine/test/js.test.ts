@@ -29,6 +29,14 @@ describe("rewriteJs", () => {
     ["[eval][0](x)", "[__g$.ev][0](x)"],
     ["import(spec)", "import(__g$.I(spec))"],
     ["import(spec, { with: { type: 'json' } })", "import(__g$.I(spec), { with: { type: 'json' } })"],
+    ['parent.postMessage(m, "*")', '__g$.P(parent).postMessage(m, "*")'],
+    ["a.b.postMessage(location.href, o, [p])", "__g$.P(a.b).postMessage(__g$.L(location).href, o, [p])"],
+    ['w["postMessage"](m, o)', '__g$.P(w)["postMessage"](m, o)'],
+    ["(a || b).postMessage(m)", "(__g$.P(a || b)).postMessage(m)"],
+    ["(n.next = t, n = n.next, p).postMessage(m)", "(__g$.P((n.next = t, n = n.next, p))).postMessage(m)"],
+    ["w?.postMessage(m)", "__g$.P(w)?.postMessage(m)"],
+    ["w.postMessage?.(m)", "__g$.P(w).postMessage?.(m)"],
+    ["a?.b.postMessage(m)", "__g$.P(a?.b)?.postMessage(m)"],
   ])("rewrites %s", (input, output) => {
     expect(rewriteJs(input)).toBe(output);
   });
@@ -41,6 +49,13 @@ describe("rewriteJs", () => {
     "location += '#a'",
     'var s = "location";',
     "x = __g$.L(location).href",
+    "postMessage(m)",
+    "w.postMessage.call(w, m)",
+    "f = w.postMessage",
+    "new w.postMessage(m)",
+    "w[k](m)",
+    "class A extends B { f() { super.postMessage(m) } }",
+    "x = __g$.P(w).postMessage(m)",
   ])("leaves %s alone", (input) => {
     expect(rewriteJs(input)).toBe(input);
   });
@@ -66,6 +81,7 @@ describe("rewriteJs", () => {
     expect(STANDALONE_SHIM).toContain("I:");
     expect(STANDALONE_SHIM).toContain("H:");
     expect(STANDALONE_SHIM).toContain("M:");
+    expect(STANDALONE_SHIM).toContain("P:");
   });
 
   it("leaves module bindings alone", () => {
@@ -99,6 +115,7 @@ describe("rewriteJs", () => {
       "eval(code)",
       "import(spec)",
       "const e = eval; e(x)",
+      "a?.b.postMessage(m)",
     ]) {
       const once = rewriteJs(source);
       expect(rewriteJs(once)).toBe(once);

@@ -27,6 +27,10 @@ const SRCSET_PROPERTIES: Array<[string, string]> = [
   ["HTMLImageElement", "srcset"],
   ["HTMLSourceElement", "srcset"],
 ];
+const INTEGRITY_PROPERTIES: Array<[string, string]> = [
+  ["HTMLScriptElement", "integrity"],
+  ["HTMLLinkElement", "integrity"],
+];
 const LINK_ELEMENTS = ["HTMLAnchorElement", "HTMLAreaElement"];
 const LINK_PARTS = ["protocol", "host", "hostname", "port", "pathname", "search", "hash"] as const;
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
@@ -49,6 +53,15 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
       property,
       (value) => restoreAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
       (value) => rewriteAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
+    );
+  }
+  for (const [name, property] of INTEGRITY_PROPERTIES) {
+    wrap(
+      win,
+      name,
+      property,
+      (value) => value,
+      (value) => rewriteAttribute("script", property, value, ctx.realBase(), ctx.origin),
     );
   }
   for (const name of LINK_ELEMENTS) installLinkParts(win, name);
