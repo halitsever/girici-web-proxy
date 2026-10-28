@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in Girici does not work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. For security issues, use private reporting instead (see the Security tab).
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Girici version, image tag, or commit SHA you are running.
+      placeholder: "v2 main @ df221bc"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Enter ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: Target site (if relevant)
+      description: The site you were proxying when the bug appeared.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: "Chrome 156 on macOS 27"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console or server logs
+      description: Relevant output. Please redact anything sensitive.
+      render: shell
