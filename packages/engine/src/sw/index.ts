@@ -4,6 +4,7 @@ import {
   COOKIE_RPC_PATH,
   HEADER,
   PROTOCOL_VERSION,
+  WS_PREP_PATH,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
@@ -13,6 +14,7 @@ import { buildPageResponse } from "./page-response.ts";
 import { classifyRequest, realUrlOf } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { HttpRelayTransport } from "./transport.ts";
+import { buildWsPrep } from "./ws-prep.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -68,6 +70,10 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
     event.respondWith(handleCookieRpc(event));
+    return;
+  }
+  if (url.origin === self.location.origin && url.pathname === WS_PREP_PATH && event.request.method === "POST") {
+    event.respondWith(handleWsPrep(event));
     return;
   }
   if (url.origin === self.location.origin && isReservedPath(url.pathname)) return;
@@ -161,6 +167,23 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Hand the WebSocket shim the target's cookies and Origin, read from the jar as the page. */
+async function handleWsPrep(event: FetchEvent): Promise<Response> {
+  await cookies.ready();
+  const client = await clientOf(event);
+  const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
+  let rawUrl: unknown;
+  try {
+    rawUrl = ((await event.request.json()) as { url?: unknown }).url;
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+  if (typeof rawUrl !== "string") return new Response(null, { status: 400 });
+  const prep = await buildWsPrep(cookies, rawUrl, pageUrl);
+  if (!prep) return new Response(null, { status: 400 });
+  return new Response(JSON.stringify(prep), { headers: { "content-type": "application/json" } });
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {

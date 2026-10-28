@@ -16,6 +16,7 @@ export const HEADER = {
 /** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
 export const PROTOCOL_VERSION = 1;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
+export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const BROADCAST_CHANNEL = "__girici";
 
 /** A cookie as page scripts may see it; times are epoch milliseconds and a null expiry marks a session cookie. */

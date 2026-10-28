@@ -6,7 +6,9 @@ import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
 import { createUpstreamAgent } from "./upstream/agent.ts";
+import { createGuardedLookup } from "./upstream/ssrf.ts";
 import { createPoTokenMinter } from "./youtube/botguard-session.ts";
+import { attachWsRelay } from "./ws/relay-ws.ts";
 
 let config: Config;
 try {
@@ -42,6 +44,11 @@ const server = createHttpServer(
     poToken: config.youtubePoToken ? createPoTokenMinter() : undefined,
   }),
 );
+attachWsRelay(server, {
+  allowedTestHosts: new Set(config.testUpstreams.keys()),
+  lookup: createGuardedLookup(),
+  logger,
+});
 server.on("error", (error) => {
   logger.error(error.message);
   process.exit(1);

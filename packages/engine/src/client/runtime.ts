@@ -14,6 +14,7 @@ import { installWorkers } from "./workers.ts";
 import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
+import { installWebSocket } from "./websocket.ts";
 import { installStorage } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import { installMessaging } from "./messaging.ts";
@@ -95,6 +96,8 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["cookies", () => (cookies = installCookies(win, ctx, config))],
     ["navigation", () => installNavigation(win, ctx, cookies)],
     ["service worker mask", () => installServiceWorkerMask(win)],
+    // Before network so the shim captures the real fetch for its ws-prep RPC.
+    ["websocket", () => installWebSocket(win, ctx)],
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
     ["storage isolation", () => installStorageIsolation(win, ctx)],
