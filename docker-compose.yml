@@ -7,7 +7,10 @@ services:
       - "3000:3000"
     environment:
       LOG_LEVEL: info
+      GIRICI_DATA_DIR: /data
       # SOURCE_URL: https://github.com/you/your-fork
+    volumes:
+      - girici_data:/data
 
   caddy:
     image: caddy:2-alpine
@@ -26,5 +29,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  girici_data:
   caddy_data:
   caddy_config:

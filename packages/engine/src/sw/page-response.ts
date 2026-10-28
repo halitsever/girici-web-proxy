@@ -6,6 +6,7 @@ import { encodeUrl } from "../shared/codec.ts";
 import {
   encodeHeaderValue,
   HEADER,
+  LOGIN_PATH,
   PROTOCOL_VERSION,
   type CookieSnapshot,
   type RelayErrorCode,
@@ -122,6 +123,11 @@ function redirectTo(location: string, status: number, ctx: PageContext): Respons
 
 function failure(code: RelayErrorCode, status: number, ctx: PageContext): Response {
   if (!ctx.navigation) return Response.error();
+  if (code === "auth") {
+    const login = new URL(LOGIN_PATH, ctx.origin);
+    login.searchParams.set("next", ctx.target.href);
+    return Response.redirect(login.href, 303);
+  }
   return new Response(errorPage(code, ctx.target), {
     status: status >= 400 && status <= 599 ? status : 502,
     headers: { "content-type": "text/html; charset=utf-8" },

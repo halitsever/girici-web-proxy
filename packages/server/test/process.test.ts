@@ -1,9 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const serverDir = fileURLToPath(new URL("..", import.meta.url));
+const dataDir = mkdtempSync(join(tmpdir(), "girici-data-"));
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -20,7 +24,7 @@ function freePort(): Promise<number> {
 function start(env: Record<string, string>): ChildProcess {
   return spawn(process.execPath, ["src/index.ts"], {
     cwd: serverDir,
-    env: { ...process.env, ...env },
+    env: { GIRICI_DATA_DIR: dataDir, ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

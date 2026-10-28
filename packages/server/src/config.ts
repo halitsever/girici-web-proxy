@@ -1,3 +1,5 @@
+import { defaultDataDir } from "./paths.ts";
+
 export type LogLevel = "error" | "warn" | "info" | "debug";
 
 export interface Config {
@@ -8,6 +10,9 @@ export interface Config {
   testUpstreams: ReadonlyMap<string, TestUpstream>;
   testCaPath: string | undefined;
   youtubePoToken: boolean;
+  dataDir: string;
+  trustProxy: boolean | number | string;
+  sessionSecret: string | undefined;
 }
 
 export interface TestUpstream {
@@ -33,7 +38,21 @@ export function loadConfig(env: Env): Config {
     testUpstreams: testMode ? readTestUpstreams(env.GIRICI_TEST_UPSTREAMS) : new Map(),
     testCaPath: testMode ? env.GIRICI_TEST_CA?.trim() || undefined : undefined,
     youtubePoToken: readBoolean(env.GIRICI_YT_POTOKEN, true),
+    dataDir: env.GIRICI_DATA_DIR?.trim() || defaultDataDir,
+    trustProxy: readTrustProxy(env.GIRICI_TRUST_PROXY),
+    sessionSecret: env.GIRICI_SESSION_SECRET?.trim() || undefined,
   };
+}
+
+/** Express trust proxy: a boolean, a hop count, or a preset like "loopback". */
+function readTrustProxy(raw: string | undefined): boolean | number | string {
+  const value = raw?.trim();
+  if (!value) return false;
+  const lower = value.toLowerCase();
+  if (["true", "1", "yes", "on"].includes(lower)) return true;
+  if (["false", "0", "no", "off"].includes(lower)) return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
 }
 
 /** Accepts true/1/yes/on (and their negatives); falls back when unset or unrecognized. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_SOURCE_URL, loadConfig } from "../src/config.ts";
+import { defaultDataDir } from "../src/paths.ts";
 
 describe("loadConfig", () => {
   it("uses defaults when nothing is set", () => {
@@ -11,7 +12,18 @@ describe("loadConfig", () => {
       testUpstreams: new Map(),
       testCaPath: undefined,
       youtubePoToken: true,
+      dataDir: defaultDataDir,
+      trustProxy: false,
+      sessionSecret: undefined,
     });
+  });
+
+  it("reads the data dir, trust proxy, and session secret override", () => {
+    expect(loadConfig({ GIRICI_DATA_DIR: "/srv/girici" }).dataDir).toBe("/srv/girici");
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "true" }).trustProxy).toBe(true);
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "2" }).trustProxy).toBe(2);
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "loopback" }).trustProxy).toBe("loopback");
+    expect(loadConfig({ GIRICI_SESSION_SECRET: "  hex  " }).sessionSecret).toBe("hex");
   });
 
   it("turns the YouTube poToken minter off with GIRICI_YT_POTOKEN", () => {

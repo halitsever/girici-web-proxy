@@ -5,12 +5,22 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
+import { AuthStore } from "../src/auth/store.ts";
+import { openDb } from "../src/db/open.ts";
 import { UI_CSP } from "../src/http/security-headers.ts";
 import { createLogger } from "../src/log.ts";
 import { createUpstreamAgent } from "../src/upstream/agent.ts";
 
 const agent = createUpstreamAgent();
 const engineBundlesDir = mkdtempSync(join(tmpdir(), "girici-engine-"));
+
+/** An admin plus public access, so the shell serves without an auth redirect in these tests. */
+function publicStore(): AuthStore {
+  const store = new AuthStore(openDb(":memory:"));
+  store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+  store.setPublicAccess(true);
+  return store;
+}
 
 async function listen(
   webDistDir: string,
@@ -23,6 +33,7 @@ async function listen(
       engineBundlesDir,
       sourceUrl: "https://example.com/source",
       logger,
+      authStore: publicStore(),
       relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
     }),
   );

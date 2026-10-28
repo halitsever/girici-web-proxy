@@ -2,6 +2,9 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { AuthStore } from "../src/auth/store.ts";
+import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
 import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
 import { attachWsRelay, mapCloseCode, validateWsTarget } from "../src/ws/relay-ws.ts";
@@ -22,21 +25,24 @@ function echoUpstream(): Promise<number> {
   return new Promise((resolve) => wss.on("listening", () => resolve((wss.address() as AddressInfo).port)));
 }
 
-async function relayServer(upstreamPort: number): Promise<string> {
+async function relayServer(upstreamPort: number, authStore?: AuthStore): Promise<string> {
   const server: Server = createServer();
   cleanups.push(() => server.close());
   attachWsRelay(server, {
     allowedTestHosts: new Set(["ws.test"]),
     lookup: noopLookup,
     logger,
+    authStore,
     dial: (_target, init) => new WebSocket(`ws://127.0.0.1:${upstreamPort}/`, init.protocols),
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `ws://127.0.0.1:${(server.address() as AddressInfo).port}/_g/ws`;
 }
 
-function connect(url: string, origin: string): WebSocket {
-  const ws = new WebSocket(url, ["girici.v1"], { headers: { origin } });
+function connect(url: string, origin: string, cookie?: string): WebSocket {
+  const headers: Record<string, string> = { origin };
+  if (cookie) headers.cookie = cookie;
+  const ws = new WebSocket(url, ["girici.v1"], { headers });
   cleanups.push(() => ws.close());
   return ws;
 }
@@ -79,6 +85,33 @@ describe("ws relay (integration)", () => {
       client.on("error", () => resolve());
       client.on("open", () => reject(new Error("opened despite a foreign Origin")));
       setTimeout(() => reject(new Error("no rejection")), 3000);
+    });
+  });
+
+  it("rejects an unauthenticated upgrade when an auth store gates it", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    const url = await relayServer(await echoUpstream(), store);
+    const origin = url.replace("ws://", "http://").replace("/_g/ws", "");
+    const client = connect(url, origin);
+    await new Promise<void>((resolve, reject) => {
+      client.on("error", () => resolve());
+      client.on("open", () => reject(new Error("opened without a session")));
+      setTimeout(() => reject(new Error("no rejection")), 3000);
+    });
+  });
+
+  it("accepts an upgrade with a valid session cookie", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    const url = await relayServer(await echoUpstream(), store);
+    const origin = url.replace("ws://", "http://").replace("/_g/ws", "");
+    const cookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
+    const client = connect(url, origin, cookie);
+    await new Promise<void>((resolve, reject) => {
+      client.on("open", () => resolve());
+      client.on("error", (e) => reject(e));
+      setTimeout(() => reject(new Error("did not open")), 3000);
     });
   });
 

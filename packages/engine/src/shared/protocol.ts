@@ -18,6 +18,9 @@ export const PROTOCOL_VERSION = 1;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const BROADCAST_CHANNEL = "__girici";
+// Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
+export const LOGIN_PATH = "/_g/login";
+export const SETUP_PATH = "/_g/setup";
 
 /** A cookie as page scripts may see it; times are epoch milliseconds and a null expiry marks a session cookie. */
 export interface CookieSnapshot {
@@ -37,7 +40,7 @@ export interface ClientConfig {
 }
 
 export type RelayErrorCode =
-  "bad_request" | "ssrf_blocked" | "dns" | "connect" | "tls" | "timeout" | "too_large" | "header_overflow";
+  "bad_request" | "ssrf_blocked" | "dns" | "connect" | "tls" | "timeout" | "too_large" | "header_overflow" | "auth";
 
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {

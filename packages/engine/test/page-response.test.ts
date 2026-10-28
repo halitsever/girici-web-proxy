@@ -120,6 +120,17 @@ describe("buildPageResponse", () => {
     expect((await buildPageResponse(blocked, context({ target: new URL("http://10.0.0.1/") }))).type).toBe("error");
   });
 
+  it("redirects a navigation to login on an auth error and fails subresources", async () => {
+    const unauth: TransportResult = { ok: false, code: "auth", status: 401 };
+    const nav = await buildPageResponse(
+      unauth,
+      context({ target: new URL("https://site-a.test/dir/page"), navigation: true, destination: "document" }),
+    );
+    expect(nav.status).toBe(303);
+    expect(nav.headers.get("location")).toBe(`${origin}/_g/login?next=${encodeURIComponent("https://site-a.test/dir/page")}`);
+    expect((await buildPageResponse(unauth, context())).type).toBe("error");
+  });
+
   it("rewrites documents and injects the client runtime", async () => {
     const res = await buildPageResponse(
       upstream(

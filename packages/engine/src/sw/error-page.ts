@@ -9,6 +9,7 @@ const MESSAGES: Record<RelayErrorCode, string> = {
   too_large: "The request is too large.",
   bad_request: "This address cannot be opened through Girici.",
   header_overflow: "{host} sent headers that are too large.",
+  auth: "Girici needs you to sign in before opening {host}.",
 };
 
 export function errorPage(code: RelayErrorCode, target: URL | null): string {

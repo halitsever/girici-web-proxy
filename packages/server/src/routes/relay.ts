@@ -3,6 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { encodeHeaderList, HEADER, targetFromRelayPath, type RelayErrorCode } from "@girici/engine/shared";
 import { Router, type Request, type Response } from "express";
 import { request, type Dispatcher } from "undici";
+import { isOwnHost } from "../http/origin.ts";
 import type { Logger } from "../log.ts";
 import { RelayRequestError, relayErrorFor } from "../upstream/errors.ts";
 import { buildUpstreamHeaders } from "../upstream/request-headers.ts";
@@ -103,12 +104,6 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
     }
     fail(res, code, status);
   }
-}
-
-/** Compares hosts only: behind a TLS terminator the server sees plain http while the page's Origin says https. */
-function isOwnHost(origin: string | undefined, host: string | undefined): boolean {
-  const url = origin ? URL.parse(origin) : null;
-  return !!url && (url.protocol === "http:" || url.protocol === "https:") && url.host === host?.toLowerCase();
 }
 
 function upstreamMethod(req: Request): string {

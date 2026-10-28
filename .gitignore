@@ -134,3 +134,10 @@ dist/
 test-results/
 playwright-report/
 e2e/.cache/
+
+# Local SQLite data dir
+/data/
+/.data/
+*.db
+*.db-journal
+*.db-wal

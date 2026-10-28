@@ -1,4 +1,6 @@
 import express, { Router, type Request, type Response } from "express";
+import { isOwnHost } from "../http/origin.ts";
+import { rateLimiter } from "../http/rate-limit.ts";
 
 /** A poToken source; the real one is the BotGuard-backed minter. */
 export interface PoTokenSource {
@@ -34,25 +36,4 @@ export function poRouter(options: PoRouterOptions): Router {
     res.json({ poToken });
   });
   return router;
-}
-
-/** Hosts only: behind a TLS terminator the server sees http while the page's Origin says https. */
-function isOwnHost(origin: string | undefined, host: string | undefined): boolean {
-  const url = origin ? URL.parse(origin) : null;
-  return !!url && (url.protocol === "http:" || url.protocol === "https:") && url.host === host?.toLowerCase();
-}
-
-function rateLimiter({ windowMs, max }: { windowMs: number; max: number }): (key: string) => boolean {
-  const hits = new Map<string, { count: number; reset: number }>();
-  return (key) => {
-    const now = Date.now();
-    const entry = hits.get(key);
-    if (!entry || now >= entry.reset) {
-      hits.set(key, { count: 1, reset: now + windowMs });
-      return true;
-    }
-    if (entry.count >= max) return false;
-    entry.count++;
-    return true;
-  };
 }

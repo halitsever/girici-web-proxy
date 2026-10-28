@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
+import { AuthStore } from "../src/auth/store.ts";
+import { openDb } from "../src/db/open.ts";
 import { createHttpServer } from "../src/http/server.ts";
 import { createLogger } from "../src/log.ts";
 import { createUpstreamAgent } from "../src/upstream/agent.ts";
@@ -28,6 +30,7 @@ describe("engine, bootstrap and legacy routes", () => {
         engineBundlesDir: engineDir,
         sourceUrl: "https://example.com/source",
         logger: createLogger("error", () => {}),
+        authStore: new AuthStore(openDb(":memory:")),
         relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
       }),
     );

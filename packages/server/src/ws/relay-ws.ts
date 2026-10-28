@@ -2,6 +2,9 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import type { LookupFunction } from "node:net";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { readSessionToken } from "../auth/cookie.ts";
+import type { AuthStore } from "../auth/store.ts";
+import { isOwnHost } from "../http/origin.ts";
 import type { Logger } from "../log.ts";
 import { SsrfBlockedError, validateTarget, type TargetPolicy } from "../upstream/ssrf.ts";
 
@@ -28,6 +31,7 @@ export interface WsRelayOptions {
   allowedTestHosts: ReadonlySet<string>;
   lookup: LookupFunction;
   logger: Logger;
+  authStore?: AuthStore;
   maxPayload?: number;
   handshakeTimeoutMs?: number;
   maxPerIp?: number;
@@ -59,9 +63,11 @@ function parseControlFrame(data: RawData, isBinary: boolean): ControlFrame | nul
   }
 }
 
-function isOwnOrigin(origin: string | undefined, host: string | undefined): boolean {
-  const url = origin ? URL.parse(origin) : null;
-  return !!url && (url.protocol === "http:" || url.protocol === "https:") && url.host === host?.toLowerCase();
+/** Same rule as the HTTP gate: open when public, else a valid session for the current admin. */
+function wsAuthorized(store: AuthStore | undefined, cookie: string | undefined): boolean {
+  if (!store || store.publicAccess()) return true;
+  const sub = readSessionToken(cookie, store.sessionSecret());
+  return sub !== null && store.admin()?.id === sub;
 }
 
 const defaultDial: Dial = (target, init) =>
@@ -87,7 +93,11 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): void {
       socket.destroy();
       return;
     }
-    if (!isOwnOrigin(req.headers.origin, req.headers.host)) {
+    if (!isOwnHost(req.headers.origin, req.headers.host)) {
+      socket.destroy();
+      return;
+    }
+    if (!wsAuthorized(options.authStore, req.headers.cookie)) {
       socket.destroy();
       return;
     }

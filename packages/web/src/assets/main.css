@@ -1,10 +1,87 @@
-@import "./base.css";
-@import "./brand/tokens.css";
+@import "tailwindcss";
+@import "tw-animate-css";
 
-body {
-  /* The self-hosted variable font registers as "Geist Variable"; the brand stack follows as fallback. */
-  font-family: "Geist Variable", var(--girici-font-sans);
-  color: var(--girici-midnight);
-  /* The page is light only; this also keeps base.css's dark background from showing below short content. */
-  background: var(--girici-mist);
+/*
+ * Girici dark theme: brand Midnight base + Route Blue accent, on a neutral dark ramp.
+ * Route Blue is the one brand accent (open action, active toggles, focus, avatar, logo bar).
+ */
+:root {
+  color-scheme: dark;
+  --background: #0a0f1e; /* Midnight */
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --popover: #18181b;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #0a0f1e;
+  --secondary: #27272a;
+  --secondary-foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #27272a;
+  --accent-foreground: #fafafa;
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fafafa;
+  --border: #27272a;
+  --input: #27272a;
+  --ring: #3d6bff; /* Route Blue */
+  --radius: 0.75rem;
+
+  /* Exact design tokens used directly by the palette and panels. */
+  --gi-brand: #3d6bff;
+  --gi-success: #4ade80;
+  --gi-danger: #f87171;
+  --gi-danger-border: #7f1d1d;
+  --gi-danger-bg: #450a0a;
+  --gi-subtle: #71717a;
+  --gi-placeholder: #52525b;
+  --gi-strong: #3f3f46;
+  --gi-divider: #18181b;
+  --gi-panel: #111113;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-gi-brand: var(--gi-brand);
+  --color-gi-success: var(--gi-success);
+  --color-gi-danger: var(--gi-danger);
+  --color-gi-subtle: var(--gi-subtle);
+  --color-gi-panel: var(--gi-panel);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: "Geist Variable", "Geist", "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
 }
