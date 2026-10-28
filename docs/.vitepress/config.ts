@@ -6,6 +6,8 @@ export default defineConfig({
   lang: "en-US",
   title: "Girici",
   description: "A self-hosted web proxy built on its own service worker engine.",
+  // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
+  base: process.env.DOCS_BASE || "/",
   appearance: "dark",
   cleanUrls: true,
   lastUpdated: true,
