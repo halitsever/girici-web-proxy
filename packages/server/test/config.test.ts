@@ -10,7 +10,13 @@ describe("loadConfig", () => {
       sourceUrl: DEFAULT_SOURCE_URL,
       testUpstreams: new Map(),
       testCaPath: undefined,
+      youtubePoToken: true,
     });
+  });
+
+  it("turns the YouTube poToken minter off with GIRICI_YT_POTOKEN", () => {
+    expect(loadConfig({ GIRICI_YT_POTOKEN: "off" }).youtubePoToken).toBe(false);
+    expect(loadConfig({ GIRICI_YT_POTOKEN: "1" }).youtubePoToken).toBe(true);
   });
 
   it("reads test upstreams only in test mode", () => {

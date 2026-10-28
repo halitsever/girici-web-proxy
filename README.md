@@ -76,6 +76,14 @@ GIRICI_DOMAIN=proxy.example.com docker compose --profile https up -d --build
 | `HOST` | `0.0.0.0` | Interface to bind. |
 | `LOG_LEVEL` | `info` | `error`, `warn`, `info` or `debug`. |
 | `SOURCE_URL` | this repository | Where the UI's source code link points. |
+| `GIRICI_YT_POTOKEN` | `on` | Mint YouTube GVS poTokens server-side to help video playback. Set `off` to disable. |
+
+## Known limitations
+
+YouTube guards video with its SABR streaming and poToken bot protection. Girici mints a GVS poToken server-side
+(`GIRICI_YT_POTOKEN`) and steers the player toward direct streams, which plays many videos, but YouTube still blocks
+sustained playback of some, especially from datacenter IPs. A residential egress helps. This stays fragile: a YouTube
+change can break it until the token path is updated.
 
 
 

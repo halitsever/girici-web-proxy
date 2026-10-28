@@ -144,7 +144,7 @@ describe("buildPageResponse", () => {
       upstream([["content-type", "application/javascript"]], "location.href"),
       context({ destination: "script" }),
     );
-    expect(await js.text()).toBe(`${STANDALONE_SHIM}__g$.L(location).href`);
+    expect(await js.text()).toBe(`${STANDALONE_SHIM}__g$.L(location).href\n//# sourceURL=https://site-a.test/dir/page`);
     expect(js.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     const data = await buildPageResponse(
       upstream([["content-type", "application/javascript"]], "location.href"),

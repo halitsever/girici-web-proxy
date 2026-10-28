@@ -7,6 +7,7 @@ export interface Config {
   sourceUrl: string;
   testUpstreams: ReadonlyMap<string, TestUpstream>;
   testCaPath: string | undefined;
+  youtubePoToken: boolean;
 }
 
 export interface TestUpstream {
@@ -31,7 +32,17 @@ export function loadConfig(env: Env): Config {
     sourceUrl: readSourceUrl(env.SOURCE_URL),
     testUpstreams: testMode ? readTestUpstreams(env.GIRICI_TEST_UPSTREAMS) : new Map(),
     testCaPath: testMode ? env.GIRICI_TEST_CA?.trim() || undefined : undefined,
+    youtubePoToken: readBoolean(env.GIRICI_YT_POTOKEN, true),
   };
+}
+
+/** Accepts true/1/yes/on (and their negatives); falls back when unset or unrecognized. */
+function readBoolean(raw: string | undefined, fallback: boolean): boolean {
+  const value = raw?.trim().toLowerCase();
+  if (!value) return fallback;
+  if (["true", "1", "yes", "on"].includes(value)) return true;
+  if (["false", "0", "no", "off"].includes(value)) return false;
+  return fallback;
 }
 
 function readPort(env: Env): number {

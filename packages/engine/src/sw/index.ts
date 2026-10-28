@@ -13,6 +13,7 @@ import { buildPageResponse } from "./page-response.ts";
 import { classifyRequest, realUrlOf } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { HttpRelayTransport } from "./transport.ts";
+import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
@@ -103,12 +104,32 @@ async function handle(event: FetchEvent): Promise<Response> {
           topLevel: request.destination === "document",
           method: request.method,
         };
+        const cookieHeader = await cookies.header(route.target, cookieContext);
+        // Keep the untouched player request so we can re-ask as a non-SABR client.
+        const ytPlayer = isYtPlayer(route.target) && request.method === "POST";
+        const playerBody = ytPlayer ? await request.clone().arrayBuffer() : null;
         const result = await transport.send(request, {
           target: route.target,
           clientUrl: initiator,
           isNavigation: navigation,
-          cookie: await cookies.header(route.target, cookieContext),
+          cookie: cookieHeader,
         });
+        if (ytPlayer && playerBody && result.ok && result.response.body) {
+          const webText = await new Response(result.response.body).text();
+          const spliced = await spliceDirectStreams(
+            playerBody,
+            webText,
+            request,
+            route.target,
+            initiator,
+            cookieHeader,
+            transport,
+            mintPoToken,
+          );
+          result.response.body = new Response(spliced ?? webText).body;
+          // The spliced body differs in length, so the upstream content-length no longer applies.
+          result.response.headers = result.response.headers.filter(([name]) => name !== "content-length");
+        }
         const changes = result.ok ? await cookies.store(route.target, result.response.setCookies, cookieContext) : [];
         return await buildPageResponse(result, {
           target: route.target,
@@ -123,6 +144,22 @@ async function handle(event: FetchEvent): Promise<Response> {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
       }
     }
+  }
+}
+
+/** Ask the server to mint a GVS poToken; same-origin, time-boxed, null on any failure. */
+async function mintPoToken(contentBinding: string): Promise<string | null> {
+  try {
+    const response = await fetch(`${self.location.origin}/_g/pot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ contentBinding }),
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    return ((await response.json()) as { poToken: string | null }).poToken ?? null;
+  } catch {
+    return null;
   }
 }
 

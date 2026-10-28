@@ -7,6 +7,7 @@ import { bootstrapRouter } from "./routes/bootstrap.ts";
 import { engineRouter } from "./routes/engine.ts";
 import { healthRouter } from "./routes/health.ts";
 import { legacyRouter } from "./routes/legacy.ts";
+import { poRouter, type PoTokenSource } from "./routes/pot.ts";
 import { relayRouter, type RelayOptions } from "./routes/relay.ts";
 import { robotsRouter } from "./routes/robots.ts";
 import { sourceRouter } from "./routes/source.ts";
@@ -18,9 +19,10 @@ export interface AppOptions {
   sourceUrl: string;
   logger: Logger;
   relay: Omit<RelayOptions, "logger">;
+  poToken?: PoTokenSource;
 }
 
-export function createApp({ webDistDir, engineBundlesDir, sourceUrl, logger, relay }: AppOptions): Express {
+export function createApp({ webDistDir, engineBundlesDir, sourceUrl, logger, relay, poToken }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(securityHeaders());
@@ -28,6 +30,7 @@ export function createApp({ webDistDir, engineBundlesDir, sourceUrl, logger, rel
   app.use(healthRouter());
   app.use(robotsRouter());
   app.use(sourceRouter(sourceUrl));
+  if (poToken) app.use(poRouter({ minter: poToken }));
   app.use(relayRouter({ ...relay, logger }));
   app.use(uiRouter(webDistDir));
   app.use(engineRouter(engineBundlesDir));

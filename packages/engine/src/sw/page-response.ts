@@ -88,7 +88,12 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
       return rewriteCss(text, ctx.target, ctx.origin);
     case "js":
       // Workers and blank frames load scripts too, and they have no runtime to call into.
-      return cachedRewrite(ctx.target, validators, () => rewriteJs(text, { standalone: true }));
+      // sourceURL makes stack traces name the real script, so tamper checks that read Error().stack see no proxy URL.
+      return cachedRewrite(
+        ctx.target,
+        validators,
+        () => `${rewriteJs(text, { standalone: true })}\n//# sourceURL=${ctx.target.href}`,
+      );
   }
 }
 

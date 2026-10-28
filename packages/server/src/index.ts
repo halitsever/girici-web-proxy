@@ -6,6 +6,7 @@ import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
 import { createUpstreamAgent } from "./upstream/agent.ts";
+import { createPoTokenMinter } from "./youtube/botguard-session.ts";
 
 let config: Config;
 try {
@@ -37,6 +38,8 @@ const server = createHttpServer(
     sourceUrl: config.sourceUrl,
     logger,
     relay: { agent, allowedTestHosts: new Set(config.testUpstreams.keys()), maxRequestBody: 50 * 1024 * 1024 },
+    // Lazy: BotGuard only runs on the first poToken request, so this costs nothing at startup.
+    poToken: config.youtubePoToken ? createPoTokenMinter() : undefined,
   }),
 );
 server.on("error", (error) => {
