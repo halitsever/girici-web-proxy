@@ -66,6 +66,8 @@ function install(): void {
       metaUrl: fromProxy,
     },
     indirectEval: (code) => scope.eval(code as string),
+    // A worker cannot reach a window, so its ports and clients keep their own postMessage.
+    messageTarget: (value) => value,
   });
   Object.defineProperty(scope, "__g$", { value: helpers });
 

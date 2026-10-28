@@ -3,10 +3,12 @@ import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.t
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
 const SRCSET_ATTRIBUTES = new Set(["srcset", "imagesrcset"]);
+const INTEGRITY_ELEMENTS = new Set(["script", "link"]);
 
-export function attributeKind(element: string, name: string): "url" | "srcset" | null {
+export function attributeKind(element: string, name: string): "url" | "srcset" | "integrity" | null {
   const attribute = name.toLowerCase();
   if (URL_ATTRIBUTES.has(attribute) || (attribute === "data" && element.toLowerCase() === "object")) return "url";
+  if (attribute === "integrity" && INTEGRITY_ELEMENTS.has(element.toLowerCase())) return "integrity";
   return SRCSET_ATTRIBUTES.has(attribute) ? "srcset" : null;
 }
 
@@ -16,6 +18,9 @@ export function rewriteAttribute(element: string, name: string, value: string, b
       return rewriteUrl(value, base, origin);
     case "srcset":
       return rewriteSrcset(value, (url) => rewriteUrl(url, base, origin));
+    // The proxy rewrites scripts and styles, so their hash no longer matches; an empty value turns the check off.
+    case "integrity":
+      return "";
     default:
       return value;
   }

@@ -6,7 +6,7 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
 // Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
@@ -16,13 +16,20 @@ export interface JsRewriteOptions {
 type Role = "read" | "target" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
-const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M"]);
+const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M", "P"]);
 const GLOBAL_NAMES = new Set(["window", "globalThis", "self"]);
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
   if (source.length > MAX_REWRITE_LENGTH) return source;
-  if (!source.includes("location") && !source.includes("eval") && !source.includes("import")) return source;
+  if (
+    !source.includes("location") &&
+    !source.includes("eval") &&
+    !source.includes("import") &&
+    !source.includes("postMessage")
+  ) {
+    return source;
+  }
   const program = parse(source, options.kind ?? "classic");
   if (!program) return source;
   const output = new MagicString(source);
@@ -115,6 +122,7 @@ class LocationRewriter {
         if ((directEval || globalEval) && first && first.type !== "SpreadElement" && !isHelperCall(first)) {
           this.#call("__g$.E(", ")", first);
         }
+        if (isPostMessageCallee(callee) && !isHelperCall(callee.object)) this.#messageTarget(callee, inChain);
         // A direct eval must keep its callee bare, or it would become an indirect eval and lose scope.
         if (!directEval) this.visit(callee, "callee", inChain);
         for (const argument of node.arguments) this.visit(argument, "read", false);
@@ -264,6 +272,16 @@ class LocationRewriter {
     this.#call("__g$.L(", ")", node);
   }
 
+  /** The receiver's own postMessage would make it the event.source, so the call runs through the caller's __g$. */
+  #messageTarget(callee: ESTree.MemberExpression, inChain: boolean): void {
+    // Inside the call a comma expression would split into several arguments, so it keeps parentheses of its own.
+    if (callee.object.type === "SequenceExpression") this.#call("__g$.P((", "))", callee.object);
+    else this.#call("__g$.P(", ")", callee.object);
+    if (inChain && !callee.optional && hasOptionalLink(callee.object)) {
+      this.#output.appendRight(this.#nextToken(end(callee.object)), callee.computed ? "?." : "?");
+    }
+  }
+
   #call(open: string, close: string, node: ESTree.Node): void {
     this.#output.appendRight(start(node), open);
     this.#output.appendLeft(end(node), close);
@@ -334,6 +352,14 @@ function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
   return node.computed
     ? property.type === "Literal" && property.value === "location"
     : property.type === "Identifier" && property.name === "location";
+}
+
+function isPostMessageCallee(node: ESTree.Node): node is ESTree.MemberExpression {
+  if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
+  const { property } = node;
+  return node.computed
+    ? property.type === "Literal" && property.value === "postMessage"
+    : property.type === "Identifier" && property.name === "postMessage";
 }
 
 function hasLocationKey(pattern: ESTree.ObjectPattern): boolean {

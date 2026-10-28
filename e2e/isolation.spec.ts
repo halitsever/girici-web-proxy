@@ -23,6 +23,17 @@ test("passes postMessage between proxied frames", async ({ page }) => {
   await expect(page.locator("#got")).toHaveText("hello from https://site-a.test");
 });
 
+test("names the real sender and origin of cross-site messages", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/pm-source");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    readyOrigin: "https://site-b.test",
+    readyFromChild: true,
+    pingFromParent: true,
+    pingOrigin: "https://site-a.test",
+  });
+});
+
 test("denies notifications", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/notify");
   await expect(page.locator("#perm")).toHaveText("denied");

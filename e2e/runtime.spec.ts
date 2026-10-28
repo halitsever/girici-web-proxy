@@ -55,6 +55,12 @@ test("shows real URLs on network responses", async ({ page }) => {
   });
 });
 
+test("runs scripts whose integrity the page sets at runtime", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/sri");
+  await expect(page.locator("#a")).toHaveText("site-a.test");
+  await expect(page.locator("#b")).toHaveText("site-a.test");
+});
+
 test("runs scripts that workers import", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/worker");
   await expect(page.locator("#answer")).toHaveText("42");

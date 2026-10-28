@@ -58,6 +58,16 @@ test("keeps classic, module and blob workers inside the proxy", async ({ page })
   expect(out.blobApi).toBe("GET");
 });
 
+test("starts workers from a blank frame's constructor", async ({ page, browserName }) => {
+  await openThroughUi(page, "https://site-a.test/frame-worker");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  expect(out.blob).toBe("blob ok");
+  // Chromium leaves about:blank frames and their workers outside the service worker, so the script cannot load there.
+  if (browserName === "chromium") expect(out.classic).toBe("error");
+  else expect(out.classic).toBe("https://site-a.test/worker-classic.js");
+});
+
 test("keeps blob worker subresources inside the proxy", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/worker-escape");
   await expect(page.locator("#results")).toHaveText("done");

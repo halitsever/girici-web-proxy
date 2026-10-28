@@ -17,7 +17,7 @@ import { installRealtimeBlock } from "./realtime.ts";
 import { installWebSocket } from "./websocket.ts";
 import { installStorage } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
-import { installMessaging } from "./messaging.ts";
+import { createMessageSender, installMessaging } from "./messaging.ts";
 import { installPermissions } from "./permissions.ts";
 import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
@@ -83,6 +83,7 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     toProxy: (raw) => ctx.toProxy(raw),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
+    messageTarget: createMessageSender(win, ctx),
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted.
   Object.defineProperty(win, "__g$", { value: helpers, enumerable: false });

@@ -12,6 +12,13 @@ describe("rewriteAttribute", () => {
     expect(rewriteAttribute("div", "data", "//x.test/a", base, origin)).toBe("//x.test/a");
     expect(rewriteAttribute("a", "title", "https://other.test/x", base, origin)).toBe("https://other.test/x");
   });
+
+  it("empties integrity on scripts and links, whose rewritten bodies no longer match the hash", () => {
+    expect(rewriteAttribute("script", "integrity", "sha384-abc", base, origin)).toBe("");
+    expect(rewriteAttribute("LINK", "Integrity", "sha384-abc", base, origin)).toBe("");
+    expect(rewriteAttribute("div", "integrity", "sha384-abc", base, origin)).toBe("sha384-abc");
+    expect(restoreAttribute("script", "integrity", "", base, origin)).toBe("");
+  });
 });
 
 describe("restoreAttribute", () => {

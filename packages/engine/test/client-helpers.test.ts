@@ -24,6 +24,7 @@ function setup() {
       metaUrl: (u) => u,
     },
     indirectEval: (code) => code,
+    messageTarget: (value) => value,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
 }
@@ -89,6 +90,7 @@ describe("createHelpers", () => {
         evaled.push(String(code));
         return "result";
       },
+      messageTarget: (value) => ({ standIn: value }),
     });
     expect(helpers.E("location")).toBe("/*rw*/location");
     expect(helpers.E(42)).toBe(42);
@@ -97,5 +99,6 @@ describe("createHelpers", () => {
     expect(helpers.I("m.js")).toBe("proxied:m.js");
     expect(helpers.H("<a>x</a>")).toBe("/*rw*/<a>x</a>");
     expect(helpers.M("/~/x")).toBe("real:/~/x");
+    expect(helpers.P("w")).toEqual({ standIn: "w" });
   });
 });
