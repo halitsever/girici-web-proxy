@@ -44,8 +44,19 @@ features:
     details: A single image, a persistent volume for its database, and an optional Caddy profile for HTTPS.
 ---
 
-<div style="max-width: 1152px; margin: 56px auto 0; padding: 0 24px;">
-
-![The Girici browse screen](/screenshot.png)
-
+<div class="gi-showcase">
+  <figure class="gi-shot">
+    <img src="/screenshot.png" alt="The Girici browse screen" />
+    <figcaption>Browse: type a URL or search, and it routes through one origin.</figcaption>
+  </figure>
+  <div class="gi-shot-row">
+    <figure class="gi-shot">
+      <img src="/screenshot-setup.png" alt="The first-run setup screen" />
+      <figcaption>First run: create the single admin account.</figcaption>
+    </figure>
+    <figure class="gi-shot">
+      <img src="/screenshot-signin.png" alt="The sign-in screen" />
+      <figcaption>Private by default: sign in to keep browsing.</figcaption>
+    </figure>
+  </div>
 </div>
