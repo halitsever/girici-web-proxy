@@ -15,14 +15,13 @@
   <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/pulls/halitsever/girici-web-proxy"/></a> 
   <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker"/></a> 
 </p>
-</p>
 
 > **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.
 > `latest` now points to v2; the last v1 image stays available as `halitsever/girici-web-proxy:v1`.
 
-<a align="center">
+<div align="center">
 <img src="https://halitsever-api.vercel.app/api/details"/>
-</a>
+</div>
 
 - 📝 [**Http/Https Support**](#) - http/https protocols are supported
 - 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
@@ -49,12 +48,12 @@ npm start
 
 Girici listens on http://localhost:3000.
 
-<p align="center">
+<div align="center">
 <b>Screenshot</b>
-</p>
-<p align="center">
-<img src="docs/public/screenshot.png" alt="Girici Web Proxy Node.js Screenshot"/>
-</p>
+<br/>
+<br/>
+<img src="docs/public/screenshot.png" alt="Girici Web Proxy Node.js Screenshot" width="820"/>
+</div>
 
 ## Run with Docker
 
@@ -112,13 +111,13 @@ change can break it until the token path is updated.
 
 
 
-<a align="center" href="https://github.com/halitsever/girici-web-proxy/issues">
-<img src="https://halitsever-api.vercel.app/api/issue"/>
-</a>
+<div align="center">
+<a href="https://github.com/halitsever/girici-web-proxy/issues"><img src="https://halitsever-api.vercel.app/api/issue"/></a>
+</div>
 
-<a align="center">
+<div align="center">
 <img src="https://halitsever-api.vercel.app/api/sponsor"/>
-</a>
+</div>
 
 ## License
 
