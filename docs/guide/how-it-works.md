@@ -46,7 +46,8 @@ without being mangled. Target URLs, cookies, and tokens are never logged at the 
 ## Authentication
 
 Once an admin account exists, the proxy data path (`/_g/r` and `/_g/ws`) sits behind a login. A
-stateless, HMAC-signed `__Host-girici` cookie carries the session. When a request is not authorized,
+stateless, HMAC-signed cookie carries the session (`__Host-girici` over HTTPS, `girici-session` on a plain-HTTP
+page such as `http://localhost`). When a request is not authorized,
 the service worker turns it into a redirect to the login page for navigations and a network error for
 subresources. Turning on public access opens the data path to everyone and skips that gate. See
 [Admin and auth](/guide/admin-and-auth).

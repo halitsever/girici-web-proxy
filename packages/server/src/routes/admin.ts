@@ -37,7 +37,7 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist): Router 
     if (changingPassword) {
       // Rotates the session secret, so re-issue a cookie to keep this device signed in.
       store.changePassword(admin.id, body.password as string);
-      issueSession(res, admin.id, store.sessionSecret());
+      issueSession(req, res, admin.id, store.sessionSecret());
     }
     res.json({ admin: store.admin() });
   });

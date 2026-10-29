@@ -13,7 +13,9 @@ one admin (username, name, email, password, at least 8 characters). After setup 
 Once an admin exists, the proxy requires a login. Visiting a proxied page while signed out redirects you
 to the login screen, and signing in sends you back where you were headed.
 
-The session is a stateless cookie (`__Host-girici`), signed with a secret stored in the database. There
+The session is a stateless cookie, signed with a secret stored in the database. Over HTTPS it is
+`__Host-girici`; on a plain-HTTP page such as `http://localhost` it is `girici-session`, because Safari drops the
+Secure cookie that `__Host-` requires there. There
 is no server-side session table; signing out clears the cookie, and changing the password rotates the
 secret so every other device is signed out.
 

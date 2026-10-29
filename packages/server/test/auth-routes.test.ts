@@ -24,7 +24,7 @@ function post(base: string, path: string, body: unknown, origin: string | null =
 }
 
 function sessionCookie(res: Response): string {
-  const set = res.headers.getSetCookie().find((c) => c.startsWith("__Host-girici="));
+  const set = res.headers.getSetCookie().find((c) => c.startsWith("__Host-girici=") || c.startsWith("girici-session="));
   return set ? (set.split(";")[0] ?? "") : "";
 }
 
@@ -80,9 +80,33 @@ describe("authRouter login and logout", () => {
     const base = await withAdmin();
     const res = await post(base, "/_g/logout", {});
     expect(res.status).toBe(204);
-    expect(res.headers.getSetCookie().some((c) => c.startsWith("__Host-girici=") && /Expires=|Max-Age=0/.test(c))).toBe(
-      true,
+    const cleared = (name: string) =>
+      res.headers.getSetCookie().some((c) => c.startsWith(`${name}=`) && /Expires=|Max-Age=0/.test(c));
+    expect(cleared("__Host-girici")).toBe(true);
+    expect(cleared("girici-session")).toBe(true);
+  });
+
+  it("gives a page served over https the __Host- Secure session cookie", async () => {
+    const base = await withAdmin();
+    const res = await post(
+      base,
+      "/_g/login",
+      { username: "halit", password: "pw-123456" },
+      base.replace("http:", "https:"),
     );
+    expect(res.headers.getSetCookie().find((c) => c.startsWith("__Host-girici="))).toMatch(/; Secure/i);
+    expect(res.headers.getSetCookie().some((c) => c.startsWith("girici-session="))).toBe(false);
+  });
+
+  it("gives a plain-http page a session cookie without Secure, which Safari keeps, and signs in with it", async () => {
+    const base = await withAdmin();
+    const res = await post(base, "/_g/login", { username: "halit", password: "pw-123456" });
+    const set = res.headers.getSetCookie().find((c) => c.startsWith("girici-session="));
+    expect(set).toMatch(/HttpOnly/i);
+    expect(set).not.toMatch(/Secure/i);
+    const cookie = set?.split(";")[0] ?? "";
+    const state = (await (await fetch(`${base}/_g/auth/state`, { headers: { cookie } })).json()) as { authed: boolean };
+    expect(state.authed).toBe(true);
   });
 
   it("rate-limits repeated login attempts", async () => {

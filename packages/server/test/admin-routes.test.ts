@@ -63,7 +63,9 @@ describe("adminRouter account", () => {
     const res = await post(base, "/_g/account", { name: "Halit", email: "h@h.h", password: "brand-new-pw" }, cookie);
     expect(res.status).toBe(200);
     expect(store.verifyLogin("halit", "brand-new-pw")).not.toBeNull();
-    expect(res.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`))).toBe(true);
+    expect(
+      res.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`) || c.startsWith("girici-session=")),
+    ).toBe(true);
   });
 
   it("rejects a cross-origin update", async () => {
