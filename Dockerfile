@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS build
+# The build output and the runtime dependencies are plain JavaScript, so both stages run natively on the builder.
+# Running Node for another architecture under QEMU is slow, and some Node images crash there.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
@@ -10,14 +12,19 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM node:24-alpine AS runtime
-ENV NODE_ENV=production
+FROM --platform=$BUILDPLATFORM node:24-alpine AS deps
 WORKDIR /app
-COPY package.json package-lock.json LICENSE ./
+COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
 RUN npm ci --omit=dev --ignore-scripts --workspace @girici/server && npm cache clean --force
+
+FROM node:24-alpine AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=deps /app ./
+COPY LICENSE ./
 COPY --from=build /app/packages/engine/dist packages/engine/dist
 COPY --from=build /app/packages/server/dist packages/server/dist
 COPY --from=build /app/packages/web/dist packages/web/dist
