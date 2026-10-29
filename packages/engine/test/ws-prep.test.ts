@@ -20,4 +20,9 @@ describe("buildWsPrep", () => {
     expect(await buildWsPrep(jar, "https://gateway.discord.gg/", null)).toBeNull();
     expect(await buildWsPrep(jar, "not a url", null)).toBeNull();
   });
+
+  it("leaves the cookie out when the target's cookies are blocked", async () => {
+    const prep = await buildWsPrep(jar, "wss://gateway.discord.gg/", new URL("https://a.test/"), () => false);
+    expect(prep).toEqual({ cookie: null, origin: "https://a.test" });
+  });
 });

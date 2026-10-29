@@ -80,6 +80,33 @@ export class CookieService {
     return cookies.map(snapshotOf).sort((a, b) => a.creation - b.creation);
   }
 
+  /** Cookies per registrable domain, HttpOnly ones included. */
+  async siteCookieCounts(): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const cookie of await this.#memory.getAllCookies()) {
+      if (isExpired(cookie)) continue;
+      const site = siteOf(cookie.domain ?? "");
+      counts.set(site, (counts.get(site) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** Removes a site's cookies, or all of them for null; open tabs drop the visible ones from document.cookie. */
+  async clearSite(site: string | null): Promise<number> {
+    const removed: CookieSnapshot[] = [];
+    let count = 0;
+    for (const cookie of await this.#memory.getAllCookies()) {
+      if (site !== null && siteOf(cookie.domain ?? "") !== site) continue;
+      await this.#memory.removeCookie(cookie.domain ?? "", cookie.path ?? "", cookie.key);
+      this.#markDirty(keyOf(cookie), null);
+      count++;
+      if (!cookie.httpOnly) removed.push({ ...snapshotOf(cookie), expires: 0 });
+    }
+    this.#emit(removed);
+    await this.flush();
+    return count;
+  }
+
   onChange(listener: (changes: CookieSnapshot[]) => void): () => void {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
@@ -175,7 +202,7 @@ function keyOf(cookie: Cookie): string {
   return `${cookie.domain ?? ""}|${cookie.path ?? ""}|${cookie.key}`;
 }
 
-function siteOf(hostname: string): string {
+export function siteOf(hostname: string): string {
   return getDomain(hostname) ?? hostname;
 }
 

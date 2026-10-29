@@ -1,4 +1,6 @@
 import { defaultDataDir } from "./paths.ts";
+import { parseHostList } from "./upstream/blocklist.ts";
+import { parseUpstreamProxy, type UpstreamProxy } from "./upstream/proxy-config.ts";
 
 export type LogLevel = "error" | "warn" | "info" | "debug";
 
@@ -13,6 +15,9 @@ export interface Config {
   dataDir: string;
   trustProxy: boolean | number | string;
   sessionSecret: string | undefined;
+  rateLimit: number;
+  blockedHosts: string[];
+  upstreamProxy: UpstreamProxy | undefined;
 }
 
 export interface TestUpstream {
@@ -41,6 +46,9 @@ export function loadConfig(env: Env): Config {
     dataDir: env.GIRICI_DATA_DIR?.trim() || defaultDataDir,
     trustProxy: readTrustProxy(env.GIRICI_TRUST_PROXY),
     sessionSecret: env.GIRICI_SESSION_SECRET?.trim() || undefined,
+    rateLimit: readRateLimit(env.GIRICI_RATE_LIMIT),
+    blockedHosts: readBlockedHosts(env.GIRICI_BLOCKED_HOSTS),
+    upstreamProxy: parseUpstreamProxy(env.GIRICI_UPSTREAM_PROXY),
   };
 }
 
@@ -62,6 +70,23 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
   if (["true", "1", "yes", "on"].includes(value)) return true;
   if (["false", "0", "no", "off"].includes(value)) return false;
   return fallback;
+}
+
+function readRateLimit(raw: string | undefined): number {
+  const value = raw?.trim();
+  if (!value) return 3000;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`GIRICI_RATE_LIMIT must be a whole number of requests per minute (0 turns it off), got "${raw}"`);
+  }
+  return Number(value);
+}
+
+function readBlockedHosts(raw: string | undefined): string[] {
+  const { hosts, invalid } = parseHostList(raw ?? "");
+  if (invalid.length > 0) {
+    throw new Error(`GIRICI_BLOCKED_HOSTS has entries that are not host names: ${invalid.join(", ")}`);
+  }
+  return hosts;
 }
 
 function readPort(env: Env): number {

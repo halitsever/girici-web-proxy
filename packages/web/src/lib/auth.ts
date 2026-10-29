@@ -11,6 +11,12 @@ export interface AuthState {
   admin?: AdminInfo;
 }
 
+export interface AdminSettings {
+  public: boolean;
+  blockedHosts: string[];
+  envBlockedHosts: string[];
+}
+
 export interface SetupInput {
   username: string;
   name: string;
@@ -75,6 +81,26 @@ export async function setPublicAccess(on: boolean): Promise<boolean> {
   if (!res.ok) throw new Error("Could not change public access.");
   invalidate();
   return (await res.json()).public as boolean;
+}
+
+export async function getAdminSettings(): Promise<AdminSettings> {
+  const res = await fetch("/_g/admin/settings", { headers: { accept: "application/json" } });
+  if (!res.ok) throw new Error("Could not load the admin settings.");
+  return res.json() as Promise<AdminSettings>;
+}
+
+export async function saveBlockedHosts(hosts: string[]): Promise<AdminSettings> {
+  const res = await fetch("/_g/admin/settings", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ blockedHosts: hosts }),
+  });
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { invalid?: string[] };
+    if (body.invalid?.length) throw new Error(`These entries are not valid sites: ${body.invalid.join(", ")}`);
+  }
+  if (!res.ok) throw new Error("Could not save blocked sites.");
+  return res.json() as Promise<AdminSettings>;
 }
 
 async function postState(path: string, body: unknown, messages: Record<number, string>): Promise<AuthState> {

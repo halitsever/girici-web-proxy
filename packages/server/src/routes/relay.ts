@@ -1,10 +1,12 @@
 import { Transform, type TransformCallback } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { encodeHeaderList, HEADER, targetFromRelayPath, type RelayErrorCode } from "@girici/engine/shared";
+import { encodeHeaderList, HEADER, targetFromRelayPath } from "@girici/engine/shared";
 import { Router, type Request, type Response } from "express";
 import { request, type Dispatcher } from "undici";
 import { isOwnHost } from "../http/origin.ts";
+import { sendRelayError } from "../http/relay-error.ts";
 import type { Logger } from "../log.ts";
+import type { HostBlocklist } from "../upstream/blocklist.ts";
 import { RelayRequestError, relayErrorFor } from "../upstream/errors.ts";
 import { buildUpstreamHeaders } from "../upstream/request-headers.ts";
 import { splitUpstreamHeaders } from "../upstream/response-headers.ts";
@@ -15,40 +17,51 @@ export interface RelayOptions {
   allowedTestHosts: ReadonlySet<string>;
   maxRequestBody: number;
   logger: Logger;
+  blocklist?: HostBlocklist;
 }
 
 const TUNNELED_METHOD = /^[A-Z]+$/;
 const BLOCKED_METHODS = new Set(["CONNECT", "TRACE", "TRACK"]);
 const NULL_BODY_STATUSES = new Set([204, 304]);
 
+const PROXY_WARNING_MS = 60_000;
+
 export function relayRouter(options: RelayOptions): Router {
   const router = Router();
+  // A dead upstream proxy fails every request; one line a minute tells the operator without flooding the log.
+  let lastProxyWarning = -Infinity;
+  const onProxyFailure = () => {
+    const now = Date.now();
+    if (now - lastProxyWarning < PROXY_WARNING_MS) return;
+    lastProxyWarning = now;
+    options.logger.warn("Upstream proxy failed; check GIRICI_UPSTREAM_PROXY");
+  };
   // Mounted by prefix so Express never percent-decodes the target path.
   router.use("/_g/r", (req, res, next) => {
-    relay(req, res, options).catch(next);
+    relay(req, res, options, onProxyFailure).catch(next);
   });
   return router;
 }
 
-async function relay(req: Request, res: Response, options: RelayOptions): Promise<void> {
+async function relay(req: Request, res: Response, options: RelayOptions, onProxyFailure: () => void): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") {
     res.setHeader("Allow", "GET, HEAD, POST");
-    fail(res, "bad_request", 405);
+    sendRelayError(res, "bad_request", 405);
     return;
   }
   // The custom marker forces a CORS preflight for cross-site callers, which nothing here answers.
   const fetchSite = req.get("sec-fetch-site");
   if (req.get(HEADER.relay) !== "1" || (fetchSite && fetchSite !== "same-origin")) {
-    fail(res, "bad_request", 403);
+    sendRelayError(res, "bad_request", 403);
     return;
   }
   if (req.method === "POST" && !isOwnHost(req.get("origin"), req.get("host"))) {
-    fail(res, "bad_request", 403);
+    sendRelayError(res, "bad_request", 403);
     return;
   }
   const target = targetFromRelayPath(req.originalUrl);
   if (!target) {
-    fail(res, "bad_request", 400);
+    sendRelayError(res, "bad_request", 400);
     return;
   }
 
@@ -58,6 +71,7 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
   });
 
   try {
+    if (options.blocklist?.isBlocked(target.hostname)) throw new RelayRequestError("blocked", 403);
     validateTarget(target, { allowedTestHosts: options.allowedTestHosts, selfHost: req.get("host") });
     const method = upstreamMethod(req);
     if (Number(req.get("content-length") ?? 0) > options.maxRequestBody) throw new RelayRequestError("too_large", 413);
@@ -98,11 +112,12 @@ async function relay(req: Request, res: Response, options: RelayOptions): Promis
     if (controller.signal.aborted) return;
     const { code, status } = relayErrorFor(error);
     options.logger.debug(`relay ${code} ${target.host}`);
+    if (code === "proxy") onProxyFailure();
     if (res.headersSent) {
       res.destroy();
       return;
     }
-    fail(res, code, status);
+    sendRelayError(res, code, status);
   }
 }
 
@@ -117,13 +132,6 @@ function upstreamMethod(req: Request): string {
 function relayStatus(status: number): number {
   if ((status >= 300 && status < 400 && status !== 304) || status < 200 || status > 599) return 200;
   return status;
-}
-
-function fail(res: Response, code: RelayErrorCode, status: number): void {
-  res.setHeader(HEADER.error, code);
-  res.setHeader(HEADER.status, String(status));
-  res.setHeader("Cache-Control", "no-store");
-  res.status(status).type("text/plain").send(code);
 }
 
 class ByteLimit extends Transform {

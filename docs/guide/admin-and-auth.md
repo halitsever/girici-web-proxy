@@ -50,6 +50,13 @@ docker compose exec girici node reset-admin-password.js
 The tool reads the same data directory as the server (`GIRICI_DATA_DIR`), so point it at the right
 database if you overrode that.
 
+## Blocked sites
+
+Under **Settings → Admin → Blocked sites**, list one site per line. Girici refuses those sites and all of
+their subdomains on every relay, including WebSockets, and shows visitors a page that says the site is
+blocked on this server. You can paste a full URL; Girici keeps only its host name. Sites listed in the
+`GIRICI_BLOCKED_HOSTS` environment variable apply too and show under the editor as read-only.
+
 ## Scaling later
 
 The schema already carries a username per account, so the single-admin model can grow into multiple

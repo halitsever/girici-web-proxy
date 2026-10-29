@@ -1,6 +1,6 @@
 import { createServer, type RequestListener, type Server } from "node:http";
 import { createServer as createSecureServer } from "node:https";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, LookupFunction } from "node:net";
 import express from "express";
 import { generate } from "selfsigned";
 import { errorHandler } from "../../src/http/error-handler.ts";
@@ -8,6 +8,8 @@ import { createHttpServer } from "../../src/http/server.ts";
 import { createLogger } from "../../src/log.ts";
 import { relayRouter } from "../../src/routes/relay.ts";
 import { createUpstreamAgent } from "../../src/upstream/agent.ts";
+import type { HostBlocklist } from "../../src/upstream/blocklist.ts";
+import type { UpstreamProxy } from "../../src/upstream/proxy-config.ts";
 
 export interface TestCert {
   key: string;
@@ -47,12 +49,20 @@ export async function startRelay(options: {
   testCa?: string;
   maxRequestBody?: number;
   headersTimeout?: number;
+  blocklist?: HostBlocklist;
+  proxy?: UpstreamProxy;
+  lookup?: LookupFunction;
+  /** When given, collects warn-level log lines. */
+  logLines?: string[];
 }): Promise<{ base: string; close(): Promise<void> }> {
-  const logger = createLogger("error", () => {});
+  const lines = options.logLines;
+  const logger = lines ? createLogger("warn", (line) => lines.push(line)) : createLogger("error", () => {});
   const agent = createUpstreamAgent({
     testUpstreams: options.testUpstreams,
     testCa: options.testCa,
     headersTimeout: options.headersTimeout,
+    proxy: options.proxy,
+    lookup: options.lookup,
   });
   const app = express();
   app.use(
@@ -61,6 +71,7 @@ export async function startRelay(options: {
       allowedTestHosts: new Set(options.testUpstreams.keys()),
       maxRequestBody: options.maxRequestBody ?? 50 * 1024 * 1024,
       logger,
+      blocklist: options.blocklist,
     }),
   );
   app.use(errorHandler(logger));

@@ -1,28 +1,22 @@
-import { HEADER } from "@girici/engine/shared";
-import type { RequestHandler, Response } from "express";
-import { sessionFromRequest } from "./cookie.ts";
+import type { RequestHandler } from "express";
+import { sendRelayError } from "../http/relay-error.ts";
+import { readSessionToken } from "./cookie.ts";
 import type { AuthStore } from "./store.ts";
+
+/** True when the Cookie header carries a valid session for the current admin. */
+export function isAdminCookie(store: AuthStore, cookieHeader: string | undefined): boolean {
+  const sub = readSessionToken(cookieHeader, store.sessionSecret());
+  return sub !== null && store.admin()?.id === sub;
+}
 
 /** Guards the proxy data path: open when public, else a valid session for the current admin. */
 export function authGate(store: AuthStore): RequestHandler {
   return (req, res, next) => {
-    if (store.publicAccess()) {
+    if (store.publicAccess() || isAdminCookie(store, req.headers.cookie)) {
       next();
       return;
     }
-    const sub = sessionFromRequest(req, store.sessionSecret());
-    if (sub !== null && store.admin()?.id === sub) {
-      next();
-      return;
-    }
-    failAuth(res);
+    // The SW turns this into a login redirect for navigations and Response.error() for subresources.
+    sendRelayError(res, "auth", 401);
   };
-}
-
-/** The SW turns this into a login redirect for navigations and Response.error() for subresources. */
-function failAuth(res: Response): void {
-  res.setHeader(HEADER.error, "auth");
-  res.setHeader(HEADER.status, "401");
-  res.setHeader("Cache-Control", "no-store");
-  res.status(401).type("text/plain").send("auth");
 }

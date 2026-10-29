@@ -58,3 +58,24 @@ subresources. Turning on public access opens the data path to everyone and skips
 - **The operator sees traffic.** The relay terminates TLS at the server.
 - **Bot protection still applies.** A correct proxy can still be blocked by a site's bot checks or by
   blocks on datacenter IP ranges.
+
+## Toolbar and site data
+
+Every proxied page gets a small Girici button in its bottom-left corner. It opens a bar with Girici home,
+back, forward, reload, an address field that takes a URL or a search, and **Clear site data**. Turn it off
+under **Settings → Show toolbar on sites** if a site reacts badly to it.
+
+All proxied sites share Girici's origin in your browser, so Girici keeps each site's cookies in its own
+jar and prefixes each site's storage. **Settings → Site data** lists the sites that stored something and
+clears one of them, or all of them, without touching the others. Clearing a site removes its cookies,
+including HttpOnly ones, and its local storage, session storage, IndexedDB databases and caches, for the
+site and its subdomains.
+
+## Third-party cookies
+
+**Settings → Block third-party cookies** is on by default. While it is on, Girici sends and stores no cookies for a
+request whose site differs from the site of the page you opened: a tracker's pixel, script or iframe on one site cannot
+read the cookie it set on another. Cookies of the site you are on, and its subdomains, work as usual. Embedded sign-ins,
+such as comment widgets or a signed-in video player on another site, stop working while the switch is on; turn it off if
+you need them.
+

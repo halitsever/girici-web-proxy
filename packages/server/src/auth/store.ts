@@ -99,6 +99,22 @@ export class AuthStore {
     this.#setSetting("public_access", on ? "1" : "0");
   }
 
+  /** Normalized host entries the admin blocked in Settings; an unreadable value counts as none. */
+  blockedHosts(): string[] {
+    const raw = this.#setting("blocked_hosts");
+    if (!raw) return [];
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((host): host is string => typeof host === "string") : [];
+    } catch {
+      return [];
+    }
+  }
+
+  setBlockedHosts(hosts: readonly string[]): void {
+    this.#setSetting("blocked_hosts", JSON.stringify(hosts));
+  }
+
   #adminRow(): AdminRow | null {
     const row = this.#db.prepare("SELECT * FROM admins ORDER BY id LIMIT 1").get() as AdminRow | undefined;
     return row ?? null;

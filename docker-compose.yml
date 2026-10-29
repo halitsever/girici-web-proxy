@@ -8,6 +8,8 @@ services:
     environment:
       LOG_LEVEL: info
       GIRICI_DATA_DIR: /data
+      # Set to 1 with the https profile, so rate limits see each visitor instead of Caddy.
+      GIRICI_TRUST_PROXY: ${GIRICI_TRUST_PROXY:-}
       # SOURCE_URL: https://github.com/you/your-fork
     volumes:
       - girici_data:/data

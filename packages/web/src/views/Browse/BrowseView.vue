@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowRight, Clock, Search } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
-import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
+import { openProxied, serviceWorkerSupport, startEngine } from "@/lib/proxy";
 import { loadHistory, rememberVisit, relativeTime, type HistoryEntry } from "@/lib/history";
 import { loadSettings } from "@/lib/settings";
 import { classifyInput, toProxyPath } from "@/lib/target";
@@ -133,8 +133,7 @@ async function openRow(row: Row | undefined) {
   success.value = `Opening ${name}${settings.value.newTab ? " in a new tab" : ""}…`;
   try {
     if (settings.value.newTab) {
-      await navigator.serviceWorker.register("/_g/sw.js", { scope: "/", updateViaCache: "none" });
-      await navigator.serviceWorker.ready;
+      await startEngine();
       window.open(row.path, "_blank", "noopener");
     } else {
       await openProxied(row.path);

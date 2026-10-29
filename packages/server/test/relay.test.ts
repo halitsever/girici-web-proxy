@@ -2,6 +2,7 @@ import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage,
 import { gzipSync } from "node:zlib";
 import { decodeHeaderList, encodeHeaderList, encodeHeaderValue } from "@girici/engine/shared";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { HostBlocklist } from "../src/upstream/blocklist.ts";
 import { createTestCert, relayFetch, startRelay, startUpstream, type TestCert } from "./helpers/upstream.ts";
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => void;
@@ -19,7 +20,7 @@ afterEach(async () => {
 
 async function setup(
   handler: Handler,
-  options: { trustCa?: boolean; maxRequestBody?: number; headersTimeout?: number } = {},
+  options: { trustCa?: boolean; maxRequestBody?: number; headersTimeout?: number; blocked?: string[] } = {},
 ) {
   const upstream = await startUpstream(handler, cert);
   const relay = await startRelay({
@@ -27,6 +28,7 @@ async function setup(
     testCa: options.trustCa === false ? undefined : cert.cert,
     maxRequestBody: options.maxRequestBody,
     headersTimeout: options.headersTimeout,
+    blocklist: options.blocked ? new HostBlocklist(options.blocked, []) : undefined,
   });
   cleanups.push(relay.close, upstream.close);
   return { upstream, base: relay.base };
@@ -248,6 +250,16 @@ describe("relay", () => {
       expect(res.headers.get("x-girici-error")).toBe("ssrf_blocked");
     }
     expect((await relayFetch(base, "ftp/example.com/")).headers.get("x-girici-error")).toBe("bad_request");
+  });
+
+  it("refuses blocked hosts and their subdomains before connecting", async () => {
+    const { base, upstream } = await setup((_req, res) => res.end("ok"), { blocked: ["site-a.test"] });
+    for (const tail of ["https/site-a.test/", "https/WWW.site-a.test./x"]) {
+      const res = await relayFetch(base, tail);
+      expect(res.status).toBe(403);
+      expect(res.headers.get("x-girici-error")).toBe("blocked");
+    }
+    expect(upstream.requestCount()).toBe(0);
   });
 
   it("verifies upstream TLS", async () => {

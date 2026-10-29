@@ -1,5 +1,6 @@
 import { decodeUrl } from "../shared/codec.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
+import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
@@ -21,12 +22,15 @@ import { createMessageSender, installMessaging } from "./messaging.ts";
 import { installPermissions } from "./permissions.ts";
 import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
+import { captureToolbarNatives, installToolbar, shouldShowToolbar } from "./toolbar.ts";
+import { installTopSiteResponder } from "./top-site.ts";
 import { createUrlContext, type InheritedContext, type Realm } from "./url-context.ts";
 
 export function install(win: Realm, config: ClientConfig, inherited?: InheritedContext): void {
   // A realm is set up once; a child frame that already carries the runtime is left alone.
   if (Object.getOwnPropertyDescriptor(win, "__g$")) return;
   const ctx = createUrlContext(win, inherited);
+  const toolbarNatives = captureToolbarNatives(win);
   const nativeLocation = win.location;
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
   let cookies: CookieBridge = { currentSeq: () => 0, pendingWrites: () => null, applySync: () => {} };
@@ -96,6 +100,8 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["workers", () => installWorkers(win, ctx)],
     ["cookies", () => (cookies = installCookies(win, ctx, config))],
     ["navigation", () => installNavigation(win, ctx, cookies)],
+    // Before the mask hides the real service worker container from the page.
+    ["top site", () => installTopSiteResponder(win)],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
@@ -107,6 +113,17 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
     ["frames", () => installFrames(win, ctx, config, install)],
+    [
+      "toolbar",
+      () => {
+        const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
+        if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: inherited !== undefined, prefs })) return;
+        installToolbar(win, ctx, toolbarNatives, {
+          assign: (path) => nativeLocation.assign(path),
+          reload: () => nativeLocation.reload(),
+        });
+      },
+    ],
     // Last, so every hook installed above is registered before tamper checks can read a masked toString.
     ["native mask", () => installToStringMask(win)],
   ];

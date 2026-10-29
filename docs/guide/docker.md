@@ -48,10 +48,14 @@ The compose file includes an optional Caddy service behind an `https` profile. I
 speaks HTTP/2 to Girici.
 
 ```bash
-GIRICI_DOMAIN=proxy.example docker compose --profile https up -d
+GIRICI_DOMAIN=proxy.example GIRICI_TRUST_PROXY=1 docker compose --profile https up -d
 ```
 
 Edit `deploy/Caddyfile` for your domain and certificate setup.
+
+`GIRICI_TRUST_PROXY=1` tells Girici that one proxy (Caddy) sits in front of it, so the rate limits and the WebSocket
+cap count each visitor instead of lumping everyone under Caddy's address. Remove the `ports` mapping of the `girici`
+service when you do this, so nobody can reach Girici directly with a forged `X-Forwarded-For`.
 
 ## Resetting the admin password in a container
 

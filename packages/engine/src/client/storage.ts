@@ -1,9 +1,7 @@
+import { prefixFor } from "../shared/partition.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
-/** The key/name prefix that keeps one real origin's storage apart from another's on our shared origin. */
-export function prefixFor(origin: string): string {
-  return `__g|${origin}|`;
-}
+export { prefixFor };
 
 /** Every proxied site shares our origin's storage, so each real origin gets its own key prefix. */
 export function createPartitionedStorage(native: Storage, origin: string): Storage {

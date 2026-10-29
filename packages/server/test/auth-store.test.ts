@@ -62,3 +62,14 @@ describe("AuthStore settings", () => {
     expect(s.publicAccess()).toBe(false);
   });
 });
+
+describe("AuthStore blocked hosts", () => {
+  it("stores the blocked host list and reads a corrupt value as empty", () => {
+    const db = openDb(":memory:");
+    const s = new AuthStore(db);
+    s.setBlockedHosts(["a.com", "b.com"]);
+    expect(s.blockedHosts()).toEqual(["a.com", "b.com"]);
+    db.prepare("UPDATE settings SET value = ? WHERE key = ?").run("{", "blocked_hosts");
+    expect(s.blockedHosts()).toEqual([]);
+  });
+});
