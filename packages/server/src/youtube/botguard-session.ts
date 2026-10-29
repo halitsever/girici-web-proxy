@@ -10,6 +10,8 @@ const GENERATE_IT = `${GOOG_BASE_URL}/$rpc/google.internal.waa.v1.Waa/GenerateIT
 // Refresh a minute before the integrity token's real expiry.
 const TTL_MARGIN_MS = 60_000;
 
+export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
 let domReady = false;
 
 /** BotGuard inspects the environment, so a jsdom window stands in for a browser, once per process. */
@@ -24,22 +26,32 @@ function ensureDom(): void {
   domReady = true;
 }
 
-async function interpreterSource(challenge: Awaited<ReturnType<typeof getChallenge>>): Promise<string> {
+async function interpreterSource(
+  challenge: Awaited<ReturnType<typeof getChallenge>>,
+  fetchImpl: FetchLike,
+): Promise<string> {
   const inline = challenge.interpreterJavascript?.privateDoNotAccessOrElseSafeScriptWrappedValue;
   if (inline) return inline;
   const wrapped = challenge.interpreterUrl?.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
   if (!wrapped) throw new Error("botguard challenge carried no interpreter");
   const url = "https:" + wrapped.replace(/^https?:/, "");
-  return (await fetch(url, { headers: { "user-agent": USER_AGENT } })).text();
+  return (await fetchImpl(url, { headers: { "user-agent": USER_AGENT } })).text();
 }
 
-/** Run the BotGuard attestation once and return a minter bound to its integrity token. */
-export async function createBotGuardSession(): Promise<PoSession> {
+/**
+ * Run the BotGuard attestation once and return a minter bound to its integrity token. Every request goes through
+ * fetchImpl, because YouTube ties the tokens to the IP that minted them and the relay must share it.
+ */
+export async function createBotGuardSession(fetchImpl: FetchLike = fetch): Promise<PoSession> {
   ensureDom();
-  const challenge = await getChallenge({ requestKey: REQUEST_KEY, fetchFunction: fetch, useYouTubeAPI: true });
+  const challenge = await getChallenge({
+    requestKey: REQUEST_KEY,
+    fetchFunction: fetchImpl as typeof fetch,
+    useYouTubeAPI: true,
+  });
   if (!challenge?.program || !challenge.globalName) throw new Error("botguard challenge incomplete");
 
-  new Function(await interpreterSource(challenge))();
+  new Function(await interpreterSource(challenge, fetchImpl))();
   const client = await BotGuardClient.create({
     program: challenge.program,
     globalName: challenge.globalName,
@@ -48,7 +60,7 @@ export async function createBotGuardSession(): Promise<PoSession> {
   const webPoSignalOutput: Parameters<typeof WebPoMinter.create>[1] = [];
   const botguardResponse = await client.snapshot({ webPoSignalOutput });
 
-  const response = await fetch(GENERATE_IT, {
+  const response = await fetchImpl(GENERATE_IT, {
     method: "POST",
     headers: {
       "content-type": "application/json+protobuf",
@@ -69,6 +81,6 @@ export async function createBotGuardSession(): Promise<PoSession> {
   };
 }
 
-export function createPoTokenMinter(): PoTokenMinter {
-  return new PoTokenMinter(createBotGuardSession);
+export function createPoTokenMinter(fetchImpl?: FetchLike): PoTokenMinter {
+  return new PoTokenMinter(() => createBotGuardSession(fetchImpl));
 }

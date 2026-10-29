@@ -1,5 +1,7 @@
 import { createFakeLocation } from "./location.ts";
 import { createHelpers } from "./helpers.ts";
+import { encodeUrl } from "../shared/codec.ts";
+import { TOP_SITE_QUERY } from "../shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 
 /** The worker globals this runtime touches; typed narrowly so it needs neither the DOM nor the WebWorker lib. */
@@ -16,7 +18,16 @@ interface WorkerScope {
   eval: (code: string) => unknown;
   Request?: new (input: unknown, init?: unknown) => { url: string };
   EventSource?: new (url: string, init?: unknown) => object;
-  navigator?: { sendBeacon?: (url: string, data?: unknown) => boolean };
+  navigator?: {
+    sendBeacon?: (url: string, data?: unknown) => boolean;
+    serviceWorker?: {
+      addEventListener(
+        type: "message",
+        listener: (event: { data: unknown; ports: ReadonlyArray<{ postMessage(message: unknown): void }> }) => void,
+      ): void;
+      startMessages?(): void;
+    };
+  };
   Worker?: new (url: string, options?: unknown) => object;
   SharedWorker?: new (url: string, options?: unknown) => object;
 }
@@ -41,6 +52,11 @@ const toProxy = (raw: string): string => {
   return proxied.startsWith("/") ? origin + proxied : proxied;
 };
 const fromProxy = (value: string): string => unrewriteUrl(value, realBase(), origin);
+// The service worker sees this worker only as a blob: address, so its fetches name the real script as referrer.
+const withOwnReferrer = (init: unknown): unknown => {
+  const options = (init ?? {}) as { referrer?: unknown };
+  return options.referrer === undefined ? { ...options, referrer: origin + encodeUrl(realBase()) } : init;
+};
 
 install();
 
@@ -83,6 +99,7 @@ function install(): void {
   hookXhr();
   hookSubresources();
   blockRealtime();
+  answerTopQueries();
 }
 
 /** Other network sinks a worker can reach, so none of them leaves the proxy or the cookie jar. */
@@ -117,6 +134,17 @@ function hookImportScripts(): void {
     );
 }
 
+/** Requests a worker starts without fetch, such as XHR, still need its site; the service worker asks for it. */
+function answerTopQueries(): void {
+  const container = scope.navigator?.serviceWorker;
+  if (!container) return;
+  container.addEventListener("message", (event) => {
+    if ((event.data as { type?: unknown } | null)?.type !== TOP_SITE_QUERY) return;
+    event.ports[0]?.postMessage({ top: realBase().href });
+  });
+  container.startMessages?.();
+}
+
 function hookFetch(): void {
   const native = scope.fetch;
   const Request = scope.Request;
@@ -124,9 +152,9 @@ function hookFetch(): void {
   scope.fetch = (input: unknown, init?: unknown) => {
     if (Request && input instanceof Request) {
       const url = toProxy(input.url);
-      return native.call(scope, url === input.url ? input : new Request(url, input), init);
+      return native.call(scope, url === input.url ? input : new Request(url, input), withOwnReferrer(init));
     }
-    return native.call(scope, toProxy(String(input)), init);
+    return native.call(scope, toProxy(String(input)), withOwnReferrer(init));
   };
 }
 

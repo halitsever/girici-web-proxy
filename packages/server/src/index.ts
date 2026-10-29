@@ -4,10 +4,15 @@ import { createApp } from "./app.ts";
 import { AuthStore } from "./auth/store.ts";
 import { loadConfig, type Config } from "./config.ts";
 import { openDb } from "./db/open.ts";
+import { compileTrust } from "./http/client-ip.ts";
+import { tokenBucket } from "./http/rate-limit.ts";
+import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
-import { createUpstreamAgent } from "./upstream/agent.ts";
+import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
+import { HostBlocklist } from "./upstream/blocklist.ts";
+import { describeProxy } from "./upstream/proxy-config.ts";
 import { createGuardedLookup } from "./upstream/ssrf.ts";
 import { createPoTokenMinter } from "./youtube/botguard-session.ts";
 import { attachWsRelay } from "./ws/relay-ws.ts";
@@ -38,11 +43,19 @@ if (!existsSync(join(webDistDir, "index.html"))) {
 if (!existsSync(join(engineBundlesDir, "sw.js"))) {
   logger.warn("Proxy engine is not built; proxied pages cannot load until you run npm run build");
 }
+if (config.upstreamProxy) {
+  logger.info(`Upstream proxy: ${describeProxy(config.upstreamProxy)}`);
+}
 if (config.testUpstreams.size > 0) {
   logger.warn(`Test mode: upstream mapping active for ${[...config.testUpstreams.keys()].join(", ")}`);
 }
 
+// One trust function and one bucket serve both relays, so a client cannot double its budget over WebSockets.
+const trust = compileTrust(config.trustProxy);
+const limiter = config.rateLimit > 0 ? tokenBucket({ perMinute: config.rateLimit }) : null;
+const blocklist = new HostBlocklist(config.blockedHosts, authStore.blockedHosts());
 const agent = createUpstreamAgent({
+  proxy: config.upstreamProxy,
   testUpstreams: config.testUpstreams,
   testCa: config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined,
 });
@@ -53,17 +66,41 @@ const server = createHttpServer(
     sourceUrl: config.sourceUrl,
     logger,
     authStore,
-    trustProxy: config.trustProxy,
-    relay: { agent, allowedTestHosts: new Set(config.testUpstreams.keys()), maxRequestBody: 50 * 1024 * 1024 },
-    // Lazy: BotGuard only runs on the first poToken request, so this costs nothing at startup.
-    poToken: config.youtubePoToken ? createPoTokenMinter() : undefined,
+    trust,
+    limiter,
+    blocklist,
+    relay: {
+      agent,
+      allowedTestHosts: new Set(config.testUpstreams.keys()),
+      maxRequestBody: 50 * 1024 * 1024,
+      blocklist,
+    },
+    // Lazy: BotGuard only runs on the first poToken request, so this costs nothing at startup. It leaves through the
+    // relay's agent so tokens and media share one egress IP, with or without an upstream proxy.
+    poToken: config.youtubePoToken
+      ? createPoTokenMinter(
+          (input, init) =>
+            undiciFetch(input, { ...(init as object), dispatcher: agent }) as unknown as Promise<Response>,
+        )
+      : undefined,
   }),
 );
+const wsLookup = createGuardedLookup();
 attachWsRelay(server, {
   allowedTestHosts: new Set(config.testUpstreams.keys()),
-  lookup: createGuardedLookup(),
+  lookup: wsLookup,
+  tunnel: config.upstreamProxy
+    ? createTunnelDialer(config.upstreamProxy, {
+        lookup: wsLookup,
+        testUpstreams: config.testUpstreams,
+        timeout: 10_000,
+      })
+    : undefined,
   logger,
   authStore,
+  trust,
+  limiter,
+  blocklist,
 });
 server.on("error", (error) => {
   logger.error(error.message);

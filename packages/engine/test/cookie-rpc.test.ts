@@ -65,4 +65,16 @@ describe("CookieRpc", () => {
     await rpc.waitFor("client-1", 5);
     expect(Date.now() - started).toBeGreaterThanOrEqual(15);
   });
+
+  it("ignores a blocked script write but still releases requests waiting on it", async () => {
+    const cookies = await service();
+    const rpc = new CookieRpc(cookies);
+    const tracker = new URL("https://tracker.test/");
+    const res = await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 1, cookie: "t=1" }), "c1", tracker, {
+      blocked: true,
+    });
+    expect(await res.json()).toEqual({ cookies: [] });
+    expect(await cookies.snapshot(tracker)).toEqual([]);
+    expect(rpc.clientIds()).toContain("c1");
+  });
 });

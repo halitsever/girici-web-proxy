@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createSessionToken, readSessionToken, SESSION_COOKIE, SESSION_TTL_MS } from "../src/auth/cookie.ts";
+import {
+  createSessionToken,
+  PLAIN_SESSION_COOKIE,
+  readSessionToken,
+  SESSION_COOKIE,
+  SESSION_TTL_MS,
+} from "../src/auth/cookie.ts";
 
 const secret = "cookie-secret";
 
@@ -23,5 +29,10 @@ describe("session cookie", () => {
   it("returns null when the secret has rotated", () => {
     const token = createSessionToken(7, secret, 1_000);
     expect(readSessionToken(`${SESSION_COOKIE}=${token}`, "rotated", 2_000)).toBeNull();
+  });
+
+  it("also reads the session cookie that plain-http pages get", () => {
+    const token = createSessionToken(42, "secret", 1_000);
+    expect(readSessionToken(`${PLAIN_SESSION_COOKIE}=${token}`, "secret", 2_000)).toBe(42);
   });
 });

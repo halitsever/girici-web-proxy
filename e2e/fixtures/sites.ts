@@ -556,6 +556,22 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/target": html(page("Target", "<h1>Target</h1>")),
     "/redirect-cross": redirect(302, "https://www.site-a.test/landing"),
     "/nav": html(NAV),
+    "/keys": html(
+      page(
+        "Keys",
+        `<p id="keys">0</p>
+<script>let n = 0; document.addEventListener("keydown", () => { document.getElementById("keys").textContent = String(++n); });</script>`,
+      ),
+    ),
+    "/wipe": html(
+      page(
+        "Wipe",
+        `<script>addEventListener("load", () => {
+  const body = document.createElement("body"); body.id = "wiped";
+  document.documentElement.replaceChildren(document.createElement("head"), body);
+});</script>`,
+      ),
+    ),
     "/echo": echo,
     "/meta-refresh": html(page("Meta", "", '<meta http-equiv="refresh" content="0; url=https://site-b.test/">')),
     "/refresh-header": (_req, res) => {
@@ -575,6 +591,13 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/runtime": html(RUNTIME),
     "/cookie/login": login,
     "/cookie/whoami": whoami,
+    "/third-party": html(
+      page(
+        "Third party",
+        `<p id="fetch"></p><iframe id="tp" src="https://site-b.test/cookie/whoami"></iframe>
+    <script>fetch("https://site-b.test/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => { document.getElementById("fetch").textContent = t || "none"; });</script>`,
+      ),
+    ),
     "/storage": html(STORAGE),
     "/idb-store": html(IDB_STORE),
     "/api": api,
@@ -641,6 +664,16 @@ const ROUTES: Record<string, Record<string, Route>> = {
     ),
     "/worker-origin.js": script("postMessage(self.origin);"),
     "/worker-classic.js": script("postMessage(self.location.href);"),
+    "/worker-cookie": html(
+      page(
+        "Worker cookie",
+        `<p id="worker"></p>
+<script>const w = new Worker("/worker-cookie.js"); w.onmessage = (e) => { document.getElementById("worker").textContent = e.data || "none"; };</script>`,
+      ),
+    ),
+    "/worker-cookie.js": script(
+      'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));',
+    ),
     "/worker-module.js": script("postMessage(self.location.href);"),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
@@ -650,6 +683,14 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,
+    "/cookie/set": (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "set-cookie": "tp=1; Path=/; SameSite=None; Secure",
+      });
+      res.end(page("Set", "<p>set</p>"));
+    },
+    "/cookie/echo": cookieEcho,
     "/storage": html(STORAGE),
     "/idb-store": html(IDB_STORE),
     "/api": api,

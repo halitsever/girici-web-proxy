@@ -15,6 +15,9 @@ describe("loadConfig", () => {
       dataDir: defaultDataDir,
       trustProxy: false,
       sessionSecret: undefined,
+      rateLimit: 3000,
+      blockedHosts: [],
+      upstreamProxy: undefined,
     });
   });
 
@@ -40,6 +43,30 @@ describe("loadConfig", () => {
     expect(loadConfig(env).testUpstreams.size).toBe(0);
     expect(loadConfig(env).testCaPath).toBeUndefined();
     expect(() => loadConfig({ NODE_ENV: "test", GIRICI_TEST_UPSTREAMS: "{oops" })).toThrow(/GIRICI_TEST_UPSTREAMS/);
+  });
+
+  it("reads GIRICI_RATE_LIMIT, defaulting to 3000 and allowing 0", () => {
+    expect(loadConfig({}).rateLimit).toBe(3000);
+    expect(loadConfig({ GIRICI_RATE_LIMIT: "0" }).rateLimit).toBe(0);
+    expect(loadConfig({ GIRICI_RATE_LIMIT: "600" }).rateLimit).toBe(600);
+    expect(() => loadConfig({ GIRICI_RATE_LIMIT: "fast" })).toThrow(/GIRICI_RATE_LIMIT/);
+    expect(() => loadConfig({ GIRICI_RATE_LIMIT: "-1" })).toThrow(/GIRICI_RATE_LIMIT/);
+  });
+
+  it("reads GIRICI_BLOCKED_HOSTS and names invalid entries", () => {
+    expect(loadConfig({ GIRICI_BLOCKED_HOSTS: "a.com, *.b.com" }).blockedHosts).toEqual(["a.com", "b.com"]);
+    expect(() => loadConfig({ GIRICI_BLOCKED_HOSTS: "a.com under_score.com" })).toThrow(/under_score\.com/);
+  });
+
+  it("reads GIRICI_UPSTREAM_PROXY and ignores the generic proxy variables", () => {
+    expect(loadConfig({ GIRICI_UPSTREAM_PROXY: "socks5://127.0.0.1:1080" }).upstreamProxy).toEqual({
+      protocol: "socks5",
+      host: "127.0.0.1",
+      port: 1080,
+    });
+    expect(
+      loadConfig({ HTTP_PROXY: "http://corp:3128", ALL_PROXY: "socks5://corp:1080" }).upstreamProxy,
+    ).toBeUndefined();
   });
 
   it("reads PORT and accepts LISTENER_PORT as an alias", () => {

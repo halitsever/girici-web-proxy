@@ -41,7 +41,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       return;
     }
     const admin = store.createAdmin(creds);
-    issueSession(res, admin.id, store.sessionSecret());
+    issueSession(req, res, admin.id, store.sessionSecret());
     res.json(state(store, true));
   });
 
@@ -57,7 +57,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       res.status(401).end();
       return;
     }
-    issueSession(res, admin.id, store.sessionSecret());
+    issueSession(req, res, admin.id, store.sessionSecret());
     res.json(state(store, true));
   });
 

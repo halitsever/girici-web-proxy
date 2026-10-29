@@ -14,11 +14,13 @@ export async function buildWsPrep(
   cookies: Pick<CookieService, "header">,
   rawUrl: string,
   pageUrl: URL | null,
+  allowCookies: (target: URL) => boolean | Promise<boolean> = () => true,
 ): Promise<WsPrep | null> {
   const ws = URL.parse(rawUrl);
   if (!ws || (ws.protocol !== "ws:" && ws.protocol !== "wss:")) return null;
   const target = new URL(ws.href);
   target.protocol = ws.protocol === "wss:" ? "https:" : "http:";
+  if (!(await allowCookies(target))) return { cookie: null, origin: pageUrl?.origin ?? target.origin };
   const cookie = await cookies.header(target, {
     initiator: pageUrl,
     credentials: "include",

@@ -34,7 +34,9 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     // Blocked storage only disables the reload guard.
   }
 
+  const blocked = config.cookiesBlocked === true;
   const apply = (changes: CookieSnapshot[]) => {
+    if (blocked) return;
     const host = ctx.realUrl().hostname;
     mirror = applyCookieChanges(
       mirror,
@@ -46,7 +48,8 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
   const write = (text: string) => {
     const cookie = parseScriptCookie(text, ctx.realUrl(), Date.now());
     if (!cookie) return;
-    mirror = applyCookieChanges(mirror, [cookie], Date.now());
+    // The worker drops a blocked frame's writes, so the mirror must not show them either.
+    if (!blocked) mirror = applyCookieChanges(mirror, [cookie], Date.now());
     const mySeq = ++seq;
     inflight++;
     const request = nativeFetch(COOKIE_RPC_PATH, {

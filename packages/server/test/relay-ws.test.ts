@@ -6,8 +6,13 @@ import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
+import { compileTrust } from "../src/http/client-ip.ts";
+import { tokenBucket } from "../src/http/rate-limit.ts";
+import { createTunnelDialer } from "../src/upstream/agent.ts";
+import { HostBlocklist } from "../src/upstream/blocklist.ts";
 import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
-import { attachWsRelay, mapCloseCode, validateWsTarget } from "../src/ws/relay-ws.ts";
+import { attachWsRelay, mapCloseCode, tlsIdentity, validateWsTarget, type WsRelayOptions } from "../src/ws/relay-ws.ts";
+import { httpProxy, startConnectProxy, startSilent } from "./helpers/proxies.ts";
 
 const policy = { allowedTestHosts: new Set<string>() };
 const noopLookup = ((_h: string, _o: unknown, cb: (e: null, a: string, f: number) => void) =>
@@ -26,26 +31,86 @@ function echoUpstream(): Promise<number> {
   return new Promise((resolve) => wss.on("listening", () => resolve((wss.address() as AddressInfo).port)));
 }
 
-async function relayServer(upstreamPort: number, authStore?: AuthStore): Promise<string> {
+async function countingEchoUpstream(): Promise<{ port: number; connections(): number }> {
+  let count = 0;
+  const wss = new WebSocketServer({ port: 0 });
+  cleanups.push(() => wss.close());
+  wss.on("connection", (socket) => {
+    count++;
+    socket.on("message", (data, isBinary) => socket.send(data, { binary: isBinary }));
+  });
+  const port = await new Promise<number>((resolve) =>
+    wss.on("listening", () => resolve((wss.address() as AddressInfo).port)),
+  );
+  return { port, connections: () => count };
+}
+
+async function relayServer(upstreamPort: number, options: Partial<WsRelayOptions> = {}): Promise<string> {
   const server: Server = createServer();
   cleanups.push(() => server.close());
   attachWsRelay(server, {
     allowedTestHosts: new Set(["ws.test"]),
     lookup: noopLookup,
     logger,
-    authStore,
-    dial: (_target, init) => new WebSocket(`ws://127.0.0.1:${upstreamPort}/`, init.protocols),
+    // A tunnel exercises the real dial, which reaches the upstream through the proxy.
+    dial: options.tunnel
+      ? undefined
+      : (_target, init) => new WebSocket(`ws://127.0.0.1:${upstreamPort}/`, init.protocols),
+    ...options,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `ws://127.0.0.1:${(server.address() as AddressInfo).port}/_g/ws`;
 }
 
-function connect(url: string, origin: string, cookie?: string): WebSocket {
+function connect(url: string, origin: string, cookie?: string, xff?: string): WebSocket {
   const headers: Record<string, string> = { origin };
   if (cookie) headers.cookie = cookie;
+  if (xff) headers["x-forwarded-for"] = xff;
   const ws = new WebSocket(url, ["girici.v1"], { headers });
   cleanups.push(() => ws.close());
   return ws;
+}
+
+const originOf = (url: string) => url.replace("ws://", "http://").replace("/_g/ws", "");
+
+function opened(ws: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    ws.on("open", () => resolve());
+    ws.on("error", reject);
+    ws.on("unexpected-response", (_req, res) => reject(new Error(`refused with ${res.statusCode}`)));
+    setTimeout(() => reject(new Error("did not open")), 3000);
+  });
+}
+
+function closed(ws: WebSocket): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve, reject) => {
+    ws.on("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    setTimeout(() => reject(new Error("no close")), 3000);
+  });
+}
+
+function openMessage(ws: WebSocket): Promise<{ t?: string }> {
+  return new Promise((resolve, reject) => {
+    ws.once("message", (data: Buffer) => resolve(JSON.parse(data.toString()) as { t?: string }));
+    setTimeout(() => reject(new Error("no open message")), 3000);
+  });
+}
+
+function nextMessage(ws: WebSocket): Promise<string> {
+  return new Promise((resolve, reject) => {
+    ws.once("message", (data: Buffer) => resolve(data.toString()));
+    setTimeout(() => reject(new Error("no message")), 3000);
+  });
+}
+
+function refusal(ws: WebSocket): Promise<number> {
+  // Closing a refused socket during cleanup aborts its handshake, which ws reports as an error.
+  ws.on("error", () => {});
+  return new Promise((resolve, reject) => {
+    ws.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+    ws.on("open", () => reject(new Error("opened despite the limit")));
+    setTimeout(() => reject(new Error("no refusal")), 3000);
+  });
 }
 
 describe("mapCloseCode", () => {
@@ -58,6 +123,14 @@ describe("mapCloseCode", () => {
     expect(mapCloseCode(1005)).toBe(1000);
     expect(mapCloseCode(1006)).toBe(1011);
     expect(mapCloseCode(1015)).toBe(1011);
+  });
+});
+
+describe("tlsIdentity", () => {
+  it("checks a wss certificate against the target, also for IP literals", () => {
+    expect(tlsIdentity(new URL("wss://chat.example/s"))).toEqual({ host: "chat.example", servername: "chat.example" });
+    expect(tlsIdentity(new URL("wss://[2606:4700::1111]/s"))).toEqual({ host: "2606:4700::1111" });
+    expect(tlsIdentity(new URL("wss://203.0.113.7/s"))).toEqual({ host: "203.0.113.7" });
   });
 });
 
@@ -92,7 +165,7 @@ describe("ws relay (integration)", () => {
   it("rejects an unauthenticated upgrade when an auth store gates it", async () => {
     const store = new AuthStore(openDb(":memory:"));
     store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
-    const url = await relayServer(await echoUpstream(), store);
+    const url = await relayServer(await echoUpstream(), { authStore: store });
     const origin = url.replace("ws://", "http://").replace("/_g/ws", "");
     const client = connect(url, origin);
     await new Promise<void>((resolve, reject) => {
@@ -105,7 +178,7 @@ describe("ws relay (integration)", () => {
   it("accepts an upgrade with a valid session cookie", async () => {
     const store = new AuthStore(openDb(":memory:"));
     const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
-    const url = await relayServer(await echoUpstream(), store);
+    const url = await relayServer(await echoUpstream(), { authStore: store });
     const origin = url.replace("ws://", "http://").replace("/_g/ws", "");
     const cookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
     const client = connect(url, origin, cookie);
@@ -155,5 +228,79 @@ describe("ws relay (integration)", () => {
       setTimeout(() => reject(new Error("no close")), 3000);
     });
     expect(code).toBe(1011);
+  });
+
+  it("answers an upgrade over the limit with 429", async () => {
+    const url = await relayServer(await echoUpstream(), { limiter: tokenBucket({ perMinute: 1 }) });
+    await opened(connect(url, originOf(url)));
+    expect(await refusal(connect(url, originOf(url)))).toBe(429);
+  });
+
+  it("caps WebSockets per forwarded client address, not per socket", async () => {
+    const url = await relayServer(await echoUpstream(), { trust: compileTrust(1), maxPerIp: 1 });
+    await opened(connect(url, originOf(url), undefined, "203.0.113.1"));
+    await opened(connect(url, originOf(url), undefined, "203.0.113.2"));
+    expect(await refusal(connect(url, originOf(url), undefined, "203.0.113.1"))).toBe(429);
+  });
+  it("closes with 1008 when the control frame names a blocked host", async () => {
+    const upstream = await countingEchoUpstream();
+    const url = await relayServer(upstream.port, { blocklist: new HostBlocklist(["ws.test"], []) });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect(await closed(ws)).toEqual({ code: 1008, reason: "blocked" });
+    expect(upstream.connections()).toBe(0);
+  });
+  it("dials the upstream through the proxy tunnel", async () => {
+    const upstreamPort = await echoUpstream();
+    const proxy = await startConnectProxy();
+    cleanups.push(() => void proxy.close());
+    const tunnel = createTunnelDialer(httpProxy(proxy.port), {
+      lookup: noopLookup,
+      testUpstreams: new Map([["ws.test", { host: "127.0.0.1", port: upstreamPort }]]),
+      timeout: 2000,
+    });
+    const url = await relayServer(upstreamPort, { tunnel });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+    ws.send("hi");
+    expect(await nextMessage(ws)).toBe("hi");
+    expect(proxy.targets).toEqual([`127.0.0.1:${upstreamPort}`]);
+  });
+
+  it("closes with 1011 when the proxy refuses the tunnel", async () => {
+    const proxy = await startConnectProxy({ status: 407 });
+    cleanups.push(() => void proxy.close());
+    const tunnel = createTunnelDialer(httpProxy(proxy.port), {
+      lookup: noopLookup,
+      testUpstreams: new Map([["ws.test", { host: "127.0.0.1", port: 1 }]]),
+      timeout: 2000,
+    });
+    const url = await relayServer(await echoUpstream(), { tunnel });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await closed(ws)).code).toBe(1011);
+    expect(proxy.targets).toHaveLength(1);
+  });
+  it("times out a tunneled upstream that never answers the handshake", async () => {
+    const silent = await startSilent();
+    const proxy = await startConnectProxy();
+    cleanups.push(
+      () => void silent.close(),
+      () => void proxy.close(),
+    );
+    const tunnel = createTunnelDialer(httpProxy(proxy.port), {
+      lookup: noopLookup,
+      testUpstreams: new Map([["ws.test", { host: "127.0.0.1", port: silent.port }]]),
+      timeout: 2000,
+    });
+    const url = await relayServer(1, { tunnel, handshakeTimeoutMs: 300 });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await closed(ws)).code).toBe(1011);
   });
 });

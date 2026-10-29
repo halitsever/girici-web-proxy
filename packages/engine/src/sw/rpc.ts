@@ -18,8 +18,16 @@ export class CookieRpc {
     this.#maxWait = options.maxWait ?? 100;
   }
 
-  /** The page URL comes from the calling client rather than the body, so a page can only write its own cookies. */
-  async handle(request: Request, clientId: string, pageUrl: URL | null): Promise<Response> {
+  /**
+   * The page URL comes from the calling client rather than the body, so a page can only write its own cookies.
+   * A blocked write (a third-party frame while blocking is on) is dropped but still releases waiting requests.
+   */
+  async handle(
+    request: Request,
+    clientId: string,
+    pageUrl: URL | null,
+    options: { blocked?: boolean } = {},
+  ): Promise<Response> {
     let body: unknown;
     try {
       body = await request.json();
@@ -31,9 +39,10 @@ export class CookieRpc {
     if (v !== PROTOCOL_VERSION) return new Response(null, { status: 409 });
     if (typeof seq !== "number" || typeof cookie !== "string" || !pageUrl) return new Response(null, { status: 400 });
 
-    await this.#cookies.setFromScript(pageUrl, cookie);
+    if (!options.blocked) await this.#cookies.setFromScript(pageUrl, cookie);
     this.#markProcessed(clientId, seq);
-    return new Response(JSON.stringify({ cookies: await this.#cookies.snapshot(pageUrl) }), {
+    const visible = options.blocked ? [] : await this.#cookies.snapshot(pageUrl);
+    return new Response(JSON.stringify({ cookies: visible }), {
       headers: { "content-type": "application/json" },
     });
   }

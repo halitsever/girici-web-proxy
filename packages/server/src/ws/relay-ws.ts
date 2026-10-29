@@ -1,11 +1,16 @@
 import type { IncomingMessage, Server } from "node:http";
+import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
-import type { LookupFunction } from "node:net";
-import { WebSocket, WebSocketServer, type RawData } from "ws";
-import { readSessionToken } from "../auth/cookie.ts";
+import { connect as tlsConnect } from "node:tls";
+import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from "ws";
+import { isAdminCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
+import { clientIp, clientKey, compileTrust, type TrustFn } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
+import type { Limiter } from "../http/rate-limit.ts";
 import type { Logger } from "../log.ts";
+import type { TunnelDialer } from "../upstream/agent.ts";
+import type { HostBlocklist } from "../upstream/blocklist.ts";
 import { SsrfBlockedError, validateTarget, type TargetPolicy } from "../upstream/ssrf.ts";
 
 const WS_PATH = "/_g/ws";
@@ -45,6 +50,11 @@ export interface WsRelayOptions {
   handshakeTimeoutMs?: number;
   maxPerIp?: number;
   dial?: Dial;
+  trust?: TrustFn;
+  limiter?: Limiter | null;
+  blocklist?: HostBlocklist;
+  /** Set when GIRICI_UPSTREAM_PROXY is: upstream sockets then open through the proxy instead of directly. */
+  tunnel?: TunnelDialer;
 }
 
 /** Codes the browser refuses to send in close(); reflect them as sendable equivalents. */
@@ -76,24 +86,66 @@ function parseControlFrame(data: RawData, isBinary: boolean): ControlFrame | nul
 /** Same rule as the HTTP gate: open when public, else a valid session for the current admin. */
 function wsAuthorized(store: AuthStore | undefined, cookie: string | undefined): boolean {
   if (!store || store.publicAccess()) return true;
-  const sub = readSessionToken(cookie, store.sessionSecret());
-  return sub !== null && store.admin()?.id === sub;
+  return isAdminCookie(store, cookie);
 }
 
-const defaultDial: Dial = (target, init) =>
-  new WebSocket(target.href, init.protocols, {
-    headers: init.headers,
-    lookup: init.lookup,
-    followRedirects: false,
-    handshakeTimeout: init.handshakeTimeout,
-    maxPayload: init.maxPayload,
-  });
+/** A plain 429 lets the browser's WebSocket fail fast instead of waiting on a silently dropped socket. */
+function refuse(socket: Duplex, retryAfter: number): void {
+  socket.end(
+    `HTTP/1.1 429 Too Many Requests\r\nRetry-After: ${retryAfter}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    () => socket.destroy(),
+  );
+}
+
+function defaultDial(tunnel: TunnelDialer | undefined): Dial {
+  return (target, init) =>
+    new WebSocket(target.href, init.protocols, {
+      headers: init.headers,
+      followRedirects: false,
+      handshakeTimeout: init.handshakeTimeout,
+      maxPayload: init.maxPayload,
+      ...(tunnel ? { createConnection: tunneledConnection(tunnel, target) } : { lookup: init.lookup }),
+    });
+}
+
+/** ws passes this to http.request, which waits for the callback, so the tunnel may open asynchronously. */
+function tunneledConnection(tunnel: TunnelDialer, target: URL): ClientOptions["createConnection"] {
+  const port = Number(target.port) || (target.protocol === "wss:" ? 443 : 80);
+  const create = (options: { timeout?: number }, callback: (error: Error | null, socket?: Duplex) => void) => {
+    tunnel(target.hostname, port).then(
+      (socket) => {
+        // ws enforces its handshake timeout through the socket's idle timeout, which net.connect would have set.
+        const timeout = options.timeout ?? 0;
+        if (target.protocol !== "wss:") {
+          socket.setTimeout(timeout);
+          // The tunnel comes back paused, and http only adds a data listener.
+          socket.resume();
+          callback(null, socket);
+          return;
+        }
+        const secure = tlsConnect({ socket, ...tlsIdentity(target), ALPNProtocols: ["http/1.1"] });
+        secure.setTimeout(timeout);
+        // http queues its writes until the handshake ends, and a TLS failure reaches the request as a socket error.
+        callback(null, secure);
+      },
+      (error: Error) => callback(error),
+    );
+  };
+  return create as unknown as ClientOptions["createConnection"];
+}
+
+/** Without host, TLS over an existing socket verifies the proxy's name instead of the target's. */
+export function tlsIdentity(target: URL): { host: string; servername?: string } {
+  const host = target.hostname.replace(/^\[|\]$/g, "");
+  return isIP(host) ? { host } : { host, servername: host };
+}
 
 /** Mount the WebSocket relay on the HTTP server's upgrade event. */
 export function attachWsRelay(server: Server, options: WsRelayOptions): void {
   const maxPayload = options.maxPayload ?? DEFAULT_MAX_PAYLOAD;
   const maxPerIp = options.maxPerIp ?? DEFAULT_MAX_PER_IP;
-  const dial = options.dial ?? defaultDial;
+  const dial = options.dial ?? defaultDial(options.tunnel);
+  const trust = options.trust ?? compileTrust(false);
   const wss = new WebSocketServer({ noServer: true, maxPayload, handleProtocols: () => SUBPROTOCOL });
   const perIp = new Map<string, number>();
 
@@ -111,9 +163,14 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): void {
       socket.destroy();
       return;
     }
-    const ip = req.socket.remoteAddress ?? "?";
+    const ip = clientKey(clientIp(req, trust));
+    const limit = options.limiter?.(ip);
+    if (limit && !limit.ok && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie))) {
+      refuse(socket, limit.retryAfter);
+      return;
+    }
     if ((perIp.get(ip) ?? 0) >= maxPerIp) {
-      socket.destroy();
+      refuse(socket, 1);
       return;
     }
     wss.handleUpgrade(req, socket, head, (client) => {
@@ -136,6 +193,11 @@ function bridge(
     const target = frame ? URL.parse(frame.u) : null;
     if (!frame || !target) {
       client.close(1008, "bad control frame");
+      return;
+    }
+    if (options.blocklist?.isBlocked(target.hostname)) {
+      options.logger.debug(`ws blocked by list ${target.host}`);
+      client.close(1008, "blocked");
       return;
     }
     try {

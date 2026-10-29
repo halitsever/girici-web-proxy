@@ -72,8 +72,11 @@ Service workers need HTTPS outside localhost. To get automatic certificates, poi
 the `ports` mapping of the `girici` service and run:
 
 ```
-GIRICI_DOMAIN=proxy.example.com docker compose --profile https up -d --build
+GIRICI_DOMAIN=proxy.example.com GIRICI_TRUST_PROXY=1 docker compose --profile https up -d --build
 ```
+
+`GIRICI_TRUST_PROXY=1` lets the rate limits tell visitors apart behind Caddy. It is safe once the `girici` service
+no longer publishes its own port.
 
 ## Configuration
 
@@ -85,6 +88,9 @@ GIRICI_DOMAIN=proxy.example.com docker compose --profile https up -d --build
 | `SOURCE_URL` | this repository | Where the UI's source code link points. |
 | `GIRICI_DATA_DIR` | `/data` in Docker, `.data` locally | Directory for the SQLite database (`girici.db`). |
 | `GIRICI_TRUST_PROXY` | `false` | Trust `X-Forwarded-For`. Behind a proxy, set the hop count (e.g. `1`), not `true`. |
+| `GIRICI_RATE_LIMIT` | `3000` | Proxy requests per client per minute, with bursts up to the same number. The signed-in admin is never limited. `0` turns it off. |
+| `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, comma or space separated. Each entry also blocks its subdomains. The admin can add more in Settings. |
+| `GIRICI_UPSTREAM_PROXY` | unset | Send all upstream traffic through this proxy: `http://`, `https://`, `socks5://` or `socks5h://`, with optional `user:password@`. |
 | `GIRICI_SESSION_SECRET` | unset | Overrides the stored session secret; set the same value on every replica. |
 | `GIRICI_YT_POTOKEN` | `on` | Mint YouTube GVS poTokens server-side to help video playback. Set `off` to disable. |
 
@@ -104,7 +110,8 @@ See the [documentation](https://halitsever.github.io/girici-web-proxy/guide/admi
 
 YouTube guards video with its SABR streaming and poToken bot protection. Girici mints a GVS poToken server-side
 (`GIRICI_YT_POTOKEN`) and steers the player toward direct streams, which plays many videos, but YouTube still blocks
-sustained playback of some, especially from datacenter IPs. A residential egress helps. This stays fragile: a YouTube
+sustained playback of some, especially from datacenter IPs. A residential egress helps. Set `GIRICI_UPSTREAM_PROXY` to send the relay,
+WebSockets and poToken minting through one; YouTube needs them on the same IP. This stays fragile: a YouTube
 change can break it until the token path is updated.
 
 

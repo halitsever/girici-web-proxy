@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveInput, toProxyPath } from "../target";
+import { resolveInput, toProxyPath } from "../src/shared/target.ts";
 
 describe("toProxyPath", () => {
   it("builds the proxy path for http(s) URLs", () => {

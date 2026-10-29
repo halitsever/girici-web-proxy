@@ -5,6 +5,7 @@ import {
   type CookieRecordStore,
   type CookieRequestContext,
 } from "../src/sw/cookies/jar.ts";
+import type { CookieSnapshot } from "../src/shared/protocol.ts";
 
 function memoryStore() {
   const records = new Map<string, unknown>();
@@ -125,5 +126,31 @@ describe("CookieService", () => {
     await jar.flush();
     expect(await jar.header(site, nav())).toBe("a=1; b=1");
     expect([...records.keys()].sort()).toEqual(["site-a.test|/|a", "site-a.test|/|b"]);
+  });
+
+  it("counts cookies per site and clears one site with its subdomains", async () => {
+    const jar = await service();
+    await jar.store(new URL("https://www.a.test/"), ["x=1; Domain=a.test", "h=1; HttpOnly"], nav());
+    await jar.store(new URL("https://b.test/"), ["y=1"], nav());
+    expect(await jar.siteCookieCounts()).toEqual(
+      new Map([
+        ["a.test", 2],
+        ["b.test", 1],
+      ]),
+    );
+    const changes: CookieSnapshot[][] = [];
+    jar.onChange((change) => changes.push(change));
+    expect(await jar.clearSite("a.test")).toBe(2);
+    expect(await jar.siteCookieCounts()).toEqual(new Map([["b.test", 1]]));
+    expect(changes.flat().map((cookie) => [cookie.name, cookie.expires])).toEqual([["x", 0]]);
+  });
+
+  it("persists a full clear", async () => {
+    const { store, records } = memoryStore();
+    const jar = await service(store);
+    await jar.store(new URL("https://b.test/"), ["y=1"], nav());
+    await jar.flush();
+    await jar.clearSite(null);
+    expect(records.size).toBe(0);
   });
 });

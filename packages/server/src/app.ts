@@ -1,7 +1,10 @@
 import express, { type Express } from "express";
 import { authGate } from "./auth/gate.ts";
 import type { AuthStore } from "./auth/store.ts";
+import { compileTrust, type TrustFn } from "./http/client-ip.ts";
 import { errorHandler } from "./http/error-handler.ts";
+import type { Limiter } from "./http/rate-limit.ts";
+import { relayLimit, warnUntrustedForwarding } from "./http/relay-limit.ts";
 import { securityHeaders } from "./http/security-headers.ts";
 import { serviceWorkerScriptGuard } from "./http/sw-script-guard.ts";
 import type { Logger } from "./log.ts";
@@ -16,6 +19,7 @@ import { relayRouter, type RelayOptions } from "./routes/relay.ts";
 import { robotsRouter } from "./routes/robots.ts";
 import { sourceRouter } from "./routes/source.ts";
 import { uiRouter } from "./routes/ui.ts";
+import { HostBlocklist } from "./upstream/blocklist.ts";
 
 export interface AppOptions {
   webDistDir: string;
@@ -23,7 +27,9 @@ export interface AppOptions {
   sourceUrl: string;
   logger: Logger;
   authStore: AuthStore;
-  trustProxy?: boolean | number | string;
+  trust?: TrustFn;
+  limiter?: Limiter | null;
+  blocklist?: HostBlocklist;
   relay: Omit<RelayOptions, "logger">;
   poToken?: PoTokenSource;
 }
@@ -34,25 +40,33 @@ export function createApp({
   sourceUrl,
   logger,
   authStore,
-  trustProxy,
+  trust,
+  limiter,
+  blocklist,
   relay,
   poToken,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
-  // req.ip (the login rate-limit key) comes from X-Forwarded-For when this is set. Behind a proxy
-  // set it to the hop count, not true: true trusts a client-spoofable header and defeats the limit.
-  app.set("trust proxy", trustProxy ?? false);
+  // req.ip (the rate-limit key) comes from X-Forwarded-For when this trusts the proxy. Behind a proxy
+  // set it to the hop count, not true: true trusts a client-spoofable header and defeats the limits.
+  const trustFn = trust ?? compileTrust(false);
+  app.set("trust proxy", trustFn);
   app.use(securityHeaders());
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter());
   app.use(robotsRouter());
   app.use(sourceRouter(sourceUrl));
   app.use(authRouter(authStore));
-  app.use(adminRouter(authStore));
+  app.use(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts())));
   // Gate the proxy data path and the poToken minter; navigations reach the SW as an auth error
   // and redirect to login. Public access opens both; nothing else here is gated.
   app.use(["/_g/r", "/_g/pot"], authGate(authStore));
+  app.use(
+    "/_g/r",
+    warnUntrustedForwarding(trustFn, logger),
+    relayLimit({ limiter: limiter ?? null, store: authStore }),
+  );
   if (poToken) app.use(poRouter({ minter: poToken }));
   app.use(relayRouter({ ...relay, logger }));
   app.use(uiRouter(webDistDir, authStore));

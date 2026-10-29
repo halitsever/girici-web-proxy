@@ -17,6 +17,9 @@ export const HEADER = {
 export const PROTOCOL_VERSION = 1;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
+export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
+export const PREFS_MESSAGE = "girici:prefs";
+export const TOP_SITE_QUERY = "girici:top?";
 export const BROADCAST_CHANNEL = "__girici";
 // Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
 export const LOGIN_PATH = "/_g/login";
@@ -34,13 +37,45 @@ export interface CookieSnapshot {
   creation: number;
 }
 
+/** Settings the service worker needs but cannot read from the UI's localStorage. */
+export interface EnginePrefs {
+  blockThirdPartyCookies: boolean;
+}
+
+export const DEFAULT_ENGINE_PREFS: EnginePrefs = { blockThirdPartyCookies: true };
+
+/** One registrable domain's stored data, as the Settings screen lists it. */
+export interface SiteSummary {
+  site: string;
+  cookies: number;
+  origins: string[];
+}
+
+export type SiteDataRequest =
+  | { v: number; op: "list"; origins: string[] }
+  | { v: number; op: "clear"; site?: string }
+  | { v: number; op: "clear-all" };
+
 export interface ClientConfig {
   v: number;
   cookies: CookieSnapshot[];
+  /** Set for a third-party frame while blocking is on: its document.cookie stays empty whatever other tabs do. */
+  cookiesBlocked?: boolean;
 }
 
 export type RelayErrorCode =
-  "bad_request" | "ssrf_blocked" | "dns" | "connect" | "tls" | "timeout" | "too_large" | "header_overflow" | "auth";
+  | "bad_request"
+  | "ssrf_blocked"
+  | "dns"
+  | "connect"
+  | "tls"
+  | "timeout"
+  | "too_large"
+  | "header_overflow"
+  | "auth"
+  | "rate_limited"
+  | "blocked"
+  | "proxy";
 
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {

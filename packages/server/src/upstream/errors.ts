@@ -1,5 +1,6 @@
 import type { RelayErrorCode } from "@girici/engine/shared";
 import { SsrfBlockedError } from "./ssrf.ts";
+import { UpstreamProxyError } from "./tunnel.ts";
 
 export class RelayRequestError extends Error {
   readonly code: RelayErrorCode;
@@ -27,6 +28,8 @@ export function relayErrorFor(error: unknown): { code: RelayErrorCode; status: n
   for (let depth = 0; current && depth < 5; depth++, current = (current as { cause?: unknown }).cause) {
     if (current instanceof SsrfBlockedError) return { code: "ssrf_blocked", status: 403 };
     if (current instanceof RelayRequestError) return { code: current.code, status: current.status };
+    if (current instanceof UpstreamProxyError)
+      return { code: current.kind === "proxy" ? "proxy" : "connect", status: 502 };
     const code = (current as { code?: unknown }).code;
     if (typeof code !== "string") continue;
     if (DNS_CODES.has(code)) return { code: "dns", status: 502 };

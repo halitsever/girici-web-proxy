@@ -8,7 +8,7 @@ export function sameSiteContext(
   target: URL,
   options: { topLevel: boolean; method: string },
 ): SameSiteContext {
-  if (!initiator || siteOf(initiator) === siteOf(target)) return "strict";
+  if (!initiator || schemefulSite(initiator) === schemefulSite(target)) return "strict";
   const safe = options.method === "GET" || options.method === "HEAD";
   return options.topLevel && safe ? "lax" : "none";
 }
@@ -19,6 +19,7 @@ export function allowsCredentials(credentials: RequestCredentials, initiator: UR
   return !initiator || initiator.origin === target.origin;
 }
 
-function siteOf(url: URL): string {
+/** Scheme plus registrable domain, the unit SameSite and third-party checks compare. */
+export function schemefulSite(url: URL): string {
   return `${url.protocol}//${getDomain(url.hostname) ?? url.hostname}`;
 }

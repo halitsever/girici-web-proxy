@@ -78,6 +78,19 @@ export function createGuardedLookup(
   };
 }
 
+/** Every vetted address for a name, for callers that hand one to someone else, such as a proxy. */
+export function resolveGuarded(
+  lookup: LookupFunction,
+  hostname: string,
+): Promise<Array<{ address: string; family: number }>> {
+  return new Promise((resolve, reject) => {
+    lookup(hostname, { all: true }, (error, addresses) => {
+      if (error) reject(error);
+      else resolve(Array.isArray(addresses) ? addresses : [{ address: String(addresses), family: 4 }]);
+    });
+  });
+}
+
 function isBlockedName(hostname: string): boolean {
   return (
     hostname === "localhost" || !hostname.includes(".") || BLOCKED_SUFFIXES.some((suffix) => hostname.endsWith(suffix))

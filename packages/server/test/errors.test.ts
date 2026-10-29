@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UpstreamProxyError } from "../src/upstream/tunnel.ts";
 import { RelayRequestError, relayErrorFor } from "../src/upstream/errors.ts";
 import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
 
@@ -21,5 +22,14 @@ describe("relayErrorFor", () => {
     [new Error("?"), "connect", 502],
   ])("maps %o to %s", (error, code, status) => {
     expect(relayErrorFor(error)).toEqual({ code, status });
+  });
+
+  it("maps upstream proxy failures by who failed", () => {
+    expect(relayErrorFor(new UpstreamProxyError("proxy", "refused"))).toEqual({ code: "proxy", status: 502 });
+    expect(relayErrorFor(new UpstreamProxyError("target", "unreachable"))).toEqual({ code: "connect", status: 502 });
+    expect(relayErrorFor(new Error("wrapped", { cause: new UpstreamProxyError("proxy", "x") }))).toEqual({
+      code: "proxy",
+      status: 502,
+    });
   });
 });

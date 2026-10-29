@@ -62,3 +62,23 @@ export function realUrlOf(value: string | null, origin: string): URL | null {
   }
   return url.origin === origin ? decodeUrl(url.pathname + url.search) : null;
 }
+
+/** The parts of a Client the authority checks read. */
+export interface ClientShape {
+  type: string;
+  frameType: string;
+  url: string;
+}
+
+/**
+ * True for a Girici UI page: a top-level window on our origin outside the proxy space. Workers that proxied pages
+ * start live on blob: URLs of our origin, and frames and popups can be scripted by the page around them.
+ */
+export function isUiWindow(client: ClientShape | null | undefined, origin: string): boolean {
+  if (!client || client.type !== "window" || client.frameType !== "top-level") return false;
+  try {
+    return new URL(client.url).origin === origin && realUrlOf(client.url, origin) === null;
+  } catch {
+    return false;
+  }
+}

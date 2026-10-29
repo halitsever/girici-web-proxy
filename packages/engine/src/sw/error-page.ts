@@ -10,6 +10,9 @@ const MESSAGES: Record<RelayErrorCode, string> = {
   bad_request: "This address cannot be opened through Girici.",
   header_overflow: "{host} sent headers that are too large.",
   auth: "Girici needs you to sign in before opening {host}.",
+  rate_limited: "Too many requests from your network. Wait a moment, then reload.",
+  blocked: "{host} is blocked on this Girici server.",
+  proxy: "Girici's upstream proxy could not reach {host}.",
 };
 
 export function errorPage(code: RelayErrorCode, target: URL | null): string {

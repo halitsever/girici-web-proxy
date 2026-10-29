@@ -31,9 +31,17 @@ async function onSubmit() {
   }
 }
 
-/** The SW sends an unauthenticated navigation here with the real target in ?next; reopen it through the proxy. */
+/**
+ * ?next is either a Girici page the router guard sent here, such as /account, or the real target of a proxied
+ * navigation the SW sent here, which reopens through the proxy.
+ */
 function goNext() {
   const next = typeof route.query.next === "string" ? route.query.next : "";
+  // "//host" and "/\host" would leave Girici, so only a single leading slash counts as one of our pages.
+  if (/^\/(?![/\\])/.test(next)) {
+    void router.replace(next);
+    return;
+  }
   const proxied = next ? toProxyPath(next) : null;
   if (proxied) window.location.assign(proxied);
   else void router.replace("/");

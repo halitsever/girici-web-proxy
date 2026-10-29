@@ -25,6 +25,7 @@ export interface PageContext {
   clientScript: string;
   cookies(): Promise<CookieSnapshot[]>;
   syncCookies?: CookieSnapshot[];
+  cookiesBlocked?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -82,7 +83,8 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
 async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, validators: Validators): Promise<string> {
   switch (kind) {
     case "html": {
-      const inject = clientTag(ctx.clientScript, { v: PROTOCOL_VERSION, cookies: await ctx.cookies() });
+      const config = { v: PROTOCOL_VERSION, cookies: await ctx.cookies() };
+      const inject = clientTag(ctx.clientScript, ctx.cookiesBlocked ? { ...config, cookiesBlocked: true } : config);
       return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
     }
     case "css":
