@@ -92,11 +92,13 @@ no longer publishes its own port.
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, comma or space separated. Each entry also blocks its subdomains. The admin can add more in Settings. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all upstream traffic through this proxy: `http://`, `https://`, `socks5://` or `socks5h://`, with optional `user:password@`. |
 | `GIRICI_SESSION_SECRET` | unset | Overrides the stored session secret; set the same value on every replica. |
+| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `on` | Mint YouTube GVS poTokens server-side to help video playback. Set `off` to disable. |
 
 ## Admin and access
 
-On first run, Girici sends you to a setup screen to create a single admin account, stored in SQLite
+On first run, Girici prints a one-time setup code to its log (`docker logs <container>`); enter it on the setup
+screen to create the admin account. A restart prints a new code until setup is done. The account is stored in SQLite
 (`${GIRICI_DATA_DIR}/girici.db`). After that, the proxy requires a login. Turn on **Public access** in
 Settings to let anyone browse without signing in. Forgot the password? Reset it from the command line:
 

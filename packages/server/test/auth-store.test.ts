@@ -73,3 +73,23 @@ describe("AuthStore blocked hosts", () => {
     expect(s.blockedHosts()).toEqual([]);
   });
 });
+
+describe("AuthStore sessions", () => {
+  it("revokes sessions on a password change even with a fixed secret", () => {
+    const s = new AuthStore(openDb(":memory:"), "fixed-secret-shared-by-every-replica-0000");
+    const info = s.createAdmin(admin);
+    expect(s.sessionsValidAfter()).toBe(0);
+    s.revokeSessions(5_000);
+    expect(s.sessionsValidAfter()).toBe(5_000);
+    s.changePassword(info.id, "another-pw-1");
+    expect(s.sessionsValidAfter()).toBeGreaterThan(5_000);
+  });
+
+  it("checks an admin's current password", () => {
+    const s = store();
+    const info = s.createAdmin(admin);
+    expect(s.checkPassword(info.id, admin.password)).toBe(true);
+    expect(s.checkPassword(info.id, "wrong-pw-123")).toBe(false);
+    expect(s.checkPassword(info.id + 1, admin.password)).toBe(false);
+  });
+});

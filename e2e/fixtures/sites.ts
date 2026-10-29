@@ -638,6 +638,30 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/raw-attr": html(RAW_ATTR),
     "/worker2": html(WORKER2),
     "/worker-escape": html(WORKER_ESCAPE),
+    "/admin-probe": html(
+      page(
+        "Admin probe",
+        `<pre id="result"></pre><script>
+  const proxy = new URLSearchParams(location.search).get("proxy");
+  (async () => {
+    const out = {};
+    const hooked = await fetch(proxy + "/_g/admin/settings");
+    out.hooked = hooked.status + " " + (await hooked.text());
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const raw = frames[frames.length - 1];
+    const post = await raw.fetch(proxy + "/_g/admin/settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ blockedHosts: [] }),
+    });
+    out.rawPost = post.status;
+    out.rawGet = (await raw.fetch(proxy + "/_g/admin/settings")).status;
+    document.getElementById("result").textContent = JSON.stringify(out);
+  })();
+</script>`,
+      ),
+    ),
     "/native-tostring": html(
       page(
         "Native toString",

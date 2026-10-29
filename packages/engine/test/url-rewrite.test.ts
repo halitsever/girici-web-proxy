@@ -43,7 +43,12 @@ describe("rewriteUrl", () => {
     expect(rewriteUrl("http://proxy.test/~/https/other.test/a", base, origin)).toBe(
       "http://proxy.test/~/https/other.test/a",
     );
-    expect(rewriteUrl("http://proxy.test/_g/client.js", base, origin)).toBe("http://proxy.test/_g/client.js");
+  });
+
+  it("maps absolute URLs on our engine and admin paths onto the page's site", () => {
+    expect(rewriteUrl("http://proxy.test/_g/admin/settings", base, origin)).toBe(
+      "/~/https/site.test/_g/admin/settings",
+    );
   });
 
   it("never throws on URLs or bases that are not web URLs", () => {

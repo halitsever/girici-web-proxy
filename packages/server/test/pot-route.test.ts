@@ -56,3 +56,15 @@ describe("poRouter", () => {
     expect((await post(base, base, { contentBinding: "v" })).status).toBe(429);
   });
 });
+
+describe("poRouter exact path", () => {
+  it("mints only at its exact, case-sensitive path", async () => {
+    const base = await listen({ mint: async () => "pot:x" });
+    const res = await fetch(`${base}/_g/POT`, {
+      method: "POST",
+      headers: { origin: base, "content-type": "application/json" },
+      body: JSON.stringify({ contentBinding: "v" }),
+    });
+    expect(res.status).toBe(404);
+  });
+});

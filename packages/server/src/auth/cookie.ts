@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { signSession, verifySession } from "./session.ts";
+import { signSession, verifySession, type SessionPayload } from "./session.ts";
 
 export const SESSION_COOKIE = "__Host-girici";
 /** Safari drops Secure cookies set by plain-http pages, localhost included, so those pages get this one instead. */
@@ -11,13 +11,13 @@ export function createSessionToken(sub: number, secret: string, now = Date.now()
   return signSession({ sub, iat: now, exp: now + SESSION_TTL_MS }, secret);
 }
 
-/** Read the admin id from a Cookie header, or null when the token is missing, expired or unsigned. */
-export function readSessionToken(cookieHeader: string | undefined, secret: string, now = Date.now()): number | null {
+/** The first valid session in a Cookie header, or null when every token is missing, expired or unsigned. */
+export function readSession(cookieHeader: string | undefined, secret: string, now = Date.now()): SessionPayload | null {
   const cookies = parseCookies(cookieHeader);
   for (const name of [SESSION_COOKIE, PLAIN_SESSION_COOKIE]) {
     const token = cookies[name];
     const payload = token ? verifySession(token, secret, now) : null;
-    if (payload) return payload.sub;
+    if (payload) return payload;
   }
   return null;
 }
@@ -41,10 +41,6 @@ export function clearSession(res: Response): void {
 /** The page's own scheme, from the Origin these same-origin POSTs carry; a TLS terminator hides it from req. */
 function servedOverHttps(req: Request): boolean {
   return URL.parse(req.get("origin") ?? "")?.protocol === "https:";
-}
-
-export function sessionFromRequest(req: Request, secret: string): number | null {
-  return readSessionToken(req.headers.cookie, secret);
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {

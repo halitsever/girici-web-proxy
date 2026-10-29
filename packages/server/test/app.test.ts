@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
-import { UI_CSP } from "../src/http/security-headers.ts";
+import { PERMISSIONS_POLICY, UI_CSP } from "../src/http/security-headers.ts";
 import { createLogger } from "../src/log.ts";
 import { createUpstreamAgent } from "../src/upstream/agent.ts";
 
@@ -92,6 +92,27 @@ describe("createApp", () => {
     expect(res.headers.get("content-security-policy")).toBe(UI_CSP);
     expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(res.headers.get("cache-control")).toBe("no-cache");
+    expect(res.headers.get("permissions-policy")).toBe(PERMISSIONS_POLICY);
+  });
+
+  it("forbids framing and openers on everything outside the boot page", async () => {
+    for (const path of ["/healthz", "/robots.txt", "/_g/auth/state", "/_g/nope", "/_g/ui/app.js"]) {
+      const res = await fetch(`${base}${path}`);
+      expect(res.headers.get("content-security-policy"), path).toContain("frame-ancestors 'none'");
+      expect(res.headers.get("cross-origin-opener-policy"), path).toBe("same-origin");
+    }
+  });
+
+  it("answers unknown paths with a plain 404", async () => {
+    const res = await fetch(`${base}/_g/nope`);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toMatch(/^text\/plain/);
+  });
+
+  it("lets proxied pages frame the boot page and leaves its opener alone", async () => {
+    const res = await fetch(`${base}/~/https/site.test/`, { headers: { accept: "text/html" } });
+    expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'self'");
+    expect(res.headers.get("cross-origin-opener-policy")).toBeNull();
   });
 
   it("serves UI assets as immutable", async () => {

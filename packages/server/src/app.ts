@@ -1,3 +1,4 @@
+import { WS_SEAL_PATH } from "@girici/engine/shared";
 import express, { type Express } from "express";
 import { authGate } from "./auth/gate.ts";
 import type { AuthStore } from "./auth/store.ts";
@@ -19,6 +20,7 @@ import { relayRouter, type RelayOptions } from "./routes/relay.ts";
 import { robotsRouter } from "./routes/robots.ts";
 import { sourceRouter } from "./routes/source.ts";
 import { uiRouter } from "./routes/ui.ts";
+import { wsSealRouter } from "./routes/ws-seal.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 
 export interface AppOptions {
@@ -32,6 +34,7 @@ export interface AppOptions {
   blocklist?: HostBlocklist;
   relay: Omit<RelayOptions, "logger">;
   poToken?: PoTokenSource;
+  setupToken?: string;
 }
 
 export function createApp({
@@ -45,6 +48,7 @@ export function createApp({
   blocklist,
   relay,
   poToken,
+  setupToken,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -57,22 +61,27 @@ export function createApp({
   app.use(healthRouter());
   app.use(robotsRouter());
   app.use(sourceRouter(sourceUrl));
-  app.use(authRouter(authStore));
+  app.use(authRouter(authStore, { setupToken }));
   app.use(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts())));
-  // Gate the proxy data path and the poToken minter; navigations reach the SW as an auth error
-  // and redirect to login. Public access opens both; nothing else here is gated.
-  app.use(["/_g/r", "/_g/pot"], authGate(authStore));
+  // Gate the proxy data path, the poToken minter and WebSocket seals; navigations reach the SW as an auth error
+  // and redirect to login. Public access opens them; nothing else here is gated.
+  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], authGate(authStore));
   app.use(
     "/_g/r",
     warnUntrustedForwarding(trustFn, logger),
     relayLimit({ limiter: limiter ?? null, store: authStore }),
   );
   if (poToken) app.use(poRouter({ minter: poToken }));
+  app.use(wsSealRouter(authStore));
   app.use(relayRouter({ ...relay, logger }));
   app.use(uiRouter(webDistDir, authStore));
   app.use(engineRouter(engineBundlesDir));
   app.use(bootstrapRouter());
   app.use(legacyRouter());
+  // Express's own 404 page swaps in a CSP without frame-ancestors.
+  app.use((_req, res) => {
+    res.status(404).type("text/plain").send("Not Found");
+  });
   app.use(errorHandler(logger));
   return app;
 }

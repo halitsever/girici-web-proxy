@@ -26,6 +26,14 @@ export interface NewAdmin {
   password: string;
 }
 
+let dummy: { hash: string; salt: string } | null = null;
+
+/** A throwaway hash to check against when there is no real one, computed on first use. */
+function dummyHash(): { hash: string; salt: string } {
+  dummy ??= hashPassword(randomBytes(16).toString("hex"));
+  return dummy;
+}
+
 /** Admin credentials and operator settings backed by SQLite. */
 export class AuthStore {
   readonly #db: DatabaseSync;
@@ -60,20 +68,47 @@ export class AuthStore {
 
   verifyLogin(username: string, password: string): AdminInfo | null {
     const row = this.#adminRow();
-    if (!row || row.username !== username) return null;
+    if (!row || row.username !== username) {
+      // An unknown name still pays for one scrypt, so the response time does not reveal the username.
+      const dummy = dummyHash();
+      verifyPassword(password, dummy.hash, dummy.salt);
+      return null;
+    }
     if (!verifyPassword(password, row.pw_hash, row.pw_salt)) return null;
     return { id: row.id, username: row.username, name: row.name, email: row.email };
+  }
+
+  /** Confirms a signed-in admin's password before a sensitive change; an unknown id still runs scrypt. */
+  checkPassword(id: number, password: string): boolean {
+    const row = this.#adminRow();
+    if (!row || row.id !== id) {
+      const dummy = dummyHash();
+      verifyPassword(password, dummy.hash, dummy.salt);
+      return false;
+    }
+    return verifyPassword(password, row.pw_hash, row.pw_salt);
   }
 
   updateProfile(id: number, name: string, email: string): void {
     this.#db.prepare("UPDATE admins SET name = ?, email = ? WHERE id = ?").run(name, email, id);
   }
 
-  /** Rotate the session secret so a password change logs every device out. */
+  /** Logs every device out; revocation also covers a fixed GIRICI_SESSION_SECRET, which cannot rotate. */
   changePassword(id: number, password: string): void {
     const { hash, salt } = hashPassword(password);
     this.#db.prepare("UPDATE admins SET pw_hash = ?, pw_salt = ? WHERE id = ?").run(hash, salt, id);
+    this.revokeSessions();
     this.rotateSessionSecret();
+  }
+
+  /** Sessions issued before this time (ms) are void. Read on every check, since the reset script writes it. */
+  sessionsValidAfter(): number {
+    const value = Number(this.#setting("sessions_valid_after"));
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
+
+  revokeSessions(now = Date.now()): void {
+    this.#setSetting("sessions_valid_after", String(now));
   }
 
   sessionSecret(): string {

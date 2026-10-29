@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SOURCE_URL, loadConfig } from "../src/config.ts";
+import { DEFAULT_SOURCE_URL, loadConfig, trustProxyWarning } from "../src/config.ts";
 import { defaultDataDir } from "../src/paths.ts";
 
 describe("loadConfig", () => {
@@ -27,6 +27,24 @@ describe("loadConfig", () => {
     expect(loadConfig({ GIRICI_TRUST_PROXY: "2" }).trustProxy).toBe(2);
     expect(loadConfig({ GIRICI_TRUST_PROXY: "loopback" }).trustProxy).toBe("loopback");
     expect(loadConfig({ GIRICI_SESSION_SECRET: "  hex  " }).sessionSecret).toBe("hex");
+  });
+
+  it("reads digits as a hop count, so 1 trusts exactly one proxy", () => {
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "1" }).trustProxy).toBe(1);
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "0" }).trustProxy).toBe(0);
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "yes" }).trustProxy).toBe(true);
+  });
+
+  it("reads GIRICI_SETUP_TOKEN and rejects a short one without echoing it", () => {
+    expect(loadConfig({ GIRICI_SETUP_TOKEN: " long-enough-code " }).setupToken).toBe("long-enough-code");
+    expect(loadConfig({}).setupToken).toBeUndefined();
+    expect(() => loadConfig({ GIRICI_SETUP_TOKEN: "short" })).toThrow(/GIRICI_SETUP_TOKEN must be at least 8/);
+    expect(() => loadConfig({ GIRICI_SETUP_TOKEN: "short" })).not.toThrow(/short"/);
+  });
+
+  it("warns only when every forwarding hop is trusted", () => {
+    expect(trustProxyWarning(true)).toContain("GIRICI_TRUST_PROXY");
+    for (const value of [false, 0, 1, 2, "loopback"]) expect(trustProxyWarning(value)).toBeNull();
   });
 
   it("turns the YouTube poToken minter off with GIRICI_YT_POTOKEN", () => {

@@ -1,4 +1,5 @@
 import { decodeUrl, encodeUrl, isReservedPath } from "../shared/codec.ts";
+import { LOGIN_PATH, POT_PATH, SETUP_PATH, WS_SEAL_PATH } from "../shared/protocol.ts";
 
 export type Route =
   | { kind: "passthrough" }
@@ -70,15 +71,55 @@ export interface ClientShape {
   url: string;
 }
 
+const UI_ROUTES = new Set(["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH]);
+const WORKER_ONLY = new Set([POT_PATH, WS_SEAL_PATH]);
+const ADMIN_PATHS = new Set(["/_g/account", "/_g/logout", LOGIN_PATH, SETUP_PATH]);
+const ADMIN_PREFIXES = ["/_g/admin/", "/_g/auth/"];
+
 /**
- * True for a Girici UI page: a top-level window on our origin outside the proxy space. Workers that proxied pages
- * start live on blob: URLs of our origin, and frames and popups can be scripted by the page around them.
+ * True for a Girici UI page: a top-level window on one of the UI's own routes. Workers that proxied pages start, this
+ * worker's error pages and blob: documents all sit on our origin too, and frames and popups can be scripted.
  */
 export function isUiWindow(client: ClientShape | null | undefined, origin: string): boolean {
   if (!client || client.type !== "window" || client.frameType !== "top-level") return false;
   try {
-    return new URL(client.url).origin === origin && realUrlOf(client.url, origin) === null;
+    const url = new URL(client.url);
+    return url.origin === origin && UI_ROUTES.has(normalizePath(url.pathname));
   } catch {
     return false;
   }
+}
+
+/** Express routes paths case-insensitively and with a trailing slash, so the checks here compare this form. */
+function normalizePath(pathname: string): string {
+  return pathname.toLowerCase().replace(/\/+$/, "") || "/";
+}
+
+/** The admin API, plus the endpoints only this worker calls. */
+export function isGuardedPath(pathname: string): boolean {
+  const path = normalizePath(pathname);
+  return WORKER_ONLY.has(path) || ADMIN_PATHS.has(path) || ADMIN_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+export interface ReservedRequest {
+  mode: RequestMode;
+  destination: RequestDestination;
+  method: string;
+}
+
+/**
+ * Proxied pages share our origin, so the browser sends the admin's cookie with their calls too. Only the UI's own
+ * calls and top-level page loads pass; the worker's own fetches never come through its fetch handler.
+ */
+export function reservedAccess(
+  pathname: string,
+  request: ReservedRequest,
+  client: ClientShape | null | undefined,
+  origin: string,
+): "allow" | "deny" {
+  if (WORKER_ONLY.has(normalizePath(pathname))) return "deny";
+  if (request.mode === "navigate") {
+    return request.destination === "document" && request.method === "GET" ? "allow" : "deny";
+  }
+  return isUiWindow(client, origin) ? "allow" : "deny";
 }

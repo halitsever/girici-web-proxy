@@ -18,6 +18,9 @@ export const PROTOCOL_VERSION = 1;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
+// Only the service worker calls these two; pages never need them.
+export const POT_PATH = "/_g/pot";
+export const WS_SEAL_PATH = "/_g/ws-seal";
 export const PREFS_MESSAGE = "girici:prefs";
 export const TOP_SITE_QUERY = "girici:top?";
 export const BROADCAST_CHANNEL = "__girici";

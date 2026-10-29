@@ -42,6 +42,12 @@ Give the container a volume for `/data` so its database persists:
 docker run -d -p 3000:3000 -v girici_data:/data girici-web-proxy
 ```
 
+The setup screen asks for a code that Girici prints to the container log at startup:
+
+```bash
+docker logs <container> | grep "setup code"
+```
+
 ## HTTPS with Caddy
 
 The compose file includes an optional Caddy service behind an `https` profile. It terminates TLS and

@@ -13,6 +13,8 @@ const name = ref("");
 const email = ref("");
 const password = ref("");
 const confirm = ref("");
+// Kept in memory only, so it is gone once the page closes.
+const currentPassword = ref("");
 const savedProfile = ref(false);
 const savedPassword = ref(false);
 const profileError = ref("");
@@ -23,8 +25,12 @@ const monogram = computed(() => initials(name.value) || "G");
 async function onSaveProfile() {
   profileError.value = "";
   savedProfile.value = false;
+  if (!currentPassword.value) {
+    profileError.value = "Enter your current password first.";
+    return;
+  }
   try {
-    admin.value = await updateAccount({ name: name.value, email: email.value });
+    admin.value = await updateAccount({ name: name.value, email: email.value, currentPassword: currentPassword.value });
     savedProfile.value = true;
   } catch (e) {
     profileError.value = e instanceof Error ? e.message : "Could not save.";
@@ -42,8 +48,17 @@ async function onChangePassword() {
     passwordError.value = "The two passwords do not match.";
     return;
   }
+  if (!currentPassword.value) {
+    passwordError.value = "Enter your current password first.";
+    return;
+  }
   try {
-    await updateAccount({ name: name.value, email: email.value, password: password.value });
+    await updateAccount({
+      name: name.value,
+      email: email.value,
+      password: password.value,
+      currentPassword: currentPassword.value,
+    });
     password.value = "";
     confirm.value = "";
     savedPassword.value = true;
@@ -52,8 +67,8 @@ async function onChangePassword() {
   }
 }
 
-async function onSignOut() {
-  await logout();
+async function onSignOut(everywhere = false) {
+  await logout(everywhere);
   // Let the guard decide: Browse when public, the login page when private.
   await router.replace("/");
 }
@@ -80,6 +95,14 @@ onMounted(async () => {
         <p class="truncate text-[22px] font-semibold tracking-[-0.03em]">{{ admin.name || "Admin" }}</p>
         <p class="truncate text-[14px] text-muted-foreground">@{{ admin.username }}</p>
       </div>
+    </div>
+
+    <div class="rounded-xl border border-border bg-gi-panel p-5">
+      <label class="flex flex-col gap-2 text-[14px] font-medium">
+        Current password
+        <Input v-model="currentPassword" type="password" autocomplete="current-password" />
+      </label>
+      <p class="mt-2 text-[13px] text-muted-foreground">Needed to save any change on this page.</p>
     </div>
 
     <div class="rounded-xl border border-border bg-gi-panel p-5">
@@ -125,6 +148,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <Button type="button" variant="outline" size="sm" class="self-start" @click="onSignOut">Sign out</Button>
+    <div class="flex flex-wrap gap-3">
+      <Button type="button" variant="outline" size="sm" @click="onSignOut()">Sign out</Button>
+      <Button type="button" variant="outline" size="sm" @click="onSignOut(true)">Sign out everywhere</Button>
+    </div>
   </div>
 </template>

@@ -33,6 +33,18 @@ export function errorPage(code: RelayErrorCode, target: URL | null): string {
 `;
 }
 
+/** Error pages run no script and keep no opener, so a proxied page cannot borrow their realm on our origin. */
+export function errorResponse(code: RelayErrorCode, status: number, target: URL | null): Response {
+  return new Response(errorPage(code, target), {
+    status,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "sandbox; default-src 'none'",
+      "cross-origin-opener-policy": "same-origin",
+    },
+  });
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }

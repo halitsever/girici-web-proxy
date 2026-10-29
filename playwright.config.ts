@@ -11,12 +11,20 @@ export default defineConfig({
     proxy: { server: "http://127.0.0.1:41999", bypass: "127.0.0.1,localhost" },
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "node e2e/fixtures/start.ts",
-    url: "http://127.0.0.1:41000/healthz",
-    reuseExistingServer: !process.env.CI,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: "node e2e/fixtures/start.ts",
+      url: "http://127.0.0.1:41000/healthz",
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command: "node e2e/fixtures/start-fresh.ts",
+      url: "http://127.0.0.1:41001/healthz",
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+  ],
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },

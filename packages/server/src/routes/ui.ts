@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { LOGIN_PATH, SETUP_PATH } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
-import { sessionFromRequest } from "../auth/cookie.ts";
+import { sessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
-import { UI_CSP } from "../http/security-headers.ts";
+import { PERMISSIONS_POLICY, UI_CSP } from "../http/security-headers.ts";
 
 // The UI is a single-page app; these client routes all load the same shell.
 const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH];
@@ -26,6 +26,7 @@ export function uiRouter(webDistDir: string, store: AuthStore): Router {
     res.set({
       "Content-Security-Policy": UI_CSP,
       "Cross-Origin-Opener-Policy": "same-origin",
+      "Permissions-Policy": PERMISSIONS_POLICY,
       "Cache-Control": "no-cache",
     });
     res.sendFile("index.html", { root: webDistDir, cacheControl: false });
@@ -35,8 +36,7 @@ export function uiRouter(webDistDir: string, store: AuthStore): Router {
 }
 
 function authed(store: AuthStore, req: Request): boolean {
-  const admin = store.admin();
-  return admin !== null && sessionFromRequest(req, store.sessionSecret()) === admin.id;
+  return sessionAdmin(store, req.headers.cookie) !== null;
 }
 
 /** Server-side funnel so an unauthed shell never flashes before the client guard runs. */

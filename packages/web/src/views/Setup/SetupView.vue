@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { setupAdmin } from "@/lib/auth";
 
 const router = useRouter();
+const setupToken = ref("");
 const username = ref("");
 const name = ref("");
 const email = ref("");
@@ -18,7 +19,13 @@ async function onSubmit() {
   error.value = "";
   busy.value = true;
   try {
-    await setupAdmin({ username: username.value, name: name.value, email: email.value, password: password.value });
+    await setupAdmin({
+      setupToken: setupToken.value,
+      username: username.value,
+      name: name.value,
+      email: email.value,
+      password: password.value,
+    });
     await router.replace("/");
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Setup failed.";
@@ -44,6 +51,15 @@ async function onSubmit() {
       </Alert>
 
       <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-2">
+          <label class="flex flex-col gap-2 text-[14px] font-medium">
+            Setup code
+            <Input v-model="setupToken" type="text" autocomplete="off" spellcheck="false" required />
+          </label>
+          <p class="text-[13px] text-muted-foreground">
+            Girici prints it in the server log at startup. With Docker, run docker logs on the container.
+          </p>
+        </div>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
           Username
           <Input v-model="username" type="text" autocomplete="username" required />

@@ -265,5 +265,9 @@ onMounted(() => {
         <span class="text-gi-subtle">↑↓ navigate · ↵ open · esc clear</span>
       </div>
     </form>
+    <p class="mt-4 max-w-[620px] text-center text-[12px] text-gi-subtle">
+      Every site you open through Girici shares one browser origin. Don't sign in to important accounts while using
+      sites you don't trust.
+    </p>
   </div>
 </template>
