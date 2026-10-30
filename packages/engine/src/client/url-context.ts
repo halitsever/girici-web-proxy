@@ -13,11 +13,14 @@ export interface UrlContext {
   realBase(): URL;
   toProxy(raw: string): string;
   fromProxy(value: string): string;
+  /** A reused window takes the new document's inherited context, or none. */
+  inherit(next: InheritedContext | undefined): void;
 }
 
 /** Must be created before the hooks so it keeps reading the browser's own proxy URLs. */
-export function createUrlContext(win: Realm, inherited?: InheritedContext): UrlContext {
-  const origin = inherited?.origin ?? win.location.origin;
+export function createUrlContext(win: Realm, initial?: InheritedContext): UrlContext {
+  const origin = initial?.origin ?? win.location.origin;
+  let inherited = initial;
   const nativeBaseUri = Object.getOwnPropertyDescriptor(win.Node.prototype, "baseURI")?.get;
 
   const realUrl = (): URL => {
@@ -60,5 +63,8 @@ export function createUrlContext(win: Realm, inherited?: InheritedContext): UrlC
     realBase,
     toProxy: (raw) => rewriteUrl(raw, realBase(), origin),
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
+    inherit: (next) => {
+      inherited = next;
+    },
   };
 }

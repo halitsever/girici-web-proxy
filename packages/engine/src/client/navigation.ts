@@ -1,11 +1,18 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import type { CookieBridge } from "./cookies.ts";
+import type { Invoke } from "./invoke.ts";
+import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
-export function installNavigation(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
+export function installNavigation(
+  win: Realm,
+  ctx: UrlContext,
+  cookies: CookieBridge,
+  invoke: Invoke,
+): DocumentListeners {
   const history = win.History.prototype;
   for (const method of ["pushState", "replaceState"] as const) {
     const native = history[method];
@@ -42,26 +49,22 @@ export function installNavigation(win: Realm, ctx: UrlContext, cookies: CookieBr
     const attribute = element.getAttributeNode(name);
     if (attribute && escapes(attribute.value, ctx)) attribute.value = ctx.toProxy(attribute.value);
   };
-  for (const type of LINK_EVENTS) {
-    win.addEventListener(
-      type,
-      (event) => {
-        for (const target of event.composedPath()) {
-          if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
-            fix(target, "href");
-            return;
-          }
-          if (target instanceof win.SVGAElement) {
-            fix(target, "href");
-            fix(target, "xlink:href");
-            return;
-          }
-        }
-      },
-      true,
-    );
-  }
-  win.addEventListener(
+  const listeners: Array<[string, (event: Event) => void, boolean]> = [];
+  const fixLink = (event: Event) => {
+    for (const target of event.composedPath()) {
+      if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
+        fix(target, "href");
+        return;
+      }
+      if (target instanceof win.SVGAElement) {
+        fix(target, "href");
+        fix(target, "xlink:href");
+        return;
+      }
+    }
+  };
+  for (const type of LINK_EVENTS) listeners.push([type, fixLink, true]);
+  listeners.push([
     "submit",
     (event) => {
       if (event.target instanceof win.HTMLFormElement) fix(event.target, "action");
@@ -69,7 +72,7 @@ export function installNavigation(win: Realm, ctx: UrlContext, cookies: CookieBr
       if (submitter) fix(submitter, "formaction");
     },
     true,
-  );
+  ]);
 
   const form = win.HTMLFormElement.prototype;
   const { submit, requestSubmit } = form;
@@ -84,34 +87,49 @@ export function installNavigation(win: Realm, ctx: UrlContext, cookies: CookieBr
   };
 
   // These run after the page's own handlers, so links and forms a page handles itself are left alone.
-  win.addEventListener("click", (event) => {
-    const writes = cookies.pendingWrites();
-    if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
-    const link = event
-      .composedPath()
-      .find((target) => target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement);
-    if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
-    const url = resolve(link.getAttributeNode("href")?.value, ctx);
-    if (!url) return;
-    event.preventDefault();
-    // The next page must already see cookies this one has just written.
-    void writes.then(() => win.location.assign(url));
-  });
-  win.addEventListener("submit", (event) => {
-    const writes = cookies.pendingWrites();
-    const target = event.target;
-    if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
-    const submitter = (event as SubmitEvent).submitter;
-    if ((target.target && target.target !== "_self") || overridesForm(submitter)) return;
-    event.preventDefault();
-    void writes.then(() => {
-      const extra = submitterField(win, submitter);
-      if (extra) target.append(extra);
-      fix(target, "action");
-      submit.call(target);
-      extra?.remove();
-    });
-  });
+  listeners.push([
+    "click",
+    (event) => {
+      const writes = cookies.pendingWrites();
+      if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
+      const link = event
+        .composedPath()
+        .find((target) => target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement);
+      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
+      const url = resolve(link.getAttributeNode("href")?.value, ctx);
+      if (!url) return;
+      event.preventDefault();
+      // The next page must already see cookies this one has just written.
+      void writes.then(() => invoke(win.location.assign, win.location, [url]));
+    },
+    false,
+  ]);
+  listeners.push([
+    "submit",
+    (event) => {
+      const writes = cookies.pendingWrites();
+      const target = event.target;
+      if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
+      const submitter = (event as SubmitEvent).submitter;
+      if ((target.target && target.target !== "_self") || overridesForm(submitter)) return;
+      event.preventDefault();
+      void writes.then(() => {
+        const extra = submitterField(win, submitter);
+        if (extra) target.append(extra);
+        fix(target, "action");
+        submit.call(target);
+        extra?.remove();
+      });
+    },
+    false,
+  ]);
+
+  const addListener = win.addEventListener.bind(win);
+  const listen = () => {
+    for (const [type, listener, capture] of listeners) addListener(type, listener, capture);
+  };
+  listen();
+  return { listen };
 }
 
 function isPlainClick(event: Event): boolean {

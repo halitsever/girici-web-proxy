@@ -84,6 +84,8 @@ function install(): void {
     indirectEval: (code) => scope.eval(code as string),
     // A worker cannot reach a window, so its ports and clients keep their own postMessage.
     messageTarget: (value) => value,
+    // A worker never loads a second document.
+    renew: () => false,
   });
   Object.defineProperty(scope, "__g$", { value: helpers });
 

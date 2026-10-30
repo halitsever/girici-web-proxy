@@ -1,12 +1,14 @@
+import type { Invoke } from "./invoke.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 type Send = (...args: unknown[]) => void;
 
 /** Every proxied page runs on our origin, so postMessage targets and the origin reported to receivers are translated. */
-export function installMessaging(win: Realm, ctx: UrlContext): void {
-  const nativePost = win.postMessage.bind(win) as Send;
+export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke): void {
+  const native = win.postMessage;
+  const send: Send = (...args) => invoke(native, win, args);
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
-    post(nativePost, ctx.realUrl().origin, ctx.origin, message, targetOrigin, rest);
+    post(send, ctx.realUrl().origin, ctx.origin, message, targetOrigin, rest);
   } as typeof win.postMessage;
 
   const descriptor = Object.getOwnPropertyDescriptor(win.MessageEvent.prototype, "origin");
@@ -32,9 +34,9 @@ export function installMessaging(win: Realm, ctx: UrlContext): void {
  * Rewritten `x.postMessage()` calls land here. The browser takes event.source from the realm that calls the native
  * postMessage, so a window gets a stand-in that sends from this realm.
  */
-export function createMessageSender(win: Realm, ctx: UrlContext): (value: unknown) => unknown {
+export function createMessageSender(win: Realm, ctx: UrlContext, invoke: Invoke): (value: unknown) => unknown {
   // Captured before installMessaging replaces it; window methods live on the window itself, not on Window.prototype.
-  const native = win.postMessage as unknown as (this: unknown, ...args: unknown[]) => void;
+  const native = win.postMessage;
   return (value) => {
     let realOrigin: string;
     try {
@@ -44,7 +46,7 @@ export function createMessageSender(win: Realm, ctx: UrlContext): (value: unknow
       // A cross-origin window hides its origin, and its own postMessage needs no translation.
       return value;
     }
-    const send: Send = (...args) => native.apply(value, args);
+    const send: Send = (...args) => invoke(native, value, args);
     return {
       postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
         post(send, realOrigin, ctx.origin, message, targetOrigin, rest),

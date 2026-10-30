@@ -10,6 +10,7 @@ export interface HelperEnv {
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
   messageTarget(value: unknown): unknown;
+  renew(): boolean;
 }
 
 export interface GiriciHelpers {
@@ -23,6 +24,8 @@ export interface GiriciHelpers {
   H(html: unknown): string;
   M(url: unknown): string;
   P(value: unknown): unknown;
+  /** The engine script of a document that reuses this window calls this instead of installing again. */
+  renew(): boolean;
 }
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
@@ -67,5 +70,6 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     H: (html) => env.rewrite.html(String(html)),
     M: (url) => env.rewrite.metaUrl(String(url)),
     P: (value) => env.messageTarget(value),
+    renew: () => env.renew(),
   };
 }

@@ -27,6 +27,11 @@ function makeRealm() {
   return { win, ctx, document, channels };
 }
 
+/** A host-only cookie for the fake realm's host. */
+function cookie(name: string, value: string): CookieSnapshot {
+  return { name, value, domain: "site.test", path: "/", hostOnly: true, secure: false, expires: null, creation: 1 };
+}
+
 const fromOtherTab: CookieSnapshot = {
   name: "t",
   value: "1",
@@ -76,5 +81,39 @@ describe("installCookies", () => {
     bridge.applySync(encodeHeaderValue(JSON.stringify([fromOtherTab])));
     document.cookie = "own=1";
     expect(document.cookie).toBe("");
+  });
+
+  it("starts a renewed document from its own cookies", () => {
+    const { win, ctx } = makeRealm();
+    const bridge = installCookies(win, ctx, { v: 2, cookies: [cookie("a", "1")] });
+    win.document.cookie = "c=3";
+    bridge.reset({ v: 2, cookies: [cookie("b", "2")] });
+    expect(win.document.cookie).toBe("b=2");
+    expect(bridge.currentSeq()).toBe(0);
+  });
+
+  it("ignores answers to writes the previous document made", async () => {
+    const { win, ctx } = makeRealm();
+    const answers: Array<(cookies: CookieSnapshot[]) => void> = [];
+    (win as unknown as { fetch: unknown }).fetch = () =>
+      new Promise((resolve) => {
+        answers.push((cookies) => resolve({ status: 200, json: () => Promise.resolve({ cookies }) }));
+      });
+    const bridge = installCookies(win, ctx, { v: 2, cookies: [] });
+    win.document.cookie = "old=1";
+    bridge.reset({ v: 2, cookies: [] });
+    win.document.cookie = "new=1";
+    answers[0]?.([cookie("old", "1")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(win.document.cookie).toBe("new=1");
+  });
+
+  it("lifts a block that the renewed document does not carry", () => {
+    const { win, ctx } = makeRealm();
+    const bridge = installCookies(win, ctx, { v: 2, cookies: [], cookiesBlocked: true });
+    bridge.reset({ v: 2, cookies: [cookie("b", "2")] });
+    win.document.cookie = "own=1";
+    expect(win.document.cookie).toBe("b=2; own=1");
+    expect(bridge.snapshot().map((c) => c.name)).toEqual(["b", "own"]);
   });
 });

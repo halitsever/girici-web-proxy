@@ -17,12 +17,18 @@ export interface CookieBridge {
   /** Settles once every cookie write still on its way to the worker has landed; null when none is. */
   pendingWrites(): Promise<void> | null;
   applySync(header: string | null): void;
+  /** A reused window starts over from the new document's config; the service worker sees a new client. */
+  reset(config: ClientConfig): void;
+  snapshot(): CookieSnapshot[];
 }
 
 /** document.cookie must answer synchronously, so it reads a local mirror of the worker's jar. */
 export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig): CookieBridge {
   let mirror = [...config.cookies];
+  let blocked = config.cookiesBlocked === true;
   let seq = 0;
+  // Answers to the previous document's writes must not land in the renewed document's mirror.
+  let generation = 0;
   let inflight = 0;
   let pending: Promise<void> | null = null;
   // Captured before the network hooks and storage partitioning wrap these.
@@ -34,7 +40,6 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     // Blocked storage only disables the reload guard.
   }
 
-  const blocked = config.cookiesBlocked === true;
   const apply = (changes: CookieSnapshot[]) => {
     if (blocked) return;
     const host = ctx.realUrl().hostname;
@@ -51,6 +56,7 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     // The worker drops a blocked frame's writes, so the mirror must not show them either.
     if (!blocked) mirror = applyCookieChanges(mirror, [cookie], Date.now());
     const mySeq = ++seq;
+    const myGeneration = generation;
     inflight++;
     const request = nativeFetch(ctx.origin + COOKIE_RPC_PATH, {
       method: "POST",
@@ -64,7 +70,7 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
         }
         const body = (await response.json()) as { cookies?: CookieSnapshot[] };
         // A newer write may already be in the mirror, so only the latest answer replaces it.
-        if (Array.isArray(body.cookies) && mySeq === seq) mirror = body.cookies;
+        if (Array.isArray(body.cookies) && mySeq === seq && myGeneration === generation) mirror = body.cookies;
       })
       .catch(() => {})
       .finally(() => {
@@ -102,5 +108,12 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
         // A malformed header only costs the mirror one update.
       }
     },
+    reset: (next) => {
+      mirror = [...next.cookies];
+      blocked = next.cookiesBlocked === true;
+      seq = 0;
+      generation++;
+    },
+    snapshot: () => [...mirror],
   };
 }

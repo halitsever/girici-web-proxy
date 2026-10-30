@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { Invoke } from "../src/client/invoke.ts";
 import { createMessageSender, installMessaging } from "../src/client/messaging.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+
+const direct: Invoke = (fn, self, args) => Reflect.apply(fn, self, args);
 
 function ctxFor(realOrigin: string, proxyOrigin: string): UrlContext {
   return { origin: proxyOrigin, realUrl: () => new URL(`${realOrigin}/`) } as unknown as UrlContext;
@@ -28,7 +31,7 @@ describe("installMessaging", () => {
     const calls: unknown[][] = [];
     const win = fakeMessagingWin(calls, "http://proxy.test");
     // The receiver's real origin is site-a, so only a message addressed to site-a is delivered.
-    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"));
+    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"), direct);
     win.postMessage("self", "https://site-a.test");
     win.postMessage("other", "https://site-b.test");
     win.postMessage("w", "*");
@@ -45,7 +48,7 @@ describe("installMessaging", () => {
       },
     };
     const win = { ...fakeMessagingWin([], "http://proxy.test"), MessageEvent: { prototype: proto } } as Realm;
-    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"));
+    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"), direct);
     const event = (source: unknown, nativeOrigin: string) =>
       Object.assign(Object.create(proto) as { origin: string }, { source, nativeOrigin });
 
@@ -53,6 +56,16 @@ describe("installMessaging", () => {
     // Ports and workers have no window behind them.
     expect(event(null, "").origin).toBe("");
     expect(event(fakeWindow("https://elsewhere.test"), "https://elsewhere.test").origin).toBe("https://elsewhere.test");
+  });
+
+  it("sends through the invoker", () => {
+    const win = fakeMessagingWin([], "http://proxy.test");
+    const invoked: Array<{ self: unknown; args: readonly unknown[] }> = [];
+    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"), (_fn, self, args) => {
+      invoked.push({ self, args });
+    });
+    win.postMessage("m", "https://site-a.test");
+    expect(invoked).toEqual([{ self: win, args: ["m", "http://proxy.test"] }]);
   });
 });
 
@@ -64,7 +77,7 @@ describe("createMessageSender", () => {
         calls.push([this, ...args]);
       },
     } as unknown as Realm;
-    const sender = createMessageSender(win, ctxFor("https://site-a.test", "http://proxy.test"));
+    const sender = createMessageSender(win, ctxFor("https://site-a.test", "http://proxy.test"), direct);
     const target = fakeWindow("https://site-b.test");
     const port = {};
     const standIn = sender(target) as { postMessage(...args: unknown[]): void };
@@ -84,6 +97,7 @@ describe("createMessageSender", () => {
     const sender = createMessageSender(
       { postMessage() {} } as unknown as Realm,
       ctxFor("https://a.test", "http://p.test"),
+      direct,
     );
     const port = { postMessage() {} };
     const crossOrigin: Record<string, unknown> = {};
@@ -97,5 +111,20 @@ describe("createMessageSender", () => {
     expect(sender(null)).toBe(null);
     expect(sender(undefined)).toBe(undefined);
     expect(sender(crossOrigin)).toBe(crossOrigin);
+  });
+
+  it("sends through the invoker", () => {
+    const native = () => {};
+    const invoked: Array<{ fn: unknown; self: unknown; args: readonly unknown[] }> = [];
+    const sender = createMessageSender(
+      { postMessage: native } as unknown as Realm,
+      ctxFor("https://site-a.test", "http://proxy.test"),
+      (fn, self, args) => {
+        invoked.push({ fn, self, args });
+      },
+    );
+    const target = fakeWindow("https://site-b.test");
+    (sender(target) as { postMessage(...args: unknown[]): void }).postMessage("m", "https://site-b.test");
+    expect(invoked).toEqual([{ fn: native, self: target, args: ["m", "http://proxy.test"] }]);
   });
 });

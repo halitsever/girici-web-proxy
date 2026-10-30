@@ -467,6 +467,28 @@ const PM_SOURCE_CHILD = page(
 </script>`,
 );
 
+// Reading contentWindow installs the runtime into the blank frame before the page gives the frame its src.
+const REUSE = page(
+  "Reuse",
+  `<pre id="results"></pre>
+<script>
+  document.cookie = "a=1; path=/";
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const blank = frame.contentWindow;
+  window.addEventListener("message", (event) => {
+    const out = { ...event.data, fromChild: event.source === frame.contentWindow };
+    document.getElementById("results").textContent = JSON.stringify(out);
+  });
+  frame.src = "https://site-b.test/reuse-child";
+</script>`,
+);
+
+const REUSE_CHILD = page(
+  "Reuse child",
+  `<script>parent.postMessage({ cookie: document.cookie, href: location.href }, "*");</script>`,
+);
+
 // Workers come from a blank frame's constructor, the way anti-tamper code reaches for untouched natives.
 const FRAME_WORKER = page(
   "Frame worker",
@@ -629,6 +651,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
+    "/reuse": html(REUSE),
     "/frame-worker": html(FRAME_WORKER),
     "/sri": html(SRI),
     "/sri-a.js": script(SRI_A),
@@ -719,6 +742,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/idb-store": html(IDB_STORE),
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
+    "/reuse-child": html(REUSE_CHILD),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

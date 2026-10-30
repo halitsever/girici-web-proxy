@@ -34,6 +34,16 @@ test("names the real sender and origin of cross-site messages", async ({ page })
   });
 });
 
+test("renews a frame window the page touched before setting its src", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/reuse");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    cookie: "",
+    href: "https://site-b.test/reuse-child",
+    fromChild: true,
+  });
+});
+
 test("denies notifications", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/notify");
   await expect(page.locator("#perm")).toHaveText("denied");

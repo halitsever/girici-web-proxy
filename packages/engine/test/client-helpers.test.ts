@@ -25,6 +25,7 @@ function setup() {
     },
     indirectEval: (code) => code,
     messageTarget: (value) => value,
+    renew: () => false,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
 }
@@ -91,6 +92,7 @@ describe("createHelpers", () => {
         return "result";
       },
       messageTarget: (value) => ({ standIn: value }),
+      renew: () => true,
     });
     expect(helpers.E("location")).toBe("/*rw*/location");
     expect(helpers.E(42)).toBe(42);
@@ -100,5 +102,6 @@ describe("createHelpers", () => {
     expect(helpers.H("<a>x</a>")).toBe("/*rw*/<a>x</a>");
     expect(helpers.M("/~/x")).toBe("real:/~/x");
     expect(helpers.P("w")).toEqual({ standIn: "w" });
+    expect(helpers.renew()).toBe(true);
   });
 });
