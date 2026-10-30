@@ -28,7 +28,7 @@ import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
 import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
-import { readAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
+import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -366,7 +366,7 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   const client = await clientOf(event);
   // Only a page's document.cookie calls here, and a worker cannot show which page it acts for.
   if (client?.type !== "window") return new Response(null, { status: 403 });
-  const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
+  const pageUrl = realUrlOf(client.url, self.location.origin);
   const blocked = pageUrl ? await cookiesBlocked(event, client, pageUrl) : false;
   const response = await rpc.handle(event.request, event.clientId, pageUrl, { blocked });
   event.waitUntil(forgetClosedClients());
@@ -378,25 +378,16 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
  * never the body, decides the identity the nonce binds to.
  */
 async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
-  let nonce: string | null;
-  try {
-    nonce = readAnnouncement(await event.request.json());
-  } catch {
-    nonce = null;
-  }
-  if (!nonce) return new Response(null, { status: 400 });
+  return answerAnnouncement(event.request, event.clientId, () => callerIdentity(event), workers);
+}
+
+/** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */
+async function callerIdentity(event: FetchEvent): Promise<WorkerIdentity | null> {
   const client = await clientOf(event);
-  let identity: WorkerIdentity | null = null;
-  if (client?.type === "window") {
-    // A blank frame's address is about:blank, so its workers stay unbound.
-    const page = realUrlOf(client.url, self.location.origin);
-    if (page) identity = { page: page.href, top: await windowTop(client, topSiteDeps) };
-  } else {
-    identity = await identityOf(event, client);
-  }
-  if (!identity) return new Response(null, { status: 403 });
-  workers.announce(nonce, identity);
-  return new Response(null, { status: 204 });
+  if (client?.type !== "window") return identityOf(event, client);
+  // A blank frame's address is about:blank, so its workers stay unbound.
+  const page = realUrlOf(client.url, self.location.origin);
+  return page && { page: page.href, top: await windowTop(client, topSiteDeps) };
 }
 
 /** The page that started the request's client, when that client is not a window. */

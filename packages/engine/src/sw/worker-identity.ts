@@ -16,6 +16,8 @@ export interface WorkerRegistryOptions {
   /** How long an announced nonce stays claimable. */
   ttlMs?: number;
   limit?: number;
+  /** How many unclaimed nonces one client may hold, so a flood from one page cannot push out another's. */
+  perClient?: number;
 }
 
 /** The nonce on a worker's runtime import, if well-formed. */
@@ -30,6 +32,26 @@ export function readAnnouncement(body: unknown): string | null {
   return v === PROTOCOL_VERSION && typeof n === "string" && NONCE.test(n) ? n : null;
 }
 
+/** Answers an announcement: 400 when the body is not one, 403 when the caller has no identity to bind the nonce to. */
+export async function answerAnnouncement(
+  request: Request,
+  from: string,
+  callerIdentity: () => Promise<WorkerIdentity | null>,
+  registry: WorkerRegistry,
+): Promise<Response> {
+  let nonce: string | null;
+  try {
+    nonce = readAnnouncement(await request.json());
+  } catch {
+    nonce = null;
+  }
+  if (!nonce) return new Response(null, { status: 400 });
+  const identity = await callerIdentity();
+  if (!identity) return new Response(null, { status: 403 });
+  registry.announce(nonce, identity, from);
+  return new Response(null, { status: 204 });
+}
+
 /**
  * Binds each worker to the page that started it. The page announces a nonce before the worker exists, and the worker
  * names it on its first request, so a worker never vouches for its own site. Bindings outlive worker restarts.
@@ -39,8 +61,9 @@ export class WorkerRegistry {
   readonly #waitMs: number;
   readonly #ttlMs: number;
   readonly #limit: number;
-  /** Announced nonces, oldest first. */
-  readonly #nonces = new Map<string, { identity: WorkerIdentity; at: number }>();
+  readonly #perClient: number;
+  /** Announced nonces and the client that announced each, oldest first. */
+  readonly #nonces = new Map<string, { identity: WorkerIdentity; at: number; from: string }>();
   /** Claims that came before their announcement. */
   readonly #waiting = new Map<string, (identity: WorkerIdentity) => void>();
   readonly #pending = new Map<string, Promise<WorkerIdentity | null>>();
@@ -53,6 +76,7 @@ export class WorkerRegistry {
     this.#waitMs = options.waitMs ?? 1000;
     this.#ttlMs = options.ttlMs ?? 30_000;
     this.#limit = options.limit ?? 500;
+    this.#perClient = options.perClient ?? 64;
   }
 
   ready(): Promise<void> {
@@ -60,7 +84,7 @@ export class WorkerRegistry {
     return this.#loaded;
   }
 
-  announce(nonce: string, identity: WorkerIdentity, now = Date.now()): void {
+  announce(nonce: string, identity: WorkerIdentity, from: string, now = Date.now()): void {
     const waiter = this.#waiting.get(nonce);
     if (waiter) {
       this.#waiting.delete(nonce);
@@ -70,29 +94,72 @@ export class WorkerRegistry {
     // The first announcement holds; a nonce is never rebound to another page.
     if (this.#nonces.has(nonce)) return;
     for (const [key, entry] of this.#nonces) if (now - entry.at > this.#ttlMs) this.#nonces.delete(key);
-    this.#nonces.set(nonce, { identity, at: now });
-    trim(this.#nonces, this.#limit);
+    const own = this.#noncesFrom(from);
+    if (own.length >= this.#perClient) this.#nonces.delete(own[0]!);
+    this.#nonces.set(nonce, { identity, at: now, from });
+    if (this.#nonces.size > this.#limit) this.#evictFromLargest();
   }
 
   /** A worker keeps its first binding, so a second nonce cannot move it to another site. */
   claim(clientId: string, nonce: string): Promise<WorkerIdentity | null> {
     const known = this.#pending.get(clientId) ?? this.#boundIdentity(clientId);
     if (known) return known;
-    const claimed = this.#take(nonce).then((identity) => {
-      this.#pending.delete(clientId);
-      if (identity) this.#bind(clientId, identity);
+    const claimed = this.#claim(clientId, nonce);
+    // Stored before it settles, so the worker's next requests wait for the same answer, but not for the disk.
+    this.#pending.set(
+      clientId,
+      claimed.then(({ identity }) => {
+        this.#pending.delete(clientId);
+        return identity;
+      }),
+    );
+    // The caller keeps the service worker alive until the binding is stored too.
+    return claimed.then(async ({ identity, stored }) => {
+      await stored;
       return identity;
     });
-    // Stored before it settles, so the worker's next requests wait for the same answer.
-    this.#pending.set(clientId, claimed);
-    return claimed;
   }
 
   async identityOf(clientId: string): Promise<WorkerIdentity | null> {
     const known = this.#pending.get(clientId) ?? this.#boundIdentity(clientId);
-    if (known) return known;
+    if (known) {
+      this.#touch(clientId);
+      return known;
+    }
     await this.ready();
     return this.#bound.get(clientId)?.identity ?? null;
+  }
+
+  async #claim(clientId: string, nonce: string): Promise<{ identity: WorkerIdentity | null; stored?: Promise<void> }> {
+    // A binding from before a restart outranks any nonce, so it is read first.
+    await this.ready();
+    const bound = this.#bound.get(clientId);
+    if (bound) return { identity: bound.identity };
+    const identity = await this.#take(nonce);
+    return identity ? { identity, stored: this.#bind(clientId, identity) } : { identity };
+  }
+
+  /** Moves a worker that is still making requests to the back of the eviction order, in memory only. */
+  #touch(clientId: string): void {
+    const bound = this.#bound.get(clientId);
+    if (!bound) return;
+    this.#bound.delete(clientId);
+    this.#bound.set(clientId, bound);
+  }
+
+  #noncesFrom(from: string): string[] {
+    const keys: string[] = [];
+    for (const [key, entry] of this.#nonces) if (entry.from === from) keys.push(key);
+    return keys;
+  }
+
+  /** Drops the oldest nonce of the client holding the most, so clients below their cap keep theirs. */
+  #evictFromLargest(): void {
+    const counts = new Map<string, number>();
+    for (const entry of this.#nonces.values()) counts.set(entry.from, (counts.get(entry.from) ?? 0) + 1);
+    let largest: string | null = null;
+    for (const [from, count] of counts) if (largest === null || count > counts.get(largest)!) largest = from;
+    if (largest !== null) this.#nonces.delete(this.#noncesFrom(largest)[0]!);
   }
 
   #boundIdentity(clientId: string): Promise<WorkerIdentity> | undefined {
@@ -119,12 +186,13 @@ export class WorkerRegistry {
     });
   }
 
-  #bind(clientId: string, identity: WorkerIdentity): void {
+  #bind(clientId: string, identity: WorkerIdentity): Promise<void> {
     const at = Date.now();
     this.#bound.delete(clientId);
     this.#bound.set(clientId, { identity, at });
-    this.#records.put(STORE, clientId, { ...identity, at }).catch(() => {});
+    const stored = this.#records.put(STORE, clientId, { ...identity, at }).catch(() => {});
     for (const dropped of trim(this.#bound, this.#limit)) this.#records.delete(STORE, dropped).catch(() => {});
+    return stored;
   }
 
   async #load(): Promise<void> {
@@ -152,8 +220,17 @@ export class WorkerRegistry {
 
 function storedBinding(value: unknown): { identity: WorkerIdentity; at: number } | null {
   const { page, top, at } = (value ?? {}) as { page?: unknown; top?: unknown; at?: unknown };
-  if (typeof page !== "string" || (typeof top !== "string" && top !== null)) return null;
+  if (typeof page !== "string" || !parses(page) || (typeof top !== "string" && top !== null)) return null;
   return { identity: { page, top }, at: typeof at === "number" ? at : 0 };
+}
+
+function parses(url: string): boolean {
+  try {
+    new URL(url);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Drops the oldest entries past the limit and returns their keys. */

@@ -68,7 +68,7 @@ export async function topSiteFor(
   }
   if (client?.type === "window") return windowTop(client, deps);
   const id = client?.id ?? request.clientId;
-  // Chromium sends a nested worker's requests with no client, and a worker can send any referrer, so none is a site.
+  // Chromium sends a nested worker's requests with no client, and those get no site, whatever their referrer says.
   if (!id) return null;
   // A worker shares the top site of the page that started it; one no page announced has none.
   return (await deps.workers(id))?.top ?? null;

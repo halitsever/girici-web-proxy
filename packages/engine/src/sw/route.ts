@@ -80,7 +80,8 @@ export interface ClientUrlInput {
 
 /**
  * The proxy URL a request is judged from. A worker sits on a blob: address and can send any referrer, so it takes the
- * page that started it. Chromium sends a nested worker's requests with no client at all, so none is never a referrer.
+ * page that started it. Chromium sends a nested worker's requests with no client at all; a request without one gets no
+ * URL, whatever its referrer says.
  */
 export function requestClientUrl(input: ClientUrlInput, origin: string): string | null {
   if (input.client?.type === "window") return input.client.url;
