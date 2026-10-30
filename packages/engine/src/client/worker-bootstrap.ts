@@ -47,9 +47,12 @@ const toText = String;
 const NativeURL = URL;
 const protocolOf = Object.getOwnPropertyDescriptor(URL.prototype, "protocol")?.get as (this: URL) => string;
 const nativeCrypto = globalThis.crypto;
-const randomUUID = nativeCrypto.randomUUID;
-const replaceAll = String.prototype.replaceAll;
+const getRandomValues = nativeCrypto.getRandomValues;
+const Bytes = Uint8Array;
+const HEX = "0123456789abcdef";
 const then = Promise.prototype.then;
+const defineProperty = Object.defineProperty;
+const iteratorKey = Symbol.iterator;
 
 /** A worker's first script: it hands the runtime its boot values, then loads the runtime before the real script. */
 export function workerBootstrapCode(boot: WorkerBoot): string {
@@ -75,11 +78,12 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
       throw new TypeError("Girici: no worker runtime to start this worker");
     }
     const source = isBlob(raw) ? { scriptUrl: raw, base: start.blobBase() } : start.resolve(raw);
-    const nonce = apply(replaceAll, apply(randomUUID, nativeCrypto, []), ["-", ""]) as string;
+    const nonce = randomHex();
     // Sent before the worker exists, so the service worker learns who started it before its first request.
+    const body = '{"v":' + PROTOCOL_VERSION + ',"n":"' + nonce + '"}';
     const announced = apply(start.fetch, globals, [
       start.origin + WORKER_RPC_PATH,
-      { method: "POST", body: quote({ v: PROTOCOL_VERSION, n: nonce }) },
+      { __proto__: null, method: "POST", body },
     ]);
     // A failed announcement leaves the worker unbound, which the service worker treats as third-party.
     try {
@@ -94,13 +98,45 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
       partition: start.partition(),
       module: (options as { type?: unknown } | null | undefined)?.type === "module",
     });
-    return apply(createObjectURL, urls, [new Blob([code], { type: "text/javascript" })]) as string;
+    const blobOptions = { __proto__: null, type: "text/javascript" } as { type: string };
+    return apply(createObjectURL, urls, [new Blob(blobParts(code), blobOptions)]) as string;
   };
   for (const name of ["Worker", "SharedWorker"] as const) {
     const Native = globals[name];
     if (!Native) continue;
     globals[name] = hookConstructor(Native, (input) => [bootstrapUrl(toText(input[0]), input[1]), ...input.slice(1)]);
   }
+}
+
+/** 16 random bytes as hex, built only from typed array and string indexing, which no page code can reach. */
+function randomHex(): string {
+  const bytes = new Bytes(16);
+  apply(getRandomValues, nativeCrypto, [bytes]);
+  let hex = "";
+  for (let index = 0; index < 16; index++) {
+    const byte = bytes[index] ?? 0;
+    hex += HEX[byte >> 4]! + HEX[byte & 15]!;
+  }
+  return hex;
+}
+
+/**
+ * One Blob part whose iteration reads only own properties, so a page that replaced the array iterator or its next
+ * cannot hand the Blob a script of its own.
+ */
+function blobParts(part: string): string[] {
+  const parts = [part];
+  let given = false;
+  const next = () => {
+    if (given) return { __proto__: null, done: true, value: undefined };
+    given = true;
+    return { __proto__: null, done: false, value: part };
+  };
+  defineProperty(parts, iteratorKey, {
+    __proto__: null,
+    value: () => ({ __proto__: null, next }),
+  } as PropertyDescriptor);
+  return parts;
 }
 
 /** Parsed rather than matched, so "BLOB:" or " blob:" are blobs too; a relative URL never is. */

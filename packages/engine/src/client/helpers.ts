@@ -56,12 +56,17 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     },
     D: (object) => {
       if (!env.isWindowOrDocument(object)) return object;
-      return new Proxy(object as object, {
-        get: (target, property) => {
-          const value: unknown = Reflect.get(target, property, target);
-          return property === "location" ? L(value) : value;
-        },
-      });
+      // A null prototype keeps traps a page adds to Object.prototype out of this handler.
+      return new Proxy(
+        object as object,
+        {
+          __proto__: null,
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property, target);
+            return property === "location" ? L(value) : value;
+          },
+        } as ProxyHandler<object>,
+      );
     },
     // eval returns non-string arguments untouched, so only code strings are rewritten.
     E: (code) => (typeof code === "string" ? env.rewrite.js(code) : code),

@@ -10,7 +10,10 @@ async function startBroadcast(context: BrowserContext) {
   return b;
 }
 
-test("keeps workers, nested workers and leaked constructors away from Girici's storage", async ({ page, context }) => {
+test("keeps workers, nested workers and leaked or tampered constructors away from Girici's storage", async ({
+  page,
+  context,
+}) => {
   await openThroughUi(page, "https://site-a.test/doors-workers");
   await startBroadcast(context);
   const ui = await context.newPage();
@@ -28,5 +31,8 @@ test("keeps workers, nested workers and leaked constructors away from Girici's s
     nested: closed,
     leakedWorker: closed,
     leakedChannel: false,
+    trapWorker: closed,
+    callWorker: closed,
+    partsWorker: closed,
   });
 });

@@ -285,7 +285,36 @@ const DOORS_WORKERS = page(
   "Doors workers",
   `<button id="start">start</button><pre id="results"></pre>
 <script>
-  const probeUrl = () => URL.createObjectURL(new Blob([${JSON.stringify(PROBE_WORKER)}], { type: "text/javascript" }));
+  const probeSource = ${JSON.stringify(PROBE_WORKER)};
+  const probeUrl = () => URL.createObjectURL(new Blob([probeSource], { type: "text/javascript" }));
+  // Each tamper is undone at once, so the engine's later calls see the real prototypes.
+  const viaTrap = () => {
+    let leaked = null;
+    Object.prototype.get = function (target, key, receiver) {
+      leaked = target;
+      return Reflect.get(target, key, receiver);
+    };
+    try { void Worker.name; } finally { delete Object.prototype.get; }
+    return leaked || Worker;
+  };
+  const viaCall = () => {
+    let leaked = null;
+    const call = Function.prototype.call;
+    Function.prototype.call = function (self, ...rest) {
+      if (typeof self === "function" && self !== Worker) leaked = self;
+      return Reflect.apply(this, self, rest);
+    };
+    try { Worker.toString(); } finally { Function.prototype.call = call; }
+    return leaked || Worker;
+  };
+  const viaParts = () => {
+    const iterate = Array.prototype[Symbol.iterator];
+    Array.prototype[Symbol.iterator] = function () {
+      const swap = typeof this[0] === "string" && this[0].includes("__giriciRuntime");
+      return swap ? [probeSource].values() : iterate.call(this);
+    };
+    try { return new Worker("/probe-worker.js"); } finally { Array.prototype[Symbol.iterator] = iterate; }
+  };
   const answer = (worker) =>
     new Promise((resolve) => {
       worker.onmessage = (event) => resolve(event.data);
@@ -300,13 +329,20 @@ const DOORS_WORKERS = page(
     const worker = new Worker(probeUrl());
     const LeakedWorker = Object.getPrototypeOf(worker).constructor;
     const LeakedChannel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
-    const [own, nested, leakedWorker, leakedChannel] = await Promise.all([
+    const TrapWorker = viaTrap();
+    const CallWorker = viaCall();
+    const [own, nested, leakedWorker, leakedChannel, trapWorker, callWorker, partsWorker] = await Promise.all([
       answer(worker),
       answer(new Worker("/nest.js")),
       answer(new LeakedWorker(probeUrl())),
       listen(new LeakedChannel("__g|https://site-b.test|probe")),
+      answer(new TrapWorker(probeUrl())),
+      answer(new CallWorker(probeUrl())),
+      answer(viaParts()),
     ]);
-    document.getElementById("results").textContent = JSON.stringify({ worker: own, nested, leakedWorker, leakedChannel });
+    document.getElementById("results").textContent = JSON.stringify({
+      worker: own, nested, leakedWorker, leakedChannel, trapWorker, callWorker, partsWorker,
+    });
   };
 </script>`,
 );

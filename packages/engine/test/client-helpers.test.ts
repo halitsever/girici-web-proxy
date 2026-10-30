@@ -69,6 +69,22 @@ describe("createHelpers", () => {
     expect(helpers.D(plain)).toBe(plain);
   });
 
+  it("D ignores proxy traps a page adds to Object.prototype", () => {
+    const { helpers, win } = setup();
+    const proto = Object.prototype as Record<string, unknown>;
+    let trapped: unknown = null;
+    proto.has = (target: object) => {
+      trapped = target;
+      return false;
+    };
+    try {
+      void ("location" in (helpers.D(win) as object));
+    } finally {
+      delete proto.has;
+    }
+    expect(trapped).toBeNull();
+  });
+
   it("routes eval, html and import helpers through the bridge", () => {
     const nativeLocation = { href: "http://proxy.test/~/https/site.test/" };
     const evaled: string[] = [];

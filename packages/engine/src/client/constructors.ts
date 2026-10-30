@@ -8,10 +8,12 @@ export function hookConstructor<T extends abstract new (...args: never[]) => obj
   native: T,
   args: (input: unknown[]) => unknown[],
 ): T {
+  // Without a prototype, a trap the page adds to Object.prototype is never found here.
   const hooked = new Proxy(native, {
+    __proto__: null,
     construct: (target, input: unknown[], newTarget: NewableFunction) =>
       construct(target, args(input), newTarget) as object,
-  });
+  } as ProxyHandler<T>);
   Object.defineProperty(native.prototype, "constructor", { value: hooked, writable: true, configurable: true });
   return maskNative(hooked, native);
 }

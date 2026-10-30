@@ -27,7 +27,9 @@ export function createPartitionedStorage(native: Storage, origin: string): Stora
   const target = Object.create(Object.getPrototypeOf(native) as object) as Storage;
   const proto = Object.getPrototypeOf(target) as object;
 
+  // A null prototype keeps traps a page adds to Object.prototype out of this handler.
   return new Proxy(target, {
+    __proto__: null,
     get: (_target, property, receiver) => {
       if (typeof property === "symbol") return Reflect.get(target, property, receiver);
       if (property === "length") return keys().length;
@@ -58,7 +60,7 @@ export function createPartitionedStorage(native: Storage, origin: string): Stora
         native.setItem(prefix + property, String(descriptor.value));
       return true;
     },
-  });
+  } as ProxyHandler<Storage>);
 }
 
 export function installStorage(win: Realm, ctx: UrlContext): void {

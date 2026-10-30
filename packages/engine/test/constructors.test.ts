@@ -43,4 +43,35 @@ describe("hookConstructor", () => {
     }
     expect(made).toBeInstanceOf(Native);
   });
+
+  it("never hands the native to proxy traps a page adds to Object.prototype", () => {
+    const Native = nativeClass();
+    const Hooked = hookConstructor(Native, (input) => input) as unknown as () => unknown;
+    const reflect = Reflect as unknown as Record<string, (...args: unknown[]) => unknown>;
+    const proto = Object.prototype as Record<string, unknown>;
+    const leaked: unknown[] = [];
+    // One trap at a time: an inherited "get" also turns every property descriptor into an accessor.
+    const probes: Array<[string, () => unknown]> = [
+      ["get", () => Hooked.name],
+      ["apply", () => Hooked()],
+      ["has", () => "prototype" in Hooked],
+      ["getPrototypeOf", () => Object.getPrototypeOf(Hooked)],
+      ["getOwnPropertyDescriptor", () => Reflect.getOwnPropertyDescriptor(Hooked, "name")],
+      ["ownKeys", () => Reflect.ownKeys(Hooked)],
+    ];
+    for (const [trap, probe] of probes) {
+      proto[trap] = (target: unknown, ...rest: unknown[]) => {
+        leaked.push(target);
+        return reflect[trap]?.(target, ...rest);
+      };
+      try {
+        probe();
+      } catch {
+        // A class cannot be called; only the trap lookup matters.
+      } finally {
+        delete proto[trap];
+      }
+    }
+    expect(leaked).toEqual([]);
+  });
 });
