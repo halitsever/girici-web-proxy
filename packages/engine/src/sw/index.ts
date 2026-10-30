@@ -12,6 +12,7 @@ import {
   type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
+import { createIdbClientRecords } from "./client-records.ts";
 import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
@@ -24,6 +25,7 @@ import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
+import { loadsUi, UiClients } from "./ui-clients.ts";
 import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
@@ -57,6 +59,9 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
+const ui = new UiClients(createIdbClientRecords());
+// A UI tab can message the worker before the activation that records it has finished.
+let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
   frames: new FrameTops(),
   origin: self.location.origin,
@@ -75,17 +80,30 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
-        ),
-      )
-      .then(() => self.clients.claim()),
-  );
+  seeding = seedUiClients();
+  const cleanup = caches
+    .keys()
+    .then((keys) =>
+      Promise.all(
+        keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
+      ),
+    );
+  // UI tabs are recorded before claim() hands them to this worker.
+  event.waitUntil(Promise.all([cleanup, seeding]).then(() => self.clients.claim()));
 });
+
+async function seedUiClients(): Promise<void> {
+  try {
+    await ui.ready();
+    await ui.seedOnce(await self.clients.matchAll({ type: "window", includeUncontrolled: true }), self.location.origin);
+  } catch {
+    // An unseeded tab gains UI authority on its next load.
+  }
+}
+
+async function uiReady(): Promise<void> {
+  await Promise.all([ui.ready(), seeding]);
+}
 
 self.addEventListener("message", (event) => {
   // The bootstrap page asks for control at once instead of waiting for the next navigation.
@@ -93,15 +111,26 @@ self.addEventListener("message", (event) => {
     event.waitUntil(self.clients.claim());
     return;
   }
-  const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin);
-  if (!update) return;
-  // The UI waits for this answer before navigating, so the next page already sees the new choice.
   const answer = event.ports[0];
-  event.waitUntil(prefs.set(update).then(() => answer?.postMessage({ ok: true })));
+  event.waitUntil(
+    uiReady().then(async () => {
+      const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
+      if (!update) return;
+      await prefs.set(update);
+      // The UI waits for this answer before navigating, so the next page already sees the new choice.
+      answer?.postMessage({ ok: true });
+    }),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (loadsUi(event.request, url, self.location.origin)) {
+    if (event.resultingClientId) ui.add(event.resultingClientId);
+    // Answering keeps the page controlled under this ID. Playwright's Firefox loses both when a navigation falls back.
+    event.respondWith(fetch(event.request));
+    return;
+  }
   // The query is ignored: workers import the runtime with a nonce suffix.
   if (url.origin === self.location.origin && runtime.has(url.pathname)) {
     event.respondWith(runtime.response(url.pathname));
@@ -121,8 +150,8 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin === self.location.origin && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
-      // Navigations are judged without a client lookup, so the login and setup screens load at once.
-      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin) === "deny") {
+      // A navigation has no client yet, so only its shape is judged.
+      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin, ui) === "deny") {
         event.respondWith(forbiddenResponse());
       }
       return;
@@ -147,8 +176,8 @@ async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
 
 /** A client that cannot be looked up in time counts as a page, not as the UI. */
 async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
-  const client = await clientOf(event);
-  const decision = reservedAccess(pathname, event.request, client, self.location.origin);
+  const [client] = await Promise.all([clientOf(event), uiReady()]);
+  const decision = reservedAccess(pathname, event.request, client, self.location.origin, ui);
   return decision === "allow" ? fetch(event.request) : forbiddenResponse();
 }
 
@@ -309,8 +338,8 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
 }
 
 async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
-  await cookies.ready();
-  return handleSiteData(event.request, callerOf(await clientOf(event), self.location.origin), cookies);
+  const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady()]);
+  return handleSiteData(event.request, callerOf(client, self.location.origin, ui), cookies);
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {

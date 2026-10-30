@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { PrefsService, readPrefsMessage } from "../src/sw/prefs.ts";
 
-const ui = { type: "window", frameType: "top-level", url: "https://girici.test/settings" };
+const ui = { id: "ui-1", type: "window", frameType: "top-level", url: "https://girici.test/settings" };
+const known = new Set(["ui-1"]);
 const origin = "https://girici.test";
 const valid = { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: false };
 
@@ -38,16 +39,27 @@ describe("PrefsService", () => {
 
 describe("readPrefsMessage", () => {
   it("takes the setting only from the Girici UI", () => {
-    expect(readPrefsMessage(valid, ui, origin)).toEqual({ blockThirdPartyCookies: false });
-    expect(readPrefsMessage(valid, { ...ui, url: "https://girici.test/~/https/tracker.example/" }, origin)).toBeNull();
-    expect(readPrefsMessage(valid, { ...ui, url: "https://evil.example/settings" }, origin)).toBeNull();
+    expect(readPrefsMessage(valid, ui, origin, known)).toEqual({ blockThirdPartyCookies: false });
     expect(
-      readPrefsMessage(valid, { type: "worker", frameType: "none", url: "blob:https://girici.test/1" }, origin),
+      readPrefsMessage(valid, { ...ui, url: "https://girici.test/~/https/tracker.example/" }, origin, known),
     ).toBeNull();
-    expect(readPrefsMessage(valid, { ...ui, frameType: "nested" }, origin)).toBeNull();
-    expect(readPrefsMessage(valid, { ...ui, url: "blob:https://girici.test/1" }, origin)).toBeNull();
-    expect(readPrefsMessage(valid, null, origin)).toBeNull();
-    expect(readPrefsMessage({ ...valid, v: 0 }, ui, origin)).toBeNull();
-    expect(readPrefsMessage({ ...valid, blockThirdPartyCookies: "no" }, ui, origin)).toBeNull();
+    expect(readPrefsMessage(valid, { ...ui, url: "https://evil.example/settings" }, origin, known)).toBeNull();
+    expect(
+      readPrefsMessage(
+        valid,
+        { id: "ui-1", type: "worker", frameType: "none", url: "blob:https://girici.test/1" },
+        origin,
+        known,
+      ),
+    ).toBeNull();
+    expect(readPrefsMessage(valid, { ...ui, frameType: "nested" }, origin, known)).toBeNull();
+    expect(readPrefsMessage(valid, { ...ui, url: "blob:https://girici.test/1" }, origin, known)).toBeNull();
+    expect(readPrefsMessage(valid, null, origin, known)).toBeNull();
+    expect(readPrefsMessage({ ...valid, v: 0 }, ui, origin, known)).toBeNull();
+    expect(readPrefsMessage({ ...valid, blockThirdPartyCookies: "no" }, ui, origin, known)).toBeNull();
+  });
+
+  it("ignores a window on a UI address that no UI navigation produced", () => {
+    expect(readPrefsMessage(valid, { ...ui, id: "page-7" }, origin, known)).toBeNull();
   });
 });

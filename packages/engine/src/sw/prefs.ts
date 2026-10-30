@@ -1,6 +1,6 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { DEFAULT_ENGINE_PREFS, PREFS_MESSAGE, PROTOCOL_VERSION, type EnginePrefs } from "../shared/protocol.ts";
-import { isUiWindow, type ClientShape } from "./route.ts";
+import { isUiWindow, type ClientShape, type UiClientSet } from "./route.ts";
 
 // Not __g|-prefixed, so clearing site data never touches it.
 const DATABASE = "__girici_prefs";
@@ -80,8 +80,9 @@ export function readPrefsMessage(
   data: unknown,
   source: ClientShape | null,
   origin: string,
+  ui: UiClientSet,
 ): Partial<EnginePrefs> | null {
-  if (typeof data !== "object" || data === null || !isUiWindow(source, origin)) return null;
+  if (typeof data !== "object" || data === null || !isUiWindow(source, origin, ui)) return null;
   const { type, v, blockThirdPartyCookies } = data as Record<string, unknown>;
   if (type !== PREFS_MESSAGE || v !== PROTOCOL_VERSION || typeof blockThirdPartyCookies !== "boolean") return null;
   return { blockThirdPartyCookies };

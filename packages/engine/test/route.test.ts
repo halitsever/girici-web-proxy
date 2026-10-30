@@ -80,34 +80,45 @@ describe("classifyRequest", () => {
 
 describe("reservedAccess", () => {
   const origin = "https://girici.test";
-  const ui = { type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const ui = { id: "ui-1", type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const known = new Set(["ui-1"]);
   const call = { mode: "cors" as RequestMode, destination: "" as RequestDestination, method: "POST" };
 
   it("lets the Girici UI call the admin API", () => {
-    expect(reservedAccess("/_g/admin/settings", call, ui, origin)).toBe("allow");
-    expect(reservedAccess("/_g/account", call, ui, origin)).toBe("allow");
+    expect(reservedAccess("/_g/admin/settings", call, ui, origin, known)).toBe("allow");
+    expect(reservedAccess("/_g/account", call, ui, origin, known)).toBe("allow");
   });
 
   it("refuses proxied pages, blank frames, blob windows, workers and unknown clients", () => {
     const clients = [
-      { type: "window", frameType: "top-level", url: `${origin}/~/https/evil.test/` },
-      { type: "window", frameType: "nested", url: "about:blank" },
-      { type: "window", frameType: "top-level", url: `blob:${origin}/1` },
-      { type: "worker", frameType: "none", url: `blob:${origin}/2` },
+      { id: "ui-1", type: "window", frameType: "top-level", url: `${origin}/~/https/evil.test/` },
+      { id: "ui-1", type: "window", frameType: "nested", url: "about:blank" },
+      { id: "ui-1", type: "window", frameType: "top-level", url: `blob:${origin}/1` },
+      { id: "ui-1", type: "worker", frameType: "none", url: `blob:${origin}/2` },
       undefined,
     ];
-    for (const client of clients) expect(reservedAccess("/_g/admin/settings", call, client, origin)).toBe("deny");
+    for (const client of clients) {
+      expect(reservedAccess("/_g/admin/settings", call, client, origin, known)).toBe("deny");
+    }
+  });
+
+  it("refuses a window on a UI address that no UI navigation produced", () => {
+    const ui = new Set(["ui-1"]);
+    const at = (id: string) => ({ id, type: "window", frameType: "top-level", url: `${origin}/settings` });
+    expect(isUiWindow(at("ui-1"), origin, ui)).toBe(true);
+    expect(isUiWindow(at("page-7"), origin, ui)).toBe(false);
+    expect(reservedAccess("/_g/admin/settings", call, at("page-7"), origin, ui)).toBe("deny");
   });
 
   it("allows top-level loads of the login screen but not framed ones", () => {
     const nav = (destination: RequestDestination) => ({ mode: "navigate" as RequestMode, destination, method: "GET" });
-    expect(reservedAccess("/_g/login", nav("document"), undefined, origin)).toBe("allow");
-    expect(reservedAccess("/_g/login", nav("iframe"), undefined, origin)).toBe("deny");
+    expect(reservedAccess("/_g/login", nav("document"), undefined, origin, known)).toBe("allow");
+    expect(reservedAccess("/_g/login", nav("iframe"), undefined, origin, known)).toBe("deny");
   });
 
   it("keeps the service worker's own endpoints away from every page", () => {
-    expect(reservedAccess("/_g/pot", call, ui, origin)).toBe("deny");
-    expect(reservedAccess("/_g/ws-seal", call, ui, origin)).toBe("deny");
+    expect(reservedAccess("/_g/pot", call, ui, origin, known)).toBe("deny");
+    expect(reservedAccess("/_g/ws-seal", call, ui, origin, known)).toBe("deny");
   });
 });
 
@@ -139,22 +150,24 @@ describe("isGuardedPath", () => {
 
 describe("isUiWindow", () => {
   const origin = "https://girici.test";
-  const top = (path: string) => ({ type: "window", frameType: "top-level", url: `${origin}${path}` });
+  const ui = new Set(["ui-1"]);
+  const top = (path: string) => ({ id: "ui-1", type: "window", frameType: "top-level", url: `${origin}${path}` });
 
   it("knows the Girici UI by its routes", () => {
     for (const path of ["/", "/settings", "/account?tab=1", "/_g/login?next=%2F", "/_g/setup", "/Settings/"])
-      expect(isUiWindow(top(path), origin), path).toBe(true);
+      expect(isUiWindow(top(path), origin, ui), path).toBe(true);
   });
 
   it("refuses documents the service worker made, such as its error pages", () => {
     for (const path of ["/~", "/~/ftp/x", "/~/https/", "/robots.txt", "/_g/sw.js", "/elsewhere"])
-      expect(isUiWindow(top(path), origin), path).toBe(false);
+      expect(isUiWindow(top(path), origin, ui), path).toBe(false);
   });
 });
 
 describe("guarded path variants", () => {
   const origin = "https://girici.test";
-  const ui = { type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const ui = { id: "ui-1", type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const known = new Set(["ui-1"]);
   const call = { mode: "cors" as RequestMode, destination: "" as RequestDestination, method: "POST" };
 
   it("guards the spellings Express would also route", () => {
@@ -167,7 +180,7 @@ describe("guarded path variants", () => {
       "/_g/account//",
     ])
       expect(isGuardedPath(path), path).toBe(true);
-    expect(reservedAccess("/_g/POT", call, ui, origin)).toBe("deny");
-    expect(reservedAccess("/_g/Admin/settings", call, undefined, origin)).toBe("deny");
+    expect(reservedAccess("/_g/POT", call, ui, origin, known)).toBe("deny");
+    expect(reservedAccess("/_g/Admin/settings", call, undefined, origin, known)).toBe("deny");
   });
 });

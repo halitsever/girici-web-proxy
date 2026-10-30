@@ -22,11 +22,7 @@ test("replaces a tampered runtime after the service worker restarts", async ({ p
   ).not.toContain("__tampered");
 });
 
-test("serves the same verified runtime whatever query string asks for it", async ({ page, browserName }) => {
-  test.skip(
-    browserName === "firefox",
-    "Firefox leaves the Girici home uncontrolled, so the service worker never answers",
-  );
+test("serves the same verified runtime whatever query string asks for it", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/runtime?x=1#h");
   // The proxied page's fetch is rewritten to the site, so ask from the Girici origin itself.
   await page.goto("/");
