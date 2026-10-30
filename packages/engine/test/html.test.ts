@@ -205,6 +205,23 @@ describe("srcdoc documents", () => {
     expect(html.match(/client\.T\.js/g)).toHaveLength(2);
   });
 
+  it("runtime-wraps srcdoc on iframes only", () => {
+    const html = rewriteHtml('<div srcdoc="<script>go(location)</script>"></div>', {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+      frameInject,
+    });
+    expect(html).not.toContain("client.T.js");
+    expect(html).not.toContain("__g$");
+  });
+
+  it("keeps a single runtime tag when the markup already starts with it", () => {
+    const inject = frameInject(new URL("https://a.test/p"));
+    const once = rewriteHtml("<p>x</p>", { url: new URL("https://a.test/p"), origin: "http://p.test", inject });
+    const twice = rewriteHtml(once, { url: new URL("https://a.test/p"), origin: "http://p.test", inject });
+    expect(twice).toBe(once);
+  });
+
   it("leaves srcdoc scripts alone without frameInject", () => {
     const html = rewriteHtml('<iframe srcdoc="<script>go(location)</script>"></iframe>', {
       url: new URL("https://a.test/p"),

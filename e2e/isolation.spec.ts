@@ -98,3 +98,14 @@ test("rewrites URLs set through Attr nodes", async ({ page }) => {
   await expect(page.frameLocator("#by-node").locator("h1")).toHaveText("Site B");
   await expect(page.frameLocator("#by-map").locator("h1")).toHaveText("Site B");
 });
+
+test("reads a srcdoc Attr node back as written and runs it once", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/attr-node");
+  await expect(page.frameLocator("#moved-srcdoc").locator("#doc")).toHaveText("site-a.test");
+  expect(JSON.parse((await page.locator("#readback").textContent()) ?? "{}")).toEqual({
+    node: true,
+    attribute: true,
+    property: true,
+    markup: true,
+  });
+});
