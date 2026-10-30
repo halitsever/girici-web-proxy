@@ -235,14 +235,15 @@ const COOKIE_API_PAGE = page(
 
 const OLD_CHANNEL = page(
   "Old channel",
-  `<p id="heard">waiting</p>
+  `<p id="heard">waiting</p><button id="judge">judge</button>
 <script>
   const Channel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
   const old = new Channel("__girici");
-  old.onmessage = () => { document.getElementById("heard").textContent = "yes"; };
-  setTimeout(() => {
-    if (document.getElementById("heard").textContent !== "yes") document.getElementById("heard").textContent = "no";
-  }, 2000);
+  const heard = document.getElementById("heard");
+  old.onmessage = () => { heard.textContent = "yes"; };
+  document.getElementById("judge").onclick = () => {
+    setTimeout(() => { if (heard.textContent !== "yes") heard.textContent = "no"; }, 2000);
+  };
 </script>`,
 );
 

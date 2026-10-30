@@ -48,6 +48,7 @@ export function install(win: Realm, config: ClientConfig, clientUrl: string): vo
   const listeners: DocumentListeners[] = [];
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
   let cookies: CookieBridge = {
+    listen: () => {},
     currentSeq: () => 0,
     pendingWrites: () => null,
     applySync: () => {},

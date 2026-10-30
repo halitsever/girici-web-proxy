@@ -64,7 +64,11 @@ const topSiteDeps: TopSiteDeps = {
   askTop,
 };
 // Tabs of the same site keep their document.cookie mirrors current through these messages.
-cookies.onChange((changes) => void announceCookies(changes));
+// One chain keeps deliveries in write order.
+let announced: Promise<void> = Promise.resolve();
+cookies.onChange((changes) => {
+  announced = announced.then(() => announceCookies(changes)).catch(() => {});
+});
 
 self.addEventListener("install", (event) => {
   event.waitUntil(runtime.install().then(() => self.skipWaiting()));
@@ -133,7 +137,7 @@ self.addEventListener("fetch", (event) => {
 async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
   const clients = await self.clients.matchAll({ type: "window" });
   for (const delivery of cookieDeliveries(clients, changes, self.location.origin)) {
-    (clients.find((client) => client.id === delivery.id) as Client).postMessage({
+    delivery.client.postMessage({
       type: COOKIE_MESSAGE,
       v: PROTOCOL_VERSION,
       changes: delivery.changes,

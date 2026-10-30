@@ -45,6 +45,9 @@ test("no longer announces cookie changes on a shared channel", async ({ page, co
   await other.evaluate(() => {
     document.cookie = "shared=1; path=/";
   });
+  // The verdict starts only once the write has reached the worker's jar.
+  await expect.poll(() => page.evaluate(() => fetch("/cookie/echo").then((r) => r.text()))).toContain("shared=1");
+  await page.locator("#judge").click();
   await expect(page.locator("#heard")).toHaveText("no");
 });
 
