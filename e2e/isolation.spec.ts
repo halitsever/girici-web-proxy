@@ -92,3 +92,9 @@ test("renders an untyped page as HTML and keeps a text document's charset", asyn
   await page.goto("/~/https/site-a.test/cyrillic.txt");
   await expect(page.locator("body")).toHaveText("Привет");
 });
+
+test("rewrites URLs set through Attr nodes", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/attr-node");
+  await expect(page.frameLocator("#by-node").locator("h1")).toHaveText("Site B");
+  await expect(page.frameLocator("#by-map").locator("h1")).toHaveText("Site B");
+});

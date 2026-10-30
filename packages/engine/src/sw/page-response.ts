@@ -161,8 +161,11 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
         site: schemefulSite(ctx.target),
       };
       if (ctx.cookiesBlocked) config.cookiesBlocked = true;
-      const inject = clientTag(new URL(ctx.clientScript, ctx.origin).href, config);
-      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
+      const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
+      const inject = clientTag(clientUrl, config);
+      const frameInject = (base: URL) =>
+        clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
+      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject, frameInject });
     }
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);

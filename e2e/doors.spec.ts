@@ -56,3 +56,15 @@ test("gives every new same-origin window the runtime before page code can reach 
   expect(frameProbe).toEqual(closed);
   expect(popupProbe).toEqual(closed);
 });
+
+test("runs srcdoc documents under the runtime from their first script", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/doors-srcdoc");
+  await startBroadcast(context);
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 20_000 });
+  const results = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  expect(results).toEqual({
+    parsed: { hooked: true, probe: closed },
+    property: { hooked: true, probe: closed },
+    attribute: { hooked: true, probe: closed },
+  });
+});

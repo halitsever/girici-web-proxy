@@ -180,3 +180,36 @@ describe("documents that are not well formed", () => {
     expect(rw(once)).toBe(once);
   });
 });
+
+describe("srcdoc documents", () => {
+  const frameInject = (base: URL) => `<script src="http://p.test/_g/client.T.js" data-girici="${base.href}"></script>`;
+
+  it("gives srcdoc documents the runtime with the frame's base", () => {
+    const html = rewriteHtml(
+      '<base href="https://cdn.a.test/d/"><iframe srcdoc="<script>go(location)</script>"></iframe>',
+      { url: new URL("https://a.test/p"), origin: "http://p.test", frameInject },
+    );
+    expect(html).toContain(
+      "&lt;script src=&quot;http://p.test/_g/client.T.js&quot; data-girici=&quot;https://cdn.a.test/d/&quot;",
+    );
+    expect(html).toContain("go(__g$.L(location))");
+  });
+
+  it("passes the runtime on to nested srcdoc documents", () => {
+    const inner = '<iframe srcdoc="<p>x</p>"></iframe>';
+    const html = rewriteHtml(`<iframe srcdoc="${inner.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`, {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+      frameInject,
+    });
+    expect(html.match(/client\.T\.js/g)).toHaveLength(2);
+  });
+
+  it("leaves srcdoc scripts alone without frameInject", () => {
+    const html = rewriteHtml('<iframe srcdoc="<script>go(location)</script>"></iframe>', {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+    });
+    expect(html).not.toContain("__g$");
+  });
+});

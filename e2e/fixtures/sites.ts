@@ -830,6 +830,53 @@ const SRCDOC_ESCAPE = page(
   `<iframe srcdoc="<script>fetch('https://site-b.test/api').catch(function(){})<\/script>"></iframe>`,
 );
 
+/** A srcdoc document whose first script reports whether the runtime is in place and what its realm reaches. */
+const srcdocReport = (id: string): string =>
+  `<p>${id}</p><script>${PROBE}
+(async () => {
+  const hooked = Object.getOwnPropertyDescriptor(window, "__g$") !== undefined;
+  parent.postMessage(JSON.stringify({ id: ${JSON.stringify(id)}, hooked, probe: await girProbe(window) }), "*");
+})();</script>`;
+
+const DOORS_SRCDOC = page(
+  "Doors srcdoc",
+  `<pre id="results"></pre>
+<script>
+  const seen = {};
+  addEventListener("message", (event) => {
+    const report = JSON.parse(event.data);
+    seen[report.id] = { hooked: report.hooked, probe: report.probe };
+    if (Object.keys(seen).length === 3) document.getElementById("results").textContent = JSON.stringify(seen);
+  });
+  const docs = ${JSON.stringify({ property: srcdocReport("property"), attribute: srcdocReport("attribute") }).replace(/<\//g, "<\\/")};
+  const byProperty = document.createElement("iframe");
+  byProperty.srcdoc = docs.property;
+  document.body.appendChild(byProperty);
+  const byAttribute = document.createElement("iframe");
+  byAttribute.setAttribute("srcdoc", docs.attribute);
+  document.body.appendChild(byAttribute);
+</script>
+<iframe srcdoc="${escapeHtml(srcdocReport("parsed"))}"></iframe>`,
+);
+
+const ATTR_NODE = page(
+  "Attr node",
+  `<script>
+  const byNode = document.createElement("iframe");
+  const node = document.createAttribute("src");
+  node.value = "https://site-b.test/";
+  byNode.id = "by-node";
+  byNode.setAttributeNode(node);
+  document.body.appendChild(byNode);
+  const byMap = document.createElement("iframe");
+  const named = document.createAttribute("src");
+  named.value = "https://site-b.test/";
+  byMap.id = "by-map";
+  byMap.attributes.setNamedItem(named);
+  document.body.appendChild(byMap);
+</script>`,
+);
+
 const NOTIFY = page(
   "Notify",
   `<p id="perm"></p>
@@ -1108,6 +1155,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     ),
     "/doors-workers": html(DOORS_WORKERS),
     "/doors-frames": html(DOORS_FRAMES),
+    "/doors-srcdoc": html(DOORS_SRCDOC),
+    "/attr-node": html(ATTR_NODE),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',

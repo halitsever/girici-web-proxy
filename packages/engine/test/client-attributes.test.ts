@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restoreAttribute, rewriteAttribute } from "../src/client/attribute-values.ts";
+import { attributeKind, restoreAttribute, rewriteAttribute } from "../src/client/attribute-values.ts";
 
 const base = new URL("https://site.test/dir/page.html");
 const origin = "http://proxy.test";
@@ -31,5 +31,14 @@ describe("restoreAttribute", () => {
       "https://c.test/a.png 1x, b.png 2x",
     );
     expect(restoreAttribute("a", "href", "rel/x", base, origin)).toBe("rel/x");
+  });
+});
+
+describe("srcdoc", () => {
+  it("hands srcdoc to the HTML rewriter", () => {
+    expect(attributeKind("IFRAME", "srcdoc")).toBe("html");
+    expect(rewriteAttribute("iframe", "srcdoc", "<p>", base, origin, (m) => `[${m}]`)).toBe("[<p>]");
+    expect(rewriteAttribute("iframe", "srcdoc", "<p>", base, origin)).toBe("<p>");
+    expect(restoreAttribute("iframe", "srcdoc", "[<p>]", base, origin, (m) => m.slice(1, -1))).toBe("<p>");
   });
 });

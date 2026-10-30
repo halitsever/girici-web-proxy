@@ -2,6 +2,7 @@ import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { rewriteHtml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
+import { stripClientTag } from "../shared/client-tag.ts";
 import { attributeKind, restoreAttribute } from "./attribute-values.ts";
 import type { UrlContext } from "./url-context.ts";
 
@@ -10,23 +11,44 @@ export interface RewriteBridge {
   js(code: string): string;
   jsBody(code: string): string;
   html(html: string): string;
+  /** A srcdoc document with the runtime tag in front, since it has no address to load the runtime through. */
+  srcdoc(markup: string): string;
   unhtml(html: string): string;
+  unsrcdoc(markup: string): string;
   importSpecifier(spec: string): string;
   metaUrl(url: string): string;
 }
 
 export function createRewriteBridge(
   ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy">,
+  frameTag: () => string,
 ): RewriteBridge {
+  const html = (markup: string) =>
+    rewriteHtml(markup, { url: ctx.realBase(), origin: ctx.origin, scripts: true, frameInject: frameTag });
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
     jsBody: (code) => rewriteJs(code, { kind: "handler" }),
-    html: (html) => rewriteHtml(html, { url: ctx.realBase(), origin: ctx.origin, scripts: true }),
-    unhtml: (html) => unrewriteHtmlAttributes(html, ctx.realBase(), ctx.origin),
+    html,
+    srcdoc: (markup) =>
+      rewriteHtml(markup, {
+        url: ctx.realBase(),
+        origin: ctx.origin,
+        scripts: true,
+        inject: frameTag(),
+        frameInject: frameTag,
+      }),
+    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin),
+    unsrcdoc: (markup) =>
+      stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin), tagSource(frameTag())),
     importSpecifier: (spec) => ctx.toProxy(spec),
     metaUrl: (url) => ctx.fromProxy(url),
   };
+}
+
+/** The runtime address, read from the tag itself so the bridge needs no second copy of it. */
+function tagSource(tag: string): string {
+  return /^<script src="([^"]*)"/.exec(tag)?.[1] ?? "";
 }
 
 interface PendingAttribute {

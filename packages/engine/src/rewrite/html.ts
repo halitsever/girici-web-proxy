@@ -10,6 +10,8 @@ export interface HtmlRewriteOptions {
   origin: string;
   inject?: string;
   scripts?: boolean;
+  /** Runtime tag for a srcdoc document, which has no address of its own to load the runtime through. */
+  frameInject?: (base: URL) => string;
 }
 
 interface Attribute {
@@ -151,7 +153,10 @@ class HtmlRewriter {
     }
     const rewritten = this.#rewriteValue(tag, attribs, name, value);
     if (rewritten !== value) {
-      this.#output.overwrite(attribute.start, attribute.end, `${name}="${escapeAttribute(rewritten)}"`);
+      // A document that carries the runtime tag has its markup written out as text.
+      const text = escapeAttribute(rewritten);
+      const escaped = name === "srcdoc" && this.#options.frameInject ? text.replace(/</g, "&lt;") : text;
+      this.#output.overwrite(attribute.start, attribute.end, `${name}="${escaped}"`);
     }
   }
 
@@ -191,7 +196,17 @@ class HtmlRewriter {
     }
     if (name === "style") return rewriteCss(value, this.#base, origin);
     if (name.startsWith("on")) return this.#scripts ? rewriteJs(value, { kind: "handler" }) : value;
-    if (name === "srcdoc") return rewriteHtml(value, { url: this.#base, origin, scripts: false });
+    if (name === "srcdoc") {
+      const { frameInject } = this.#options;
+      if (!frameInject) return rewriteHtml(value, { url: this.#base, origin, scripts: false });
+      return rewriteHtml(value, {
+        url: this.#base,
+        origin,
+        scripts: true,
+        inject: frameInject(this.#base),
+        frameInject,
+      });
+    }
     if (tag === "meta" && name === "content" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh") {
       return rewriteRefresh(value, this.#base, origin);
     }

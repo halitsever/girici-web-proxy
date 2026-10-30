@@ -1,4 +1,5 @@
 import { attributeKind, restoreAttribute, rewriteAttribute } from "./attribute-values.ts";
+import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 const URL_PROPERTIES: Array<[string, string]> = [
@@ -35,8 +36,21 @@ const LINK_ELEMENTS = ["HTMLAnchorElement", "HTMLAreaElement"];
 const LINK_PARTS = ["protocol", "host", "hostname", "port", "pathname", "search", "hash"] as const;
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
 
+// Taken at load: the Attr hooks run inside page calls, after page code may have replaced these.
+const apply = Reflect.apply;
+const ownDescriptor = Object.getOwnPropertyDescriptor;
+const defineProperty = Object.defineProperty;
+const mapGet = WeakMap.prototype.get;
+const mapSet = WeakMap.prototype.set;
+
+/** The markup rewriters for a srcdoc document, which also carries the runtime tag. */
+export interface SrcdocBridge {
+  srcdoc(markup: string): string;
+  unsrcdoc(markup: string): string;
+}
+
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
-export function installAttributes(win: Realm, ctx: UrlContext): void {
+export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBridge): void {
   for (const [name, property] of URL_PROPERTIES) {
     wrap(
       win,
@@ -64,6 +78,7 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
       (value) => rewriteAttribute("script", property, value, ctx.realBase(), ctx.origin),
     );
   }
+  wrap(win, "HTMLIFrameElement", "srcdoc", markup.unsrcdoc, markup.srcdoc);
   for (const name of LINK_ELEMENTS) installLinkParts(win, name);
 
   const element = win.Element.prototype;
@@ -84,6 +99,7 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
   };
 
   // Reading an Attr node directly (getAttributeNode, the attributes map, nodeValue, textContent) must show the real URL.
+  const nativeValue = findAccessor(win.Attr.prototype, "value");
   for (const name of ["value", "nodeValue", "textContent"] as const) {
     const descriptor = findAccessor(win.Attr.prototype, name);
     if (!descriptor?.get || !descriptor.set) continue;
@@ -103,15 +119,64 @@ export function installAttributes(win: Realm, ctx: UrlContext): void {
     });
   }
 
+  // A node attached whole skips the value setters above, so its value is rewritten before it goes in.
+  const attrValue = nativeValue?.get && nativeValue.set ? { get: nativeValue.get, set: nativeValue.set } : null;
+  const prepare = (target: unknown, node: unknown): void => {
+    if (!attrValue || typeof node !== "object" || node === null) return;
+    try {
+      const value = apply(attrValue.get, node, []);
+      if (typeof value !== "string") return;
+      const { namespaceURI, name } = node as Attr;
+      const next = rewrite(target as Element, attributeName(namespaceURI, name), value);
+      if (next !== value) apply(attrValue.set, node, [next]);
+    } catch {
+      // The native call reports a node that is not an Attr.
+    }
+  };
+  for (const name of ["setAttributeNode", "setAttributeNodeNS"] as const) {
+    const native = element[name] as (...args: unknown[]) => unknown;
+    element[name] = maskNative(function (this: Element, node: Attr) {
+      prepare(this, node);
+      return apply(native, this, [node]);
+    }, native) as typeof element.setAttributeNode;
+  }
+
+  // A NamedNodeMap does not name its element, so the attributes getter records it.
+  const owners = new WeakMap<object, Element>();
+  const attributes = ownDescriptor(element, "attributes");
+  if (attributes?.get) {
+    const read = attributes.get;
+    defineProperty(element, "attributes", {
+      configurable: true,
+      enumerable: attributes.enumerable ?? true,
+      get: maskNative(function (this: Element) {
+        const map = apply(read, this, []) as object;
+        apply(mapSet, owners, [map, this]);
+        return map;
+      }, read),
+    });
+  }
+  const mapProto = win.NamedNodeMap?.prototype;
+  if (mapProto) {
+    for (const name of ["setNamedItem", "setNamedItemNS"] as const) {
+      const native = mapProto[name] as (...args: unknown[]) => unknown;
+      mapProto[name] = maskNative(function (this: NamedNodeMap, node: Attr) {
+        const owner = apply(mapGet, owners, [this]);
+        if (owner) prepare(owner, node);
+        return apply(native, this, [node]);
+      }, native) as typeof mapProto.setNamedItem;
+    }
+  }
+
   function rewrite(target: Element, name: string, value: string): string {
     return attributeKind(target.localName, name)
-      ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin)
+      ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.srcdoc)
       : value;
   }
 
   function restore(target: Element, name: string, value: string): string {
     return attributeKind(target.localName, name)
-      ? restoreAttribute(target.localName, name, value, ctx.realBase(), ctx.origin)
+      ? restoreAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.unsrcdoc)
       : value;
   }
 }

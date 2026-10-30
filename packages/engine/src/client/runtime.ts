@@ -1,3 +1,4 @@
+import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
@@ -120,7 +121,7 @@ export function install(
     }
     return fake;
   };
-  const rewrite = createRewriteBridge(ctx);
+  const rewrite = createRewriteBridge(ctx, () => clientTag(clientUrl, childConfig()));
   const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
     nativeLocation,
@@ -169,7 +170,7 @@ export function install(
           steps,
         )),
     ],
-    ["attributes", () => installAttributes(win, ctx)],
+    ["attributes", () => installAttributes(win, ctx, rewrite)],
     [
       "html sinks",
       () =>
