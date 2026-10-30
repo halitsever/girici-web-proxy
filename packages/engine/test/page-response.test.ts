@@ -26,6 +26,15 @@ function context(overrides: Partial<PageContext> = {}): PageContext {
 }
 
 describe("buildPageResponse", () => {
+  it("refuses to serve a page when its runtime cannot be verified", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      context({ navigation: true, destination: "document", runtimeAvailable: async () => false }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("could not verify its page script");
+  });
+
   it("serves an untyped navigation inert", async () => {
     const res = await buildPageResponse(
       upstream([["content-security-policy", "default-src *"]], "<script>x()</script>"),

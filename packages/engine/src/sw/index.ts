@@ -20,6 +20,7 @@ import { classifyRequest, isGuardedPath, realUrlOf, reservedAccess } from "./rou
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, type TopSiteDeps } from "./third-party.ts";
+import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
@@ -27,12 +28,25 @@ import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
 declare const __GIRICI_WORKER__: string;
+declare const __GIRICI_CLIENT_SHA256__: string;
+declare const __GIRICI_WORKER_SHA256__: string;
 
 const CLIENT_PATH = __GIRICI_CLIENT__;
 const WORKER_PATH = __GIRICI_WORKER__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
-const PRECACHED = new Set([CLIENT_PATH, WORKER_PATH]);
+const runtime = new RuntimeStore(
+  [
+    { path: CLIENT_PATH, sha256: __GIRICI_CLIENT_SHA256__ },
+    { path: WORKER_PATH, sha256: __GIRICI_WORKER_SHA256__ },
+  ],
+  {
+    open: () => caches.open(CLIENT_CACHE),
+    // The cache mode skips the HTTP cache, so a stale or altered copy there cannot pass for the runtime.
+    fetch: (path) => fetch(path, { cache: "reload" }),
+    digest: sha256Hex,
+  },
+);
 const transport = new HttpRelayTransport();
 // Window clients answer at once; only a deadlocked worker ever reaches this.
 const CLIENT_LOOKUP_TIMEOUT = 200;
@@ -52,12 +66,7 @@ const channel = new BroadcastChannel(BROADCAST_CHANNEL);
 cookies.onChange((changes) => channel.postMessage({ type: "cookies", v: PROTOCOL_VERSION, changes }));
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CLIENT_CACHE)
-      .then((cache) => cache.addAll([...PRECACHED]))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(runtime.install().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -88,8 +97,9 @@ self.addEventListener("message", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.origin === self.location.origin && PRECACHED.has(url.pathname)) {
-    event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request)));
+  // The query is ignored: workers import the runtime with a nonce suffix.
+  if (url.origin === self.location.origin && runtime.has(url.pathname)) {
+    event.respondWith(runtime.response(url.pathname));
     return;
   }
   if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
@@ -194,6 +204,7 @@ async function handle(event: FetchEvent): Promise<Response> {
           cookies: () => (blocked ? Promise.resolve([]) : cookies.snapshot(route.target)),
           syncCookies: navigation ? undefined : changes,
           cookiesBlocked: blocked,
+          runtimeAvailable: async () => (await runtime.bytes(CLIENT_PATH)) !== null,
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();

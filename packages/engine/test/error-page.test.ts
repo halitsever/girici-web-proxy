@@ -10,6 +10,10 @@ describe("errorPage", () => {
     expect(errorPage("blocked", new URL("https://bad.test/"))).toContain("bad.test is blocked on this Girici server.");
   });
 
+  it("explains a runtime that failed verification", () => {
+    expect(errorPage("runtime", null)).toContain("turn that off for /_g/.");
+  });
+
   it("blames the upstream proxy", () => {
     expect(errorPage("proxy", new URL("https://a.test/"))).toContain("Girici's upstream proxy could not reach a.test.");
   });

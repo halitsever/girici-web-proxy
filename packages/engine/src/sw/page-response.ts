@@ -14,7 +14,7 @@ import {
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { decodeText, isDocumentLoad, mimeOf, rewriteKind, sandboxesDocument, type BodyKind } from "./body.ts";
-import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
+import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
 import type { TransportResult } from "./transport.ts";
@@ -28,7 +28,11 @@ export interface PageContext {
   cookies(): Promise<CookieSnapshot[]>;
   syncCookies?: CookieSnapshot[];
   cookiesBlocked?: boolean;
+  /** Resolves false when the page runtime cannot be verified, so no page is served without it. */
+  runtimeAvailable?: () => Promise<boolean>;
 }
+
+const rewrites = new RewriteMemo();
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
@@ -86,6 +90,9 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     lastModified: envelope.find(([name]) => name === "last-modified")?.[1] ?? null,
     length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
   };
+  if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
+    return errorResponse("runtime", 503, ctx.target);
+  }
   const text = decodeText(await new Response(body).arrayBuffer(), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
   return new Response(await rewriteBody(kind, text, ctx, validators), { status, headers });
@@ -117,14 +124,13 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
 }
 
 /** Reuses a stored rewrite when the script carries a validator, so a repeat visit skips re-parsing a large bundle. */
-async function cachedRewrite(target: URL, validators: Validators, rewrite: () => string): Promise<string> {
+function cachedRewrite(target: URL, validators: Validators, rewrite: () => string): string {
   const key = cacheKey(target, "js", validators);
   if (!key) return rewrite();
-  const cache = await caches.open(REWRITE_CACHE);
-  const cached = await readRewritten(key, cache);
+  const cached = rewrites.get(key);
   if (cached !== null) return cached;
   const rewritten = rewrite();
-  await writeRewritten(key, rewritten, cache);
+  rewrites.set(key, rewritten);
   return rewritten;
 }
 
