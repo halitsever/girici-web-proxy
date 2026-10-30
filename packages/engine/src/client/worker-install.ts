@@ -7,7 +7,11 @@ import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
-import { workerBootstrapCode } from "./worker-bootstrap.ts";
+import { hookWorkers } from "./worker-bootstrap.ts";
+
+// Taken at load, so a replaced Function.prototype.call or String never receives a native or the URL.
+const apply = Reflect.apply;
+const toText = String;
 
 /** The worker globals this runtime touches; typed narrowly so it needs neither the DOM nor the WebWorker lib. */
 export interface WorkerScope {
@@ -58,7 +62,16 @@ export function installWorker(scope: WorkerScope): void {
   hookFetch(scope, ctx);
   hookXhr(scope, ctx);
   hookSubresources(scope, ctx);
-  hookNestedWorkers(scope, ctx, boot.runtimeUrl, partition);
+  // Nested workers get this worker's runtime and partition; a blob one also keeps this worker's base.
+  hookWorkers(scope, {
+    runtimeUrl: boot.runtimeUrl,
+    partition: () => partition,
+    blobBase: () => ctx.realBase().href,
+    resolve: (raw) => {
+      const scriptUrl = ctx.toProxy(raw);
+      return { scriptUrl, base: ctx.fromProxy(scriptUrl) };
+    },
+  });
   blockRealtime(scope);
   answerTopQueries(scope, ctx);
 }
@@ -139,46 +152,15 @@ function maskOrigin(scope: WorkerScope, ctx: UrlContext): void {
 function hookSubresources(scope: WorkerScope, ctx: UrlContext): void {
   if (scope.EventSource) {
     scope.EventSource = hookConstructor(scope.EventSource, (input) => [
-      ctx.toProxy(String(input[0])),
+      ctx.toProxy(toText(input[0])),
       ...input.slice(1),
     ]);
   }
   const navigator = scope.navigator;
   const sendBeacon = navigator?.sendBeacon;
   if (navigator && sendBeacon) {
-    navigator.sendBeacon = (url: string, data?: unknown) => sendBeacon.call(navigator, ctx.toProxy(String(url)), data);
-  }
-}
-
-/** Nested workers load through the same bootstrap as the page's, with this worker's runtime and partition. */
-function hookNestedWorkers(
-  scope: WorkerScope,
-  ctx: UrlContext,
-  runtimeUrl: string | undefined,
-  partition: string,
-): void {
-  // Taken now, so a script that replaces them cannot hand the native constructor a script of its own.
-  const urls = scope.URL;
-  const createObjectURL = urls?.createObjectURL;
-  const Blob = scope.Blob;
-  const bootstrap = (raw: string, options: unknown): string => {
-    if (!runtimeUrl || !createObjectURL || !Blob) throw new TypeError("Girici: no worker runtime to start this worker");
-    // A blob worker has no real URL of its own, so it inherits this worker's.
-    const blob = raw.startsWith("blob:");
-    const scriptUrl = blob ? raw : ctx.toProxy(raw);
-    const code = workerBootstrapCode({
-      runtimeUrl,
-      scriptUrl,
-      base: blob ? ctx.realBase().href : ctx.fromProxy(scriptUrl),
-      partition,
-      module: (options as { type?: unknown } | null | undefined)?.type === "module",
-    });
-    return createObjectURL.call(urls, new Blob([code], { type: "text/javascript" }));
-  };
-  for (const name of ["Worker", "SharedWorker"] as const) {
-    const Native = scope[name];
-    if (!Native) continue;
-    scope[name] = hookConstructor(Native, (input) => [bootstrap(String(input[0]), input[1]), ...input.slice(1)]);
+    navigator.sendBeacon = (url: string, data?: unknown) =>
+      apply(sendBeacon, navigator, [ctx.toProxy(toText(url)), data]);
   }
 }
 
@@ -186,9 +168,10 @@ function hookImportScripts(scope: WorkerScope, ctx: UrlContext): void {
   const native = scope.importScripts;
   if (!native) return;
   scope.importScripts = (...urls: string[]) =>
-    native.apply(
+    apply(
+      native,
       scope,
-      urls.map((url) => ctx.toProxy(String(url))),
+      urls.map((url) => ctx.toProxy(toText(url))),
     );
 }
 
@@ -215,9 +198,9 @@ function hookFetch(scope: WorkerScope, ctx: UrlContext): void {
   scope.fetch = (input: unknown, init?: unknown) => {
     if (Request && input instanceof Request) {
       const url = ctx.toProxy(input.url);
-      return native.call(scope, url === input.url ? input : new Request(url, input), withOwnReferrer(init));
+      return apply(native, scope, [url === input.url ? input : new Request(url, input), withOwnReferrer(init)]);
     }
-    return native.call(scope, ctx.toProxy(String(input)), withOwnReferrer(init));
+    return apply(native, scope, [ctx.toProxy(toText(input)), withOwnReferrer(init)]);
   };
 }
 
@@ -226,7 +209,7 @@ function hookXhr(scope: WorkerScope, ctx: UrlContext): void {
   if (!proto) return;
   const open = proto.open;
   proto.open = function (this: unknown, method: unknown, url: unknown, ...rest: unknown[]) {
-    open.call(this, method, ctx.toProxy(String(url)), ...rest);
+    apply(open, this, [method, ctx.toProxy(toText(url)), ...rest]);
   };
 }
 

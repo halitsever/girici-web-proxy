@@ -4,20 +4,25 @@ import type { CookieBridge } from "./cookies.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
+// Taken at load, so a replaced Function.prototype.call or String never receives a native or the URL.
+const apply = Reflect.apply;
+const toText = String;
+
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
 export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
   const nativeFetch = win.fetch;
+  const Request = win.Request;
   win.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     const seq = cookies.currentSeq();
     let request: RequestInfo = proxiedInput(input);
     if (seq > 0) {
-      const withSeq = new win.Request(request, init);
+      const withSeq = new Request(request, init);
       // no-cors requests cannot carry custom headers; they simply skip the wait.
-      if (withSeq.mode !== "no-cors") withSeq.headers.set(HEADER.cookieSeq, String(seq));
+      if (withSeq.mode !== "no-cors") withSeq.headers.set(HEADER.cookieSeq, toText(seq));
       request = withSeq;
       init = undefined;
     }
-    return nativeFetch.call(win, request, init).then((response) => {
+    return apply(nativeFetch, win, [request, init]).then((response) => {
       cookies.applySync(response.headers.get(HEADER.cookieSync));
       return response;
     });
@@ -26,9 +31,9 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
 
   // A Request built from an already proxied URL is passed on unchanged.
   const proxiedInput = (input: RequestInfo | URL): RequestInfo => {
-    if (!(input instanceof win.Request)) return ctx.toProxy(String(input));
+    if (!(input instanceof Request)) return ctx.toProxy(toText(input));
     const url = ctx.toProxy(input.url);
-    return url === input.url ? input : new win.Request(url, input);
+    return url === input.url ? input : new Request(url, input);
   };
 
   const fromProxy = (value: string) => (value ? ctx.fromProxy(value) : value);
@@ -40,14 +45,14 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   const xhr = win.XMLHttpRequest.prototype;
   const nativeOpen = xhr.open as (this: XMLHttpRequest, method: string, url: string, ...rest: unknown[]) => void;
   xhr.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    nativeOpen.call(this, method, ctx.toProxy(String(url)), ...rest);
+    apply(nativeOpen, this, [method, ctx.toProxy(toText(url)), ...rest]);
   } as typeof xhr.open;
   maskNative(xhr.open, nativeOpen);
   const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
   const syncing = new WeakSet<XMLHttpRequest>();
   xhr.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const seq = cookies.currentSeq();
-    if (seq > 0) nativeSetRequestHeader.call(this, HEADER.cookieSeq, String(seq));
+    if (seq > 0) apply(nativeSetRequestHeader, this, [HEADER.cookieSeq, toText(seq)]);
     if (!syncing.has(this)) {
       syncing.add(this);
       // Headers arrive before load, so cookies are in place by the time the page's handlers run.
@@ -55,18 +60,18 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
         if (this.readyState === this.HEADERS_RECEIVED) cookies.applySync(this.getResponseHeader(HEADER.cookieSync));
       });
     }
-    nativeSend.call(this, body);
+    apply(nativeSend, this, [body]);
   };
   maskNative(xhr.send, nativeSend);
 
   const navigatorProto = win.Navigator.prototype;
   const nativeBeacon = navigatorProto.sendBeacon;
   navigatorProto.sendBeacon = function (this: Navigator, url: string | URL, data?: BodyInit | null) {
-    return nativeBeacon.call(this, ctx.toProxy(String(url)), data);
+    return apply(nativeBeacon, this, [ctx.toProxy(toText(url)), data]);
   };
   maskNative(navigatorProto.sendBeacon, nativeBeacon);
 
-  win.EventSource = hookConstructor(win.EventSource, (input) => [ctx.toProxy(String(input[0])), ...input.slice(1)]);
+  win.EventSource = hookConstructor(win.EventSource, (input) => [ctx.toProxy(toText(input[0])), ...input.slice(1)]);
 }
 
 function wrapGetter(proto: object, name: string, read: (value: string) => string): void {
@@ -76,7 +81,7 @@ function wrapGetter(proto: object, name: string, read: (value: string) => string
   Object.defineProperty(proto, name, {
     ...descriptor,
     get(this: unknown) {
-      return read(String(get.call(this)));
+      return read(toText(apply(get, this, [])));
     },
   });
 }

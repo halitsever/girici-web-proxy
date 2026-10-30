@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { installStorageIsolation } from "../src/client/storage-isolation.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+import { recordingCalls } from "./recording-calls.ts";
 
 function ctxFor(origin: string): UrlContext {
   return { realUrl: () => new URL(`${origin}/`) } as unknown as UrlContext;
@@ -29,13 +30,28 @@ function fakeStorageWin(opened: string[], dbNames: string[], cacheNames: string[
     keys() {
       return Promise.resolve([...cacheNames]);
     }
+    match(_request: string, options: { cacheName: string }) {
+      opened.push(`cache-match:${options.cacheName}`);
+      return Promise.resolve(undefined);
+    }
+  }
+  class LockManager {
+    request(...[name]: [string, unknown?]) {
+      opened.push(`lock:${name}`);
+      return Promise.resolve();
+    }
+    query() {
+      return Promise.resolve({ held: [], pending: [] });
+    }
   }
   return {
     IDBFactory,
     CacheStorage,
+    LockManager,
     indexedDB: new IDBFactory(),
     caches: new CacheStorage(),
-  } as unknown as Realm;
+    locks: new LockManager(),
+  } as unknown as Realm & { locks: LockManager; LockManager: typeof LockManager };
 }
 
 function fakeCachesWin(backing: Map<string, Map<string, string>>) {
@@ -101,5 +117,32 @@ describe("installStorageIsolation", () => {
     win.indexedDB.open("db1");
     expect(opened).toEqual([`idb:${partition}db1`]);
     expect(await win.indexedDB.databases()).toEqual([{ name: "db1" }]);
+  });
+
+  it("never hands its natives to a replaced Function.prototype.call", () => {
+    const opened: string[] = [];
+    const win = fakeStorageWin(opened, [], []);
+    const natives = [win.IDBFactory.prototype, win.CacheStorage.prototype, win.LockManager.prototype].flatMap((proto) =>
+      Object.values(Object.getOwnPropertyDescriptors(proto)).map((descriptor) => descriptor.value),
+    );
+    installStorageIsolation(win, ctxFor("https://a.test"), () => "__g|https://a.test|");
+    const seen = recordingCalls(() => {
+      win.indexedDB.open("db");
+      win.indexedDB.deleteDatabase("db");
+      void win.indexedDB.databases();
+      void win.caches.open("c");
+      void win.caches.keys();
+      void win.caches.match("/x", { cacheName: "c" });
+      void win.locks.request("l", () => {});
+      void win.locks.query();
+    });
+    expect(natives.filter((native) => seen.includes(native))).toEqual([]);
+    expect(opened).toEqual([
+      "idb:__g|https://a.test|db",
+      "idb-del:__g|https://a.test|db",
+      "cache:__g|https://a.test|c",
+      "cache-match:__g|https://a.test|c",
+      "lock:__g|https://a.test|l",
+    ]);
   });
 });

@@ -1,6 +1,10 @@
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
+// Taken at load, so a replaced Function.prototype.call or String never receives a native or the name.
+const apply = Reflect.apply;
+const toText = String;
+
 /** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
 export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
   const strip = (name: string): string | null => (name.startsWith(partition()) ? name.slice(partition().length) : null);
@@ -11,7 +15,7 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "databases",
     (native) =>
       async function (this: unknown) {
-        const all = (await native.call(this)) as NamedLock[];
+        const all = (await apply(native, this, [])) as NamedLock[];
         return stripLocks(all, strip);
       },
   );
@@ -22,7 +26,7 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "keys",
     (native) =>
       async function (this: unknown) {
-        const all = (await native.call(this)) as string[];
+        const all = (await apply(native, this, [])) as string[];
         return all.map(strip).filter((name): name is string => name !== null);
       },
   );
@@ -35,7 +39,7 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
         const caches = this as CacheStorage;
         const options = rawOptions as CacheQueryOptions & { cacheName?: string };
         if (options?.cacheName) {
-          return native.call(this, request, { ...options, cacheName: partition() + options.cacheName });
+          return apply(native, this, [request, { ...options, cacheName: partition() + options.cacheName }]);
         }
         return (async () => {
           for (const name of await caches.keys()) {
@@ -54,14 +58,14 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "query",
     (native) =>
       async function (this: unknown) {
-        const result = (await native.call(this)) as { held?: NamedLock[]; pending?: NamedLock[] };
+        const result = (await apply(native, this, [])) as { held?: NamedLock[]; pending?: NamedLock[] };
         return { ...result, held: stripLocks(result.held, strip), pending: stripLocks(result.pending, strip) };
       },
   );
 
   if (win.BroadcastChannel) {
     win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) => [
-      partition() + String(input[0]),
+      partition() + toText(input[0]),
       ...input.slice(1),
     ]);
   }
@@ -93,7 +97,7 @@ function prefixFirstArg(proto: object | undefined, methods: string[], prefix: ()
       method,
       (native) =>
         function (this: unknown, name: unknown, ...rest: unknown[]) {
-          return native.call(this, prefix() + String(name), ...rest);
+          return apply(native, this, [prefix() + toText(name), ...rest]);
         },
     );
   }
