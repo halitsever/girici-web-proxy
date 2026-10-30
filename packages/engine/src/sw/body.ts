@@ -65,7 +65,7 @@ export function contentTypeOf(contentType: string | null): string | null {
 
 // What a browser sniffs an untyped body for: whitespace, then "<!doctype html" or "<html" ended by a space or ">".
 const HTML_START = /^[\t\n\f\r ]*<(?:!doctype html|html)[ >]/i;
-const SNIFF_BYTES = 1445;
+export const SNIFF_BYTES = 1445;
 
 /** True when an untyped body starts like HTML, which a browser would render as a page. */
 export function sniffsHtml(bytes: ArrayBuffer): boolean {

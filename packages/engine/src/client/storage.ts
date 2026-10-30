@@ -3,8 +3,14 @@ import type { Realm, UrlContext } from "./url-context.ts";
 
 export { prefixFor };
 
+// Taken at load, before page code can replace them, because some run lazily on the page's first storage access.
 const apply = Reflect.apply;
 const toText = String;
+const create = Object.create;
+const protoOf = Object.getPrototypeOf;
+const describe = Object.getOwnPropertyDescriptor;
+const startsWith = String.prototype.startsWith;
+const slice = String.prototype.slice;
 
 export interface StorageMethods {
   length: (this: Storage) => number;
@@ -16,7 +22,7 @@ export interface StorageMethods {
 
 /** Taken before page code runs: a replaced Storage.prototype method would otherwise receive the raw store. */
 export function storageMethods(proto: object): StorageMethods {
-  const own = (name: string) => Object.getOwnPropertyDescriptor(proto, name);
+  const own = (name: string) => describe(proto, name);
   return {
     length: own("length")?.get as StorageMethods["length"],
     key: own("key")?.value as Storage["key"],
@@ -30,7 +36,7 @@ export function storageMethods(proto: object): StorageMethods {
 export function createPartitionedStorage(
   native: Storage,
   origin: string,
-  calls: StorageMethods = storageMethods(Object.getPrototypeOf(native) as object),
+  calls: StorageMethods = storageMethods(protoOf(native) as object),
 ): Storage {
   const prefix = prefixFor(origin);
   const length = () => apply(calls.length, native, []);
@@ -42,7 +48,7 @@ export function createPartitionedStorage(
     const found: string[] = [];
     for (let index = 0; index < length(); index++) {
       const key = nativeKey(index);
-      if (key?.startsWith(prefix)) found.push(key.slice(prefix.length));
+      if (key !== null && apply(startsWith, key, [prefix])) found.push(apply(slice, key, [prefix.length]) as string);
     }
     return found;
   };
@@ -56,8 +62,8 @@ export function createPartitionedStorage(
     key: (index: number) => keys()[index] ?? null,
   };
   // Sharing the native prototype keeps `instanceof Storage` true for the page.
-  const target = Object.create(Object.getPrototypeOf(native) as object) as Storage;
-  const proto = Object.getPrototypeOf(target) as object;
+  const target = create(protoOf(native) as object) as Storage;
+  const proto = protoOf(target) as object;
 
   // A null prototype keeps traps a page adds to Object.prototype out of this handler.
   return new Proxy(target, {

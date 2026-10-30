@@ -21,6 +21,7 @@ import {
   rewriteKind,
   sandboxesDocument,
   sniffsHtml,
+  SNIFF_BYTES,
   type BodyKind,
 } from "./body.ts";
 import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
@@ -45,6 +46,40 @@ const rewrites = new RewriteMemo();
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+/** Reads the first bytes for sniffing and hands back a stream that still starts with them, so large files keep streaming. */
+async function peek(
+  body: ReadableStream<Uint8Array>,
+  limit: number,
+): Promise<{ head: ArrayBuffer; body: ReadableStream<Uint8Array> }> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < limit) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    size += value.byteLength;
+  }
+  const head = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    head.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const replay = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  return { head: head.buffer, body: replay };
+}
+
 // The browser already decoded the relay body, so the upstream encoding and length no longer apply.
 const DROPPED_HEADERS = new Set(["content-encoding", "content-length", "set-cookie"]);
 const REWRITTEN_TYPES: Record<BodyKind, string> = {
@@ -55,7 +90,8 @@ const REWRITTEN_TYPES: Record<BodyKind, string> = {
 
 export async function buildPageResponse(result: TransportResult, ctx: PageContext): Promise<Response> {
   if (!result.ok) return failure(result.code, result.status, ctx);
-  const { status, headers: envelope, body } = result.response;
+  const { status, headers: envelope } = result.response;
+  let body = result.response.body;
 
   if (REDIRECT_STATUSES.has(status)) {
     const location = envelope.find(([name]) => name === "location")?.[1];
@@ -78,11 +114,11 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
 
   let contentType = headers.get("content-type");
   let kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
-  let bytes: ArrayBuffer | null = null;
   if (!kind && isDocumentLoad(ctx.destination, ctx.navigation) && !mimeOf(contentType)) {
     // A browser sniffs an untyped document, so one that starts like HTML is a page and gets the runtime.
-    bytes = await new Response(body).arrayBuffer();
-    if (sniffsHtml(bytes)) {
+    const peeked = await peek(body, SNIFF_BYTES);
+    body = peeked.body;
+    if (sniffsHtml(peeked.head)) {
       kind = "html";
       contentType = "text/html";
     }
@@ -101,7 +137,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
       const type = contentTypeOf(contentType);
       if (type) headers.set("content-type", type);
     }
-    return new Response(bytes ?? body, { status, headers });
+    return new Response(body, { status, headers });
   }
   const validators: Validators = {
     etag: envelope.find(([name]) => name === "etag")?.[1] ?? null,
@@ -111,7 +147,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
     return errorResponse("runtime", 503, ctx.target);
   }
-  const text = decodeText(bytes ?? (await new Response(body).arrayBuffer()), contentType);
+  const text = decodeText(await new Response(body).arrayBuffer(), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
   return new Response(await rewriteBody(kind, text, ctx, validators), { status, headers });
 }

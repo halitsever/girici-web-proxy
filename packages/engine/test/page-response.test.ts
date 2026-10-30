@@ -73,6 +73,24 @@ describe("buildPageResponse", () => {
     expect(await res.text()).toBe("hello <html> x.");
   });
 
+  it("starts an untyped download before its last byte arrives", async () => {
+    let more!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        more = controller;
+        controller.enqueue(new Uint8Array(2000).fill(120));
+      },
+    });
+    const result: TransportResult = { ok: true, response: { status: 200, headers: [], setCookies: [], body } };
+    const res = await buildPageResponse(result, context({ navigation: true, destination: "document" }));
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    more.enqueue(new Uint8Array([121]));
+    more.close();
+    const text = await res.text();
+    expect(text.length).toBe(2001);
+    expect(text.endsWith("xy")).toBe(true);
+  });
+
   it("leaves an untyped subresource that looks like HTML untouched", async () => {
     const res = await buildPageResponse(upstream([], "<html><p>x</p>"), context({ destination: "" }));
     expect(await res.text()).toBe("<html><p>x</p>");

@@ -78,6 +78,28 @@ describe("createPartitionedStorage", () => {
     expect(seen).toEqual([]);
   });
 
+  it("shows no raw store or foreign key to globals a page replaced before its first access", () => {
+    const native = new MemoryStorage();
+    native.setItem("__g|https://b.test|secret", "b");
+    const seen: unknown[] = [];
+    const getPrototypeOf = Object.getPrototypeOf;
+    const startsWith = String.prototype.startsWith;
+    Object.getPrototypeOf = (value: unknown) => (seen.push(value), getPrototypeOf(value));
+    String.prototype.startsWith = function (this: string, search: string) {
+      seen.push(String(this));
+      return Reflect.apply(startsWith, this, [search]);
+    };
+    try {
+      const a = createPartitionedStorage(native, "https://a.test");
+      a.setItem("own", "1");
+      expect(Object.keys(a)).toEqual(["own"]);
+    } finally {
+      Object.getPrototypeOf = getPrototypeOf;
+      String.prototype.startsWith = startsWith;
+    }
+    expect(seen).toEqual([]);
+  });
+
   it("ignores proxy traps a page adds to Object.prototype", () => {
     const a = createPartitionedStorage(new MemoryStorage(), "https://a.test");
     const proto = Object.prototype as Record<string, unknown>;
