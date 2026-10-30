@@ -53,14 +53,24 @@ describe("adminRouter account", () => {
 
   it("updates the profile for an authed admin", async () => {
     const { base, store, cookie } = await withAdmin();
-    const res = await post(base, "/_g/account", { name: "Halit S", email: "new@h.h" }, cookie);
+    const res = await post(
+      base,
+      "/_g/account",
+      { name: "Halit S", email: "new@h.h", currentPassword: setup.password },
+      cookie,
+    );
     expect(res.status).toBe(200);
     expect(store.admin()).toMatchObject({ name: "Halit S", email: "new@h.h" });
   });
 
   it("changes the password, rotating the old session and issuing a new one", async () => {
     const { base, store, cookie } = await withAdmin();
-    const res = await post(base, "/_g/account", { name: "Halit", email: "h@h.h", password: "brand-new-pw" }, cookie);
+    const res = await post(
+      base,
+      "/_g/account",
+      { name: "Halit", email: "h@h.h", password: "brand-new-pw", currentPassword: setup.password },
+      cookie,
+    );
     expect(res.status).toBe(200);
     expect(store.verifyLogin("halit", "brand-new-pw")).not.toBeNull();
     expect(
@@ -77,7 +87,12 @@ describe("adminRouter account", () => {
 
   it("does not change the profile when the new password is too short", async () => {
     const { base, store, cookie } = await withAdmin();
-    const res = await post(base, "/_g/account", { name: "Changed", email: "c@c.c", password: "short" }, cookie);
+    const res = await post(
+      base,
+      "/_g/account",
+      { name: "Changed", email: "c@c.c", password: "short", currentPassword: setup.password },
+      cookie,
+    );
     expect(res.status).toBe(400);
     expect(store.admin()).toMatchObject({ name: "Halit", email: "h@h.h" });
   });
@@ -86,7 +101,7 @@ describe("adminRouter account", () => {
 describe("adminRouter settings", () => {
   it("toggles public access for an authed admin", async () => {
     const { base, store, cookie } = await withAdmin();
-    const res = await post(base, "/_g/admin/settings", { publicAccess: true }, cookie);
+    const res = await post(base, "/_g/admin/settings", { publicAccess: true, currentPassword: setup.password }, cookie);
     expect(res.status).toBe(200);
     expect(store.publicAccess()).toBe(true);
   });
@@ -108,7 +123,7 @@ describe("adminRouter settings", () => {
     const res = await post(
       base,
       "/_g/admin/settings",
-      { blockedHosts: ["https://Bad.example/x", "*.worse.example"] },
+      { blockedHosts: ["https://Bad.example/x", "*.worse.example"], currentPassword: setup.password },
       cookie,
     );
     expect((await res.json()).blockedHosts).toEqual(["bad.example", "worse.example"]);
@@ -118,8 +133,13 @@ describe("adminRouter settings", () => {
 
   it("rejects the whole list when one entry is invalid", async () => {
     const { base, cookie, store, blocklist } = await withAdmin();
-    await post(base, "/_g/admin/settings", { blockedHosts: ["keep.example"] }, cookie);
-    const res = await post(base, "/_g/admin/settings", { blockedHosts: ["ok.example", "not a host"] }, cookie);
+    await post(base, "/_g/admin/settings", { blockedHosts: ["keep.example"], currentPassword: setup.password }, cookie);
+    const res = await post(
+      base,
+      "/_g/admin/settings",
+      { blockedHosts: ["ok.example", "not a host"], currentPassword: setup.password },
+      cookie,
+    );
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ invalid: ["not a host"] });
     expect(store.blockedHosts()).toEqual(["keep.example"]);
@@ -129,7 +149,9 @@ describe("adminRouter settings", () => {
   it("rejects more than 1000 entries", async () => {
     const { base, cookie } = await withAdmin();
     const hosts = Array.from({ length: 1001 }, (_, i) => `h${i}.example`);
-    expect((await post(base, "/_g/admin/settings", { blockedHosts: hosts }, cookie)).status).toBe(400);
+    expect(
+      (await post(base, "/_g/admin/settings", { blockedHosts: hosts, currentPassword: setup.password }, cookie)).status,
+    ).toBe(400);
   });
 
   it("rejects a cross-origin blocklist change", async () => {
@@ -137,5 +159,50 @@ describe("adminRouter settings", () => {
     expect((await post(base, "/_g/admin/settings", { blockedHosts: [] }, cookie, "https://evil.example")).status).toBe(
       403,
     );
+  });
+});
+
+describe("adminRouter current password", () => {
+  it("refuses an account change without the current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    expect((await post(base, "/_g/account", { name: "X", email: "x@x.x" }, cookie)).status).toBe(403);
+    expect(store.admin()?.name).toBe("Halit");
+  });
+
+  it("refuses a password change with a wrong current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    const body = { name: "Halit", email: "h@h.h", password: "brand-new-pw", currentPassword: "nope-nope" };
+    expect((await post(base, "/_g/account", body, cookie)).status).toBe(403);
+    expect(store.verifyLogin("halit", setup.password)).not.toBeNull();
+  });
+
+  it("refuses settings writes without the current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    expect((await post(base, "/_g/admin/settings", { publicAccess: true }, cookie)).status).toBe(403);
+    expect(store.publicAccess()).toBe(false);
+  });
+
+  it("checks the session before reading a large body", async () => {
+    const { base } = await withAdmin();
+    const res = await post(base, "/_g/admin/settings", { blockedHosts: ["a".repeat(600_000)] });
+    expect(res.status).toBe(401);
+  });
+
+  it("limits current-password attempts per client", async () => {
+    const { base, cookie } = await withAdmin();
+    for (let i = 0; i < 10; i++)
+      await post(base, "/_g/admin/settings", { publicAccess: true, currentPassword: `wrong-${i}` }, cookie);
+    const res = await post(base, "/_g/admin/settings", { publicAccess: true, currentPassword: setup.password }, cookie);
+    expect(res.status).toBe(429);
+  });
+});
+
+describe("adminRouter exact paths", () => {
+  it("routes the admin API only at its exact, case-sensitive paths", async () => {
+    const { base, cookie } = await withAdmin();
+    expect((await fetch(`${base}/_g/Admin/settings`, { headers: { cookie } })).status).toBe(404);
+    expect((await fetch(`${base}/_g/admin/settings/`, { headers: { cookie } })).status).toBe(404);
+    const body = { name: "X", email: "x@x.x", currentPassword: setup.password };
+    expect((await post(base, "/_g/account/", body, cookie)).status).toBe(404);
   });
 });

@@ -19,6 +19,7 @@ test("sends third-party cookies when the switch is off", async ({ page }) => {
   await setThirdPartyCookie(page);
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Block third-party cookies" }).click();
+  await expect(page.getByText("With this off, any site you open can send requests to your other sites")).toBeVisible();
   await openThroughUi(page, "https://site-a.test/third-party");
   await expect(page.locator("#fetch")).toHaveText("tp=1");
   await expect(page.frameLocator("#tp").locator("#server")).toHaveText("tp=1");

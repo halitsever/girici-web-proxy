@@ -8,6 +8,17 @@ Girici stores a single admin account and its settings in a small SQLite database
 The first time you open Girici with no admin yet, every route sends you to the setup screen. You create
 one admin (username, name, email, password, at least 8 characters). After setup you are signed in.
 
+Setup asks for a one-time code that Girici prints to its log at startup, whatever `LOG_LEVEL` says:
+
+```
+Girici setup code: K7QM-2XPA-9FDR
+Open Girici in a browser and enter this code to create the admin account.
+```
+
+Only someone who can read the server log can create the admin, so a fresh instance that is already reachable from
+the internet cannot be claimed by a stranger. A restart prints a new code until setup is done. To choose the code
+yourself, for example in automated deployments, set `GIRICI_SETUP_TOKEN` (8 or more characters).
+
 ## Login
 
 Once an admin exists, the proxy requires a login. Visiting a proxied page while signed out redirects you
@@ -16,8 +27,11 @@ to the login screen, and signing in sends you back where you were headed.
 The session is a stateless cookie, signed with a secret stored in the database. Over HTTPS it is
 `__Host-girici`; on a plain-HTTP page such as `http://localhost` it is `girici-session`, because Safari drops the
 Secure cookie that `__Host-` requires there. There
-is no server-side session table; signing out clears the cookie, and changing the password rotates the
-secret so every other device is signed out.
+is no server-side session table; signing out clears the cookie.
+
+**Sign out everywhere** on the Account page voids every session the admin has, on every device. Changing the
+password and running the reset tool below do the same. This also works when `GIRICI_SESSION_SECRET` fixes the
+signing secret, because Girici stores the time of the last sign-out and refuses sessions issued before it.
 
 ## Public access
 
@@ -25,6 +39,9 @@ In **Settings**, an admin can turn on **Public access**. While it is on, anyone 
 proxy without signing in. The admin account and the admin section of Settings still require a login.
 
 Public access is off by default. A public instance is open to abuse, so enable it only when you mean to.
+
+Changing the account (name, email, password) or the admin settings asks for your current password every time.
+The page keeps it in memory only while it is open. If you forgot it, use the reset tool below.
 
 ## Resetting the admin password
 

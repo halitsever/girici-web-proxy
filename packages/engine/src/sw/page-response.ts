@@ -14,7 +14,7 @@ import {
 import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
 import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
 import { clientTag } from "./client-tag.ts";
-import { errorPage } from "./error-page.ts";
+import { errorResponse } from "./error-page.ts";
 import type { TransportResult } from "./transport.ts";
 
 export interface PageContext {
@@ -130,8 +130,5 @@ function failure(code: RelayErrorCode, status: number, ctx: PageContext): Respon
     login.searchParams.set("next", ctx.target.href);
     return Response.redirect(login.href, 303);
   }
-  return new Response(errorPage(code, ctx.target), {
-    status: status >= 400 && status <= 599 ? status : 502,
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
+  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target);
 }

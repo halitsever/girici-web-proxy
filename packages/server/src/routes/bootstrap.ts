@@ -23,6 +23,8 @@ export function bootstrapRouter(): Router {
     res.setHeader("Cache-Control", "no-store");
     if ((req.method === "GET" || req.method === "HEAD") && isDocumentRequest(req)) {
       res.setHeader("Content-Security-Policy", BOOT_CSP);
+      // A popup that lands here before its service worker runs keeps its opener.
+      res.removeHeader("Cross-Origin-Opener-Policy");
       res.type("html").send(BOOT_PAGE);
       return;
     }

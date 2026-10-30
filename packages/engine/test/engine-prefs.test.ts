@@ -45,6 +45,7 @@ describe("readPrefsMessage", () => {
       readPrefsMessage(valid, { type: "worker", frameType: "none", url: "blob:https://girici.test/1" }, origin),
     ).toBeNull();
     expect(readPrefsMessage(valid, { ...ui, frameType: "nested" }, origin)).toBeNull();
+    expect(readPrefsMessage(valid, { ...ui, url: "blob:https://girici.test/1" }, origin)).toBeNull();
     expect(readPrefsMessage(valid, null, origin)).toBeNull();
     expect(readPrefsMessage({ ...valid, v: 0 }, ui, origin)).toBeNull();
     expect(readPrefsMessage({ ...valid, blockThirdPartyCookies: "no" }, ui, origin)).toBeNull();

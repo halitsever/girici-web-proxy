@@ -11,7 +11,15 @@ import { tokenBucket } from "../src/http/rate-limit.ts";
 import { createTunnelDialer } from "../src/upstream/agent.ts";
 import { HostBlocklist } from "../src/upstream/blocklist.ts";
 import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
-import { attachWsRelay, mapCloseCode, tlsIdentity, validateWsTarget, type WsRelayOptions } from "../src/ws/relay-ws.ts";
+import {
+  attachWsRelay,
+  mapCloseCode,
+  PerClientCount,
+  tlsIdentity,
+  validateWsTarget,
+  type WsRelayOptions,
+} from "../src/ws/relay-ws.ts";
+import { sealWsHandshake } from "../src/ws/seal.ts";
 import { httpProxy, startConnectProxy, startSilent } from "./helpers/proxies.ts";
 
 const policy = { allowedTestHosts: new Set<string>() };
@@ -302,5 +310,79 @@ describe("ws relay (integration)", () => {
     await opened(ws);
     ws.send(JSON.stringify({ u: "ws://ws.test/" }));
     expect((await closed(ws)).code).toBe(1011);
+  });
+});
+
+describe("sealed handshakes", () => {
+  /** A public relay whose dial records the headers it would send upstream. */
+  async function sealedRelay() {
+    const store = new AuthStore(openDb(":memory:"));
+    store.setPublicAccess(true);
+    const port = await echoUpstream();
+    const seen: { headers: Record<string, string> } = { headers: {} };
+    const url = await relayServer(port, {
+      authStore: store,
+      dial: (_target, init) => {
+        seen.headers = init.headers;
+        return new WebSocket(`ws://127.0.0.1:${port}/`, init.protocols);
+      },
+    });
+    const client = connect(url, originOf(url));
+    await opened(client);
+    return { store, client, seen };
+  }
+
+  it("sends only sealed cookies and Origin upstream", async () => {
+    const { store, client, seen } = await sealedRelay();
+    const seal = sealWsHandshake(store.sessionSecret(), {
+      target: new URL("ws://ws.test/"),
+      origin: "https://page.test",
+      cookie: "sid=1",
+    });
+    client.send(JSON.stringify({ u: "ws://ws.test/", s: seal, c: "stolen=1", o: "https://evil.test" }));
+    expect((await openMessage(client)).t).toBe("open");
+    expect(seen.headers.cookie).toBe("sid=1");
+    expect(seen.headers.origin).toBe("https://page.test");
+  });
+
+  it("connects without cookies when an old runtime sends them in clear", async () => {
+    const { client, seen } = await sealedRelay();
+    client.send(JSON.stringify({ u: "ws://ws.test/", c: "sid=1", o: "https://evil.test" }));
+    expect((await openMessage(client)).t).toBe("open");
+    expect(seen.headers.cookie).toBeUndefined();
+    expect(seen.headers.origin).toBe("http://ws.test");
+  });
+});
+
+describe("PerClientCount", () => {
+  it("caps a client and forgets it once its last socket closes", () => {
+    const count = new PerClientCount();
+    expect(count.take("a", 2)).toBe(true);
+    expect(count.take("a", 2)).toBe(true);
+    expect(count.take("a", 2)).toBe(false);
+    count.release("a");
+    count.release("a");
+    expect(count.size).toBe(0);
+  });
+});
+
+describe("malformed control frames", () => {
+  it("closes, instead of crashing, on a control frame with a malformed seal or protocol list", async () => {
+    const frames = [
+      { u: "ws://ws.test/", s: 1 },
+      { u: "ws://ws.test/", s: {} },
+      { u: "ws://ws.test/", s: true },
+      { u: "ws://ws.test/", s: "x".repeat(5000) },
+      { u: "ws://ws.test/", p: [1] },
+    ];
+    for (const frame of frames) {
+      const store = new AuthStore(openDb(":memory:"));
+      store.setPublicAccess(true);
+      const url = await relayServer(await echoUpstream(), { authStore: store });
+      const client = connect(url, originOf(url));
+      await opened(client);
+      client.send(JSON.stringify(frame));
+      expect((await closed(client)).code, JSON.stringify(frame).slice(0, 40)).toBe(1008);
+    }
   });
 });

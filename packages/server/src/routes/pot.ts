@@ -14,7 +14,8 @@ export interface PoRouterOptions {
 
 /** Mints a GVS poToken for the caller. Same-origin only, rate-limited, so a proxied page cannot farm tokens. */
 export function poRouter(options: PoRouterOptions): Router {
-  const router = Router();
+  // Exact paths only: the service worker guards these by name, so a variant such as /_g/Logout/ must miss too.
+  const router = Router({ caseSensitive: true, strict: true });
   const allow = rateLimiter(options.rateLimit ?? { windowMs: 60_000, max: 120 });
   router.post("/_g/pot", express.json({ limit: "8kb" }), async (req: Request, res: Response) => {
     if (!isOwnHost(req.get("origin"), req.get("host"))) {

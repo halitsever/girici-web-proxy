@@ -18,6 +18,7 @@ export interface Config {
   rateLimit: number;
   blockedHosts: string[];
   upstreamProxy: UpstreamProxy | undefined;
+  setupToken: string | undefined;
 }
 
 export interface TestUpstream {
@@ -49,6 +50,7 @@ export function loadConfig(env: Env): Config {
     rateLimit: readRateLimit(env.GIRICI_RATE_LIMIT),
     blockedHosts: readBlockedHosts(env.GIRICI_BLOCKED_HOSTS),
     upstreamProxy: parseUpstreamProxy(env.GIRICI_UPSTREAM_PROXY),
+    setupToken: readSetupToken(env.GIRICI_SETUP_TOKEN),
   };
 }
 
@@ -56,11 +58,21 @@ export function loadConfig(env: Env): Config {
 function readTrustProxy(raw: string | undefined): boolean | number | string {
   const value = raw?.trim();
   if (!value) return false;
-  const lower = value.toLowerCase();
-  if (["true", "1", "yes", "on"].includes(lower)) return true;
-  if (["false", "0", "no", "off"].includes(lower)) return false;
+  // Digits come first: the docs say "1" for one proxy, and read as true it would trust forged entries.
   if (/^\d+$/.test(value)) return Number(value);
+  const lower = value.toLowerCase();
+  if (["true", "yes", "on"].includes(lower)) return true;
+  if (["false", "no", "off"].includes(lower)) return false;
   return value;
+}
+
+/** Trusting every hop lets any client pick its own rate-limit key, so startup says so. */
+export function trustProxyWarning(value: boolean | number | string): string | null {
+  if (value !== true) return null;
+  return (
+    "GIRICI_TRUST_PROXY=true trusts every X-Forwarded-For entry, and clients can forge them. " +
+    "Set the number of proxies in front of Girici instead (usually 1)."
+  );
 }
 
 /** Accepts true/1/yes/on (and their negatives); falls back when unset or unrecognized. */
@@ -70,6 +82,14 @@ function readBoolean(raw: string | undefined, fallback: boolean): boolean {
   if (["true", "1", "yes", "on"].includes(value)) return true;
   if (["false", "0", "no", "off"].includes(value)) return false;
   return fallback;
+}
+
+/** The message leaves the value out, since it is a secret. */
+function readSetupToken(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value.length < 8) throw new Error("GIRICI_SETUP_TOKEN must be at least 8 characters");
+  return value;
 }
 
 function readRateLimit(raw: string | undefined): number {

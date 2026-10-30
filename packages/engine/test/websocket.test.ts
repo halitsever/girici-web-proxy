@@ -40,7 +40,7 @@ class TestCloseEvent extends Event {
   }
 }
 
-function makeWin(prep: unknown = { cookie: "sess=1", origin: "https://discord.com" }): Realm {
+function makeWin(prep: unknown = { seal: "S" }): Realm {
   return {
     WebSocket: MockWs as unknown,
     fetch: async () => ({ ok: true, json: async () => prep }),
@@ -87,11 +87,7 @@ describe("installWebSocket", () => {
     const inner = MockWs.instances[0]!;
 
     inner.onopen!();
-    expect(JSON.parse(inner.sent[0] as string)).toMatchObject({
-      u: "wss://gateway.discord.gg/",
-      c: "sess=1",
-      o: "https://discord.com",
-    });
+    expect(JSON.parse(inner.sent[0] as string)).toEqual({ u: "wss://gateway.discord.gg/", p: [], s: "S" });
     expect(events).toEqual([]);
     expect(ws.readyState).toBe(0);
 

@@ -29,8 +29,9 @@ npm run dev
 
 ## First run: create the admin
 
-The first time you open Girici, it sends you to a setup screen. Create the single admin account
-(username, name, email, password). After setup you are signed in and land on the browse screen.
+The first time you open Girici, it sends you to a setup screen. Enter the setup code Girici printed in its log
+when it started, then create the single admin account (username, name, email, password). After setup you are
+signed in and land on the browse screen.
 
 Once an admin exists, Girici requires a login. If you want the proxy to be open to anyone, turn on
 **Public access** in Settings; see [Admin and auth](/guide/admin-and-auth) for what that changes and

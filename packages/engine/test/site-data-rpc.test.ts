@@ -89,6 +89,7 @@ describe("callerOf", () => {
       kind: "other",
     });
     expect(callerOf({ ...ui, url: "https://evil.example/settings" }, origin)).toEqual({ kind: "other" });
+    expect(callerOf({ ...ui, url: `blob:${origin}/1` }, origin)).toEqual({ kind: "other" });
     expect(callerOf(undefined, origin)).toEqual({ kind: "other" });
   });
 

@@ -17,6 +17,7 @@ stops the server with a message naming the variable.
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, comma or space separated. Each entry also blocks its subdomains. The admin can add more in Settings. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all upstream traffic through this proxy: `http://`, `https://`, `socks5://` or `socks5h://`, with optional `user:password@`. |
 | `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret. Set the same value on every replica so sessions validate across them. |
+| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives.

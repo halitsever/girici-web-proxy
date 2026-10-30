@@ -116,6 +116,8 @@ describe("buildPageResponse", () => {
       context({ target: new URL("http://10.0.0.1/"), navigation: true, destination: "document" }),
     );
     expect(nav.status).toBe(403);
+    expect(nav.headers.get("content-security-policy")).toMatch(/^sandbox/);
+    expect(nav.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(await nav.text()).toContain("does not open local or private network addresses");
     expect((await buildPageResponse(blocked, context({ target: new URL("http://10.0.0.1/") }))).type).toBe("error");
   });

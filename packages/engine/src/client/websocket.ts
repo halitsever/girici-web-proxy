@@ -62,14 +62,15 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
     }
 
     async #connect(real: URL, protocols: string[]): Promise<void> {
-      let prep: { cookie: string | null; origin: string } = { cookie: null, origin: real.origin };
+      // An opaque seal of the cookie and Origin; this page never sees the cookie itself.
+      let seal: string | null = null;
       try {
         const response = await nativeFetch(WS_PREP_PATH, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ url: real.href }),
         });
-        if (response.ok) prep = (await response.json()) as typeof prep;
+        if (response.ok) seal = ((await response.json()) as { seal?: string | null }).seal ?? null;
       } catch {
         // Fall back to no cookie; the handshake may still succeed for an unauthenticated socket.
       }
@@ -77,7 +78,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       const inner = new Native(relayUrl, [SUBPROTOCOL]);
       inner.binaryType = "arraybuffer";
       this.#inner = inner;
-      inner.onopen = () => inner.send(JSON.stringify({ u: real.href, p: protocols, c: prep.cookie, o: prep.origin }));
+      inner.onopen = () => inner.send(JSON.stringify({ u: real.href, p: protocols, s: seal }));
       inner.onmessage = (event: MessageEvent) => this.#fromRelay(event.data);
       inner.onclose = (event: CloseEvent) => this.#closed(event.code, event.reason, event.wasClean);
       inner.onerror = () => {

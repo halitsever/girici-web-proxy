@@ -1,4 +1,7 @@
 {$GIRICI_DOMAIN:localhost} {
 	encode zstd gzip
+	# HSTS on localhost would force https on every local port.
+	@public not host localhost
+	header @public Strict-Transport-Security "max-age=31536000"
 	reverse_proxy girici:3000
 }

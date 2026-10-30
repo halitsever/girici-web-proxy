@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorPage } from "../src/sw/error-page.ts";
+import { errorPage, errorResponse } from "../src/sw/error-page.ts";
 
 describe("errorPage", () => {
   it("explains a rate limit", () => {
@@ -12,5 +12,16 @@ describe("errorPage", () => {
 
   it("blames the upstream proxy", () => {
     expect(errorPage("proxy", new URL("https://a.test/"))).toContain("Girici's upstream proxy could not reach a.test.");
+  });
+});
+
+describe("errorResponse", () => {
+  it("serves the page without script or opener, so no proxied page can borrow its realm", async () => {
+    const res = errorResponse("bad_request", 400, null);
+    expect(res.status).toBe(400);
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("content-security-policy")).toMatch(/^sandbox/);
+    expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
+    expect(await res.text()).toContain("This address cannot be opened through Girici.");
   });
 });

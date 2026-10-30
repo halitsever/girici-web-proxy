@@ -12,6 +12,7 @@ import type { Logger } from "../log.ts";
 import type { TunnelDialer } from "../upstream/agent.ts";
 import type { HostBlocklist } from "../upstream/blocklist.ts";
 import { SsrfBlockedError, validateTarget, type TargetPolicy } from "../upstream/ssrf.ts";
+import { openWsSeal } from "./seal.ts";
 
 const WS_PATH = "/_g/ws";
 const SUBPROTOCOL = "girici.v1";
@@ -22,12 +23,11 @@ const FIRST_FRAME_MS = 10_000;
 const PING_MS = 30_000;
 const HIGH_WATER = 1024 * 1024;
 
-/** The control frame the shim sends first: url, subprotocols, cookie, origin. */
+/** The control frame the shim sends first: url, subprotocols and the seal the service worker had made. */
 interface ControlFrame {
   u: string;
   p?: string[];
-  c?: string;
-  o?: string;
+  s?: string | null;
 }
 
 export type Dial = (
@@ -57,6 +57,32 @@ export interface WsRelayOptions {
   tunnel?: TunnelDialer;
 }
 
+/** Open sockets per client; an entry leaves with its last socket, so the map holds only live clients. */
+export class PerClientCount {
+  readonly #counts = new Map<string, number>();
+
+  count(key: string): number {
+    return this.#counts.get(key) ?? 0;
+  }
+
+  take(key: string, max: number): boolean {
+    const count = this.count(key);
+    if (count >= max) return false;
+    this.#counts.set(key, count + 1);
+    return true;
+  }
+
+  release(key: string): void {
+    const left = this.count(key) - 1;
+    if (left > 0) this.#counts.set(key, left);
+    else this.#counts.delete(key);
+  }
+
+  get size(): number {
+    return this.#counts.size;
+  }
+}
+
 /** Codes the browser refuses to send in close(); reflect them as sendable equivalents. */
 export function mapCloseCode(code: number): number {
   if (code === 1005) return 1000;
@@ -73,14 +99,22 @@ export function validateWsTarget(url: URL, policy: TargetPolicy): void {
   validateTarget(httpEquivalent, policy);
 }
 
+const MAX_SEAL = 4096;
+
+/** Fields go straight into Buffer and ws calls, which throw on a wrong type inside a listener and end the process. */
 function parseControlFrame(data: RawData, isBinary: boolean): ControlFrame | null {
   if (isBinary) return null;
+  let value: unknown;
   try {
-    const value = JSON.parse(data.toString()) as ControlFrame;
-    return typeof value?.u === "string" ? value : null;
+    value = JSON.parse(data.toString());
   } catch {
     return null;
   }
+  const { u, p, s } = (value ?? {}) as Record<string, unknown>;
+  if (typeof u !== "string") return null;
+  if (p !== undefined && !(Array.isArray(p) && p.every((item) => typeof item === "string"))) return null;
+  if (s !== undefined && s !== null && (typeof s !== "string" || s.length > MAX_SEAL)) return null;
+  return { u, p: p as string[] | undefined, s: s as string | null | undefined };
 }
 
 /** Same rule as the HTTP gate: open when public, else a valid session for the current admin. */
@@ -147,7 +181,7 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): void {
   const dial = options.dial ?? defaultDial(options.tunnel);
   const trust = options.trust ?? compileTrust(false);
   const wss = new WebSocketServer({ noServer: true, maxPayload, handleProtocols: () => SUBPROTOCOL });
-  const perIp = new Map<string, number>();
+  const perClient = new PerClientCount();
 
   server.on("upgrade", (req, socket, head) => {
     const url = URL.parse(req.url ?? "", "http://localhost");
@@ -169,13 +203,17 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): void {
       refuse(socket, limit.retryAfter);
       return;
     }
-    if ((perIp.get(ip) ?? 0) >= maxPerIp) {
+    if (perClient.count(ip) >= maxPerIp) {
       refuse(socket, 1);
       return;
     }
     wss.handleUpgrade(req, socket, head, (client) => {
-      perIp.set(ip, (perIp.get(ip) ?? 0) + 1);
-      client.once("close", () => perIp.set(ip, Math.max((perIp.get(ip) ?? 1) - 1, 0)));
+      // Counted only once upgraded: a handshake ws rejects never reaches this callback to give its slot back.
+      if (!perClient.take(ip, maxPerIp)) {
+        client.close(1013, "busy");
+        return;
+      }
+      client.once("close", () => perClient.release(ip));
       bridge(client, req, { ...options, maxPayload, dial });
     });
   });
@@ -223,8 +261,11 @@ function connectUpstream(
   forward: Record<string, string>,
   options: WsRelayOptions & { dial: Dial; maxPayload: number },
 ): void {
-  const headers: Record<string, string> = { ...forward, origin: frame.o ?? target.origin };
-  if (frame.c) headers.cookie = frame.c;
+  // Cookie and Origin come only from a seal the server made for this target; a page cannot read or forge one.
+  const secret = options.authStore?.sessionSecret();
+  const sealed = frame.s && secret ? openWsSeal(secret, frame.s, target) : null;
+  const headers: Record<string, string> = { ...forward, origin: sealed?.origin ?? httpOrigin(target) };
+  if (sealed?.cookie) headers.cookie = sealed.cookie;
 
   let setCookies: string[] = [];
   let upstream: WebSocket;
@@ -273,6 +314,11 @@ function connectUpstream(
     if (upstream.readyState !== WebSocket.OPEN && client.readyState === WebSocket.OPEN) client.close(1011, "upstream");
   });
   client.on("error", () => upstream.terminate());
+}
+
+/** Browsers send the page's http(s) origin on a handshake, never a ws: one. */
+function httpOrigin(target: URL): string {
+  return `${target.protocol === "wss:" ? "https:" : "http:"}//${target.host}`;
 }
 
 function pipe(from: WebSocket, to: WebSocket): void {

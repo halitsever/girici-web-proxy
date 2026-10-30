@@ -1,7 +1,10 @@
 import express, { Router, type NextFunction, type Request, type Response } from "express";
-import { issueSession, sessionFromRequest } from "../auth/cookie.ts";
+import { issueSession } from "../auth/cookie.ts";
+import { sessionAdmin } from "../auth/gate.ts";
 import type { AdminInfo, AuthStore } from "../auth/store.ts";
+import { clientKey } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
+import { rateLimiter } from "../http/rate-limit.ts";
 import { MAX_BLOCKED_HOSTS, normalizeHostEntry, type HostBlocklist } from "../upstream/blocklist.ts";
 
 const MIN_PASSWORD = 8;
@@ -12,14 +15,17 @@ export interface AdminSettings {
   envBlockedHosts: string[];
 }
 
-/** Account and operator settings for the signed-in admin; changes are same-origin and authed only. */
+/** Account and operator settings for the signed-in admin; changes need same origin, a session and the password. */
 export function adminRouter(store: AuthStore, blocklist: HostBlocklist): Router {
-  const router = Router();
+  // Exact paths only: the service worker guards these by name, so a variant such as /_g/Logout/ must miss too.
+  const router = Router({ caseSensitive: true, strict: true });
   const json = express.json({ limit: "8kb" });
   // A full blocklist of long host names outgrows the small-form limit.
   const settingsJson = express.json({ limit: "512kb" });
+  // Each write checks a password, so attempts are capped per client the way sign-ins are.
+  const confirm = confirmPassword(store, rateLimiter({ windowMs: 60_000, max: 10 }));
 
-  router.post("/_g/account", json, sameOrigin, requireSession(store), (req, res) => {
+  router.post("/_g/account", sameOrigin, requireSession(store), json, confirm, (req, res) => {
     const body = req.body as { name?: unknown; email?: unknown; password?: unknown };
     const name = str(body?.name);
     const email = str(body?.email);
@@ -48,7 +54,7 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist): Router 
     res.json(settingsOf(store, blocklist));
   });
 
-  router.post("/_g/admin/settings", settingsJson, sameOrigin, requireSession(store), (req, res) => {
+  router.post("/_g/admin/settings", sameOrigin, requireSession(store), settingsJson, confirm, (req, res) => {
     const body = req.body as { publicAccess?: unknown; blockedHosts?: unknown };
     const hasPublic = body?.publicAccess !== undefined;
     const hasHosts = body?.blockedHosts !== undefined;
@@ -101,11 +107,27 @@ function sameOrigin(req: Request, res: Response, next: NextFunction): void {
   next();
 }
 
+/** A session alone is not enough to change anything: a page that rides the cookie does not know the password. */
+function confirmPassword(store: AuthStore, allow: (key: string) => boolean) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!allow(clientKey(req.ip ?? "?"))) {
+      res.status(429).end();
+      return;
+    }
+    const given = (req.body as { currentPassword?: unknown } | undefined)?.currentPassword;
+    const admin = res.locals.admin as AdminInfo;
+    if (typeof given !== "string" || !store.checkPassword(admin.id, given)) {
+      res.status(403).end();
+      return;
+    }
+    next();
+  };
+}
+
 function requireSession(store: AuthStore) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const admin = store.admin();
-    const sub = sessionFromRequest(req, store.sessionSecret());
-    if (!admin || sub !== admin.id) {
+    const admin = sessionAdmin(store, req.headers.cookie);
+    if (!admin) {
       res.status(401).end();
       return;
     }

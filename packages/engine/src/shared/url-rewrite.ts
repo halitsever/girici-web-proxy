@@ -83,9 +83,9 @@ export function rewriteSrcset(value: string, rewrite: (url: string) => string): 
   return candidates.join(", ");
 }
 
-/** Our origin also serves the UI and the engine; other paths there were root-relative URLs of the page. */
+/** Only proxy URLs stay on our origin; naming our UI, engine or admin paths from a page reaches the page's site. */
 function ownUrl(url: URL, base: URL, raw: string): string {
-  if (decodeUrl(url.pathname + url.search) || isReservedPath(url.pathname)) return raw;
+  if (decodeUrl(url.pathname + url.search)) return raw;
   return encodeUrl(new URL(url.pathname + url.search + url.hash, base.origin));
 }
 

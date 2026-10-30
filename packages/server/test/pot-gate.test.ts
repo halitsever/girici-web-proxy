@@ -64,3 +64,15 @@ describe("poToken gate", () => {
     expect((await mint(await listen(store))).status).toBe(200);
   });
 });
+
+describe("WebSocket seal gate", () => {
+  it("refuses to seal without a session when access is private", async () => {
+    const base = await listen(privateStore());
+    const res = await fetch(`${base}/_g/ws-seal`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: base },
+      body: JSON.stringify({ url: "wss://chat.test/", origin: "https://chat.test", cookie: null }),
+    });
+    expect(res.status).toBe(401);
+  });
+});

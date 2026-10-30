@@ -1,8 +1,9 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createApp } from "./app.ts";
+import { generateSetupCode, setupBanner } from "./auth/setup-code.ts";
 import { AuthStore } from "./auth/store.ts";
-import { loadConfig, type Config } from "./config.ts";
+import { loadConfig, trustProxyWarning, type Config } from "./config.ts";
 import { openDb } from "./db/open.ts";
 import { compileTrust } from "./http/client-ip.ts";
 import { tokenBucket } from "./http/rate-limit.ts";
@@ -26,6 +27,8 @@ try {
 }
 
 const logger = createLogger(config.logLevel);
+const trustWarning = trustProxyWarning(config.trustProxy);
+if (trustWarning) logger.warn(trustWarning);
 
 let authStore: AuthStore;
 try {
@@ -54,6 +57,8 @@ if (config.testUpstreams.size > 0) {
 const trust = compileTrust(config.trustProxy);
 const limiter = config.rateLimit > 0 ? tokenBucket({ perMinute: config.rateLimit }) : null;
 const blocklist = new HostBlocklist(config.blockedHosts, authStore.blockedHosts());
+// A fresh code at every start until setup is done, unless the operator fixed one.
+const setupCode = config.setupToken ?? generateSetupCode();
 const agent = createUpstreamAgent({
   proxy: config.upstreamProxy,
   testUpstreams: config.testUpstreams,
@@ -69,6 +74,7 @@ const server = createHttpServer(
     trust,
     limiter,
     blocklist,
+    setupToken: setupCode,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
@@ -108,6 +114,7 @@ server.on("error", (error) => {
 });
 server.listen(config.port, config.host, () => {
   logger.info(`Girici listening on http://${config.host}:${config.port}`);
+  if (!authStore.hasAdmin()) process.stdout.write(setupBanner(setupCode, config.setupToken !== undefined));
 });
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

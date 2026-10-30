@@ -2,6 +2,7 @@
 import type { SiteSummary } from "@girici/engine/shared";
 import { computed, onMounted, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess } from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
@@ -17,6 +18,8 @@ const history = ref<HistoryEntry[]>([]);
 const authed = ref(false);
 const publicAccess = ref(false);
 const publicError = ref("");
+// Kept in memory only, so it is gone once the page closes.
+const adminPassword = ref("");
 const blockedText = ref("");
 const envBlocked = ref<string[]>([]);
 const blockedStatus = ref("");
@@ -43,10 +46,14 @@ watch(
 
 async function onTogglePublic(on: boolean) {
   publicError.value = "";
+  if (!adminPassword.value) {
+    publicError.value = "Enter your current password first.";
+    return;
+  }
   const previous = publicAccess.value;
   publicAccess.value = on;
   try {
-    publicAccess.value = await setPublicAccess(on);
+    publicAccess.value = await setPublicAccess(on, adminPassword.value);
   } catch (e) {
     publicAccess.value = previous;
     publicError.value = e instanceof Error ? e.message : "Could not change public access.";
@@ -56,13 +63,17 @@ async function onTogglePublic(on: boolean) {
 async function onSaveBlocked() {
   blockedStatus.value = "";
   blockedError.value = "";
+  if (!adminPassword.value) {
+    blockedError.value = "Enter your current password first.";
+    return;
+  }
   savingBlocked.value = true;
   try {
     const hosts = blockedText.value
       .split("\n")
       .map((line) => line.trim())
       .filter(Boolean);
-    const saved = await saveBlockedHosts(hosts);
+    const saved = await saveBlockedHosts(hosts, adminPassword.value);
     blockedText.value = saved.blockedHosts.join("\n");
     blockedStatus.value = "Saved.";
   } catch (e) {
@@ -205,6 +216,10 @@ onMounted(async () => {
         <div>
           <p class="text-[14px] font-medium">Block third-party cookies</p>
           <p class="text-[13px] text-muted-foreground">Stops trackers from following you across proxied sites.</p>
+          <p v-if="!settings.blockCookies" class="mt-1 text-[13px] text-gi-danger">
+            With this off, any site you open can send requests to your other sites with your cookies and read the
+            replies.
+          </p>
         </div>
         <Switch v-model="settings.blockCookies" aria-label="Block third-party cookies" />
       </div>
@@ -214,6 +229,13 @@ onMounted(async () => {
       <div class="px-5 pt-5">
         <p class="text-[15px] font-semibold">Admin</p>
         <p class="mt-1 text-[13px] text-muted-foreground">Operator controls for this proxy.</p>
+        <label class="mt-4 flex flex-col gap-2 text-[14px] font-medium">
+          Current password
+          <Input v-model="adminPassword" type="password" autocomplete="current-password" />
+        </label>
+        <p class="mt-2 text-[13px] text-muted-foreground">
+          Needed to change these settings. Kept only while this page is open.
+        </p>
       </div>
       <div class="mt-4 flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
         <div>

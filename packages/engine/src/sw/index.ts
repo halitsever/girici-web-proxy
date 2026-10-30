@@ -3,23 +3,25 @@ import {
   BROADCAST_CHANNEL,
   COOKIE_RPC_PATH,
   HEADER,
+  POT_PATH,
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
   TOP_SITE_QUERY,
   WS_PREP_PATH,
+  WS_SEAL_PATH,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
-import { errorPage } from "./error-page.ts";
+import { errorResponse } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { classifyRequest, realUrlOf } from "./route.ts";
+import { classifyRequest, isGuardedPath, realUrlOf, reservedAccess } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, type TopSiteDeps } from "./third-party.ts";
 import { HttpRelayTransport } from "./transport.ts";
-import { buildWsPrep } from "./ws-prep.ts";
+import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -102,9 +104,31 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(handleSiteDataRpc(event));
     return;
   }
+  if (url.origin === self.location.origin && isGuardedPath(url.pathname)) {
+    if (event.request.mode === "navigate") {
+      // Navigations are judged without a client lookup, so the login and setup screens load at once.
+      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin) === "deny") {
+        event.respondWith(forbidden());
+      }
+      return;
+    }
+    event.respondWith(guardReserved(event, url.pathname));
+    return;
+  }
   if (url.origin === self.location.origin && isReservedPath(url.pathname)) return;
   event.respondWith(handle(event));
 });
+
+/** A client that cannot be looked up in time counts as a page, not as the UI. */
+async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
+  const client = await clientOf(event);
+  const decision = reservedAccess(pathname, event.request, client, self.location.origin);
+  return decision === "allow" ? fetch(event.request) : forbidden();
+}
+
+function forbidden(): Response {
+  return new Response(null, { status: 403 });
+}
 
 async function handle(event: FetchEvent): Promise<Response> {
   const { request } = event;
@@ -218,7 +242,7 @@ async function askTop(clientId: string): Promise<string | null> {
 /** Ask the server to mint a GVS poToken; same-origin, time-boxed, null on any failure. */
 async function mintPoToken(contentBinding: string): Promise<string | null> {
   try {
-    const response = await fetch(`${self.location.origin}/_g/pot`, {
+    const response = await fetch(`${self.location.origin}${POT_PATH}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ contentBinding }),
@@ -231,7 +255,7 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
   }
 }
 
-/** Hand the WebSocket shim the target's cookies and Origin, read from the jar as the page. */
+/** Hand the WebSocket shim a seal of the target's cookies and Origin, read from the jar as the page. */
 async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await cookies.ready();
   const client = await clientOf(event);
@@ -250,7 +274,15 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
     async (target) => !(await cookiesBlocked(event, client, target)),
   );
   if (!prep) return new Response(null, { status: 400 });
-  return new Response(JSON.stringify(prep), { headers: { "content-type": "application/json" } });
+  const seal = await sealWsPrep(prep, (body) =>
+    fetch(`${self.location.origin}${WS_SEAL_PATH}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(5_000),
+    }),
+  );
+  return new Response(JSON.stringify({ seal }), { headers: { "content-type": "application/json" } });
 }
 
 async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
@@ -283,5 +315,5 @@ async function clientOf(event: FetchEvent): Promise<Client | undefined> {
 }
 
 function htmlError(code: RelayErrorCode, status: number, target: URL | null): Response {
-  return new Response(errorPage(code, target), { status, headers: { "content-type": "text/html; charset=utf-8" } });
+  return errorResponse(code, status, target);
 }

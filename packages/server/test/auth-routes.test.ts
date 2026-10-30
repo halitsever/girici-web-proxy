@@ -3,15 +3,19 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { authRouter } from "../src/routes/auth.ts";
+import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 
 let server: Server;
 afterEach(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-async function listen(store: AuthStore): Promise<string> {
+const SETUP_CODE = "TEST-CODE-0001";
+
+async function listen(store: AuthStore, options: { trustProxy?: boolean } = {}): Promise<string> {
   const app = express();
-  app.use(authRouter(store, { loginMax: 5 }));
+  if (options.trustProxy) app.set("trust proxy", true);
+  app.use(authRouter(store, { loginMax: 5, setupToken: SETUP_CODE }));
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -29,6 +33,7 @@ function sessionCookie(res: Response): string {
 }
 
 const setup = { username: "halit", name: "Halit", email: "h@h.h", password: "pw-123456" };
+const setupWithCode = { ...setup, setupToken: SETUP_CODE };
 
 describe("authRouter state", () => {
   it("reports setup needed when no admin exists", async () => {
@@ -45,7 +50,7 @@ describe("authRouter setup", () => {
 
   it("creates the admin, sets a session, and refuses a second setup", async () => {
     const base = await listen(new AuthStore(openDb(":memory:")));
-    const res = await post(base, "/_g/setup", setup);
+    const res = await post(base, "/_g/setup", setupWithCode);
     expect(res.status).toBe(200);
     expect(await res.clone().json()).toMatchObject({ setup: false, authed: true, admin: { name: "Halit" } });
     const cookie = sessionCookie(res);
@@ -57,7 +62,7 @@ describe("authRouter setup", () => {
 
   it("rejects a weak password", async () => {
     const base = await listen(new AuthStore(openDb(":memory:")));
-    expect((await post(base, "/_g/setup", { ...setup, password: "short" })).status).toBe(400);
+    expect((await post(base, "/_g/setup", { ...setupWithCode, password: "short" })).status).toBe(400);
   });
 });
 
@@ -113,5 +118,82 @@ describe("authRouter login and logout", () => {
     const base = await withAdmin();
     for (let i = 0; i < 5; i++) await post(base, "/_g/login", { username: "halit", password: "nope" });
     expect((await post(base, "/_g/login", { username: "halit", password: "nope" })).status).toBe(429);
+  });
+});
+
+describe("authRouter logout everywhere", () => {
+  it("signs out every device when asked to log out everywhere", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const cookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret(), Date.now() - 1_000)}`;
+    const base = await listen(store);
+    const res = await fetch(`${base}/_g/logout`, {
+      method: "POST",
+      headers: { origin: base, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ everywhere: true }),
+    });
+    expect(res.status).toBe(204);
+    const state = await fetch(`${base}/_g/auth/state`, { headers: { cookie } });
+    expect(await state.json()).toMatchObject({ authed: false });
+  });
+
+  it("revokes nothing for an everywhere logout without a session", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin(setup);
+    const base = await listen(store);
+    await post(base, "/_g/logout", { everywhere: true });
+    expect(store.sessionsValidAfter()).toBe(0);
+  });
+});
+
+describe("authRouter limits", () => {
+  it("counts sign-ins from one IPv6 /64 together", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin(setup);
+    const base = await listen(store, { trustProxy: true });
+    const attempt = (ip: string) =>
+      fetch(`${base}/_g/login`, {
+        method: "POST",
+        headers: { origin: base, "content-type": "application/json", "x-forwarded-for": ip },
+        body: JSON.stringify({ username: "halit", password: "wrong-pw-1" }),
+      });
+    for (let i = 0; i < 5; i++) expect((await attempt(`2001:db8:1:2::${i + 1}`)).status).toBe(401);
+    expect((await attempt("2001:db8:1:2::99")).status).toBe(429);
+  });
+});
+
+describe("authRouter setup code", () => {
+  it("refuses setup without the right setup code", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const base = await listen(store);
+    expect((await post(base, "/_g/setup", { ...setup, setupToken: "WRONG-CODE-0000" })).status).toBe(403);
+    expect(store.hasAdmin()).toBe(false);
+  });
+
+  it("keeps setup closed when the router was given no code", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const app = express();
+    app.use(authRouter(store));
+    server = createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    expect((await post(base, "/_g/setup", { ...setup, setupToken: "" })).status).toBe(403);
+  });
+});
+
+describe("authRouter exact paths", () => {
+  it("routes the auth API only at its exact, case-sensitive paths", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const cookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
+    const base = await listen(store);
+    const logout = await fetch(`${base}/_g/logout/`, {
+      method: "POST",
+      headers: { origin: base, cookie, "content-type": "application/json" },
+      body: JSON.stringify({ everywhere: true }),
+    });
+    expect(logout.status).toBe(404);
+    expect(store.sessionsValidAfter()).toBe(0);
+    expect((await fetch(`${base}/_g/AUTH/state`, { headers: { cookie } })).status).toBe(404);
   });
 });

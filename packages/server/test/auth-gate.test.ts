@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
-import { authGate } from "../src/auth/gate.ts";
+import { authGate, isAdminCookie, sessionAdmin } from "../src/auth/gate.ts";
 import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
@@ -53,5 +53,26 @@ describe("authGate", () => {
     store.setPublicAccess(true);
     const res = await fetch(await listen(store));
     expect(res.status).toBe(200);
+  });
+});
+
+describe("sessionAdmin", () => {
+  it("rejects sessions issued before the last revocation", () => {
+    const store = freshStore();
+    const admin = store.admin()!;
+    const now = Date.now();
+    const before = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret(), now - 10_000)}`;
+    const after = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret(), now)}`;
+    store.revokeSessions(now - 5_000);
+    expect(sessionAdmin(store, before)).toBeNull();
+    expect(isAdminCookie(store, before)).toBe(false);
+    expect(sessionAdmin(store, after)?.id).toBe(admin.id);
+  });
+
+  it("keeps sessions from before the upgrade, when nothing was ever revoked", () => {
+    const store = freshStore();
+    const admin = store.admin()!;
+    const old = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret(), Date.now() - 86_400_000)}`;
+    expect(sessionAdmin(store, old)?.id).toBe(admin.id);
   });
 });
