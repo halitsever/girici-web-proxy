@@ -13,7 +13,16 @@ import {
   type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
-import { decodeText, isDocumentLoad, mimeOf, rewriteKind, sandboxesDocument, type BodyKind } from "./body.ts";
+import {
+  contentTypeOf,
+  decodeText,
+  isDocumentLoad,
+  mimeOf,
+  rewriteKind,
+  sandboxesDocument,
+  sniffsHtml,
+  type BodyKind,
+} from "./body.ts";
 import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
@@ -67,8 +76,17 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   if (ctx.syncCookies?.length) headers.set(HEADER.cookieSync, encodeHeaderValue(JSON.stringify(ctx.syncCookies)));
   if (NULL_BODY_STATUSES.has(status) || !body) return new Response(null, { status, headers });
 
-  const contentType = headers.get("content-type");
-  const kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
+  let contentType = headers.get("content-type");
+  let kind = rewriteKind(ctx.destination, ctx.navigation, contentType);
+  let bytes: ArrayBuffer | null = null;
+  if (!kind && isDocumentLoad(ctx.destination, ctx.navigation) && !mimeOf(contentType)) {
+    // A browser sniffs an untyped document, so one that starts like HTML is a page and gets the runtime.
+    bytes = await new Response(body).arrayBuffer();
+    if (sniffsHtml(bytes)) {
+      kind = "html";
+      contentType = "text/html";
+    }
+  }
   if (!kind) {
     // The relay hop already decoded any content-encoding, so the upstream length is right only for an identity body.
     const encoded = envelope.some(([name]) => name === "content-encoding");
@@ -77,13 +95,13 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     if (sandboxesDocument(ctx.destination, ctx.navigation, contentType)) {
       for (const [name, value] of Object.entries(inertHeaders())) headers.set(name, value);
       // With nosniff, a missing type leaves some browsers an empty document.
-      headers.set("content-type", mimeOf(contentType) ?? "text/plain; charset=utf-8");
+      headers.set("content-type", contentTypeOf(contentType) ?? "text/plain; charset=utf-8");
     } else if (isDocumentLoad(ctx.destination, ctx.navigation)) {
       // The browser parses the header on its own, so it may only ever see the one type decided here.
-      const mime = mimeOf(contentType);
-      if (mime) headers.set("content-type", mime);
+      const type = contentTypeOf(contentType);
+      if (type) headers.set("content-type", type);
     }
-    return new Response(body, { status, headers });
+    return new Response(bytes ?? body, { status, headers });
   }
   const validators: Validators = {
     etag: envelope.find(([name]) => name === "etag")?.[1] ?? null,
@@ -93,7 +111,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
     return errorResponse("runtime", 503, ctx.target);
   }
-  const text = decodeText(await new Response(body).arrayBuffer(), contentType);
+  const text = decodeText(bytes ?? (await new Response(body).arrayBuffer()), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
   return new Response(await rewriteBody(kind, text, ctx, validators), { status, headers });
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeText, mimeOf, rewriteKind, sandboxesDocument } from "../src/sw/body.ts";
+import { contentTypeOf, decodeText, mimeOf, rewriteKind, sandboxesDocument, sniffsHtml } from "../src/sw/body.ts";
 
 describe("rewriteKind", () => {
   it("rewrites HTML that object and embed elements load", () => {
@@ -86,5 +86,36 @@ describe("mimeOf", () => {
     expect(sandboxesDocument("document", true, "text/html, video/mp4")).toBe(false);
     expect(sandboxesDocument("document", true, "text/plain, video/mp4")).toBe(false);
     expect(sandboxesDocument("document", true, "video/mp4, text/plain")).toBe(true);
+  });
+});
+
+describe("sniffsHtml", () => {
+  const bytes = (text: string) => new TextEncoder().encode(text).buffer;
+
+  it("finds an HTML start after an optional BOM and whitespace, in any case", () => {
+    for (const text of ["<!doctype html>", "<!DOCTYPE HTML PUBLIC", "<html>", "<HTML lang=en>", "\uFEFF \n\t<html>"])
+      expect(sniffsHtml(bytes(text)), text).toBe(true);
+  });
+
+  it("leaves everything else alone", () => {
+    for (const text of ["", "hello <html>", "<htmlx>", "<!doctype htmlx>", '{"a":1}', "<p>x</p>", "<?xml version"])
+      expect(sniffsHtml(bytes(text)), text).toBe(false);
+  });
+});
+
+describe("contentTypeOf", () => {
+  it("keeps a valid charset on text types only", () => {
+    expect(contentTypeOf('Text/Plain; Charset="Windows-1251"')).toBe("text/plain; charset=windows-1251");
+    expect(contentTypeOf("text/xml; foo=1; charset=iso-8859-2")).toBe("text/xml; charset=iso-8859-2");
+    expect(contentTypeOf("text/plain; charset=bogus-label")).toBe("text/plain");
+    expect(contentTypeOf('text/plain; charset=a"b')).toBe("text/plain");
+    expect(contentTypeOf("video/mp4; charset=utf-8")).toBe("video/mp4");
+    expect(contentTypeOf(null)).toBeNull();
+  });
+
+  it("follows the browser across comma-joined types", () => {
+    expect(contentTypeOf("text/plain; charset=koi8-r, text/plain")).toBe("text/plain; charset=koi8-r");
+    expect(contentTypeOf("text/plain; charset=koi8-r, text/xml")).toBe("text/xml");
+    expect(contentTypeOf("text/plain; charset=koi8-r, text/plain; charset=gbk")).toBe("text/plain; charset=gbk");
   });
 });

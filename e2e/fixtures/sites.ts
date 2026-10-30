@@ -805,6 +805,16 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/plain.txt": typed("text/plain", PLAIN_BODY),
     "/doc.svg": typed("image/svg+xml", SVG_BODY),
     "/untyped": typed(null, PLAIN_BODY),
+    "/untyped-page": typed(
+      null,
+      `\uFEFF\n<!DOCTYPE html><title>Untyped</title><p id="where"></p>
+<script>document.getElementById("where").textContent = location.href;</script>`,
+    ),
+    "/cyrillic.txt": (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain; charset=windows-1251" });
+      // "Привет" in windows-1251.
+      res.end(Buffer.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]));
+    },
     "/data.xml": typed("application/xml", XML_BODY),
     "/inert": html(INERT),
     "/frame-worker": html(FRAME_WORKER),

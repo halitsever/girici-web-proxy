@@ -53,6 +53,40 @@ describe("buildPageResponse", () => {
     }
   });
 
+  it("rewrites an untyped navigation whose body starts as HTML", async () => {
+    for (const body of ["<!DOCTYPE html><p>x</p>", "\uFEFF\n  <html><p>x</p></html>"]) {
+      const res = await buildPageResponse(upstream([], body), context({ navigation: true, destination: "document" }));
+      expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(res.headers.get("content-security-policy")).toBeNull();
+      expect(await res.text()).toContain("/_g/client.test.js");
+    }
+  });
+
+  it("keeps an untyped navigation that is not HTML as sandboxed text", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-length", "15"]], "hello <html> x."),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(res.headers.get("content-length")).toBe("15");
+    expect(await res.text()).toBe("hello <html> x.");
+  });
+
+  it("leaves an untyped subresource that looks like HTML untouched", async () => {
+    const res = await buildPageResponse(upstream([], "<html><p>x</p>"), context({ destination: "" }));
+    expect(await res.text()).toBe("<html><p>x</p>");
+  });
+
+  it("keeps the charset of a sandboxed text navigation", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/plain; charset=windows-1251; foo=bar"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=windows-1251");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+  });
+
   it("serves a comma-joined html type as rewritten html", async () => {
     const res = await buildPageResponse(
       upstream(

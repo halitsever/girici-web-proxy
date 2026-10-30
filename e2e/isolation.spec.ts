@@ -73,3 +73,10 @@ test("runs no script in documents the proxy does not rewrite", async ({ page, br
   await page.goto("/~/https/site-a.test/doc.svg");
   await expect(page.locator("svg")).not.toHaveAttribute("data-ran", "1");
 });
+
+test("renders an untyped page as HTML and keeps a text document's charset", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/untyped-page");
+  await expect(page.locator("#where")).toHaveText("https://site-a.test/untyped-page");
+  await page.goto("/~/https/site-a.test/cyrillic.txt");
+  await expect(page.locator("body")).toHaveText("Привет");
+});
