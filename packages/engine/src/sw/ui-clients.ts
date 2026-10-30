@@ -33,19 +33,29 @@ export function loadsUi(
   return classifyRequest({ url: url.href, origin, navigation: true, clientUrl: null, referrer }).kind === "passthrough";
 }
 
+export interface UiClientsOptions {
+  limit?: number;
+  /** IDs of the windows that still exist. Without it every ID counts as alive. */
+  liveIds?: () => Promise<ReadonlySet<string>>;
+}
+
 /** Girici UI tabs, known by the client IDs their own navigations produced. Records outlive worker restarts. */
 export class UiClients implements UiClientSet {
   readonly #records: ClientRecordStore;
   readonly #limit: number;
+  readonly #liveIds: () => Promise<ReadonlySet<string> | null>;
   /** Client ID to the time it was added, oldest first. */
   readonly #ids = new Map<string, number>();
-  // Stays set when the records cannot be read, so an unknown history never seeds.
-  #seeded = true;
+  // Only records read without the marker allow a seed, so an unread history never seeds.
+  #seedable = false;
+  #seedTried = false;
   #loaded: Promise<void> | null = null;
+  #trimming = false;
 
-  constructor(records: ClientRecordStore, options: { limit?: number } = {}) {
+  constructor(records: ClientRecordStore, options: UiClientsOptions = {}) {
     this.#records = records;
     this.#limit = options.limit ?? LIMIT;
+    this.#liveIds = options.liveIds ?? (async () => null);
   }
 
   ready(): Promise<void> {
@@ -62,7 +72,7 @@ export class UiClients implements UiClientSet {
     this.#ids.delete(id);
     this.#ids.set(id, at);
     this.#records.put(STORE, id, at).catch(() => {});
-    this.#trim();
+    void this.#trim();
   }
 
   /**
@@ -70,11 +80,17 @@ export class UiClients implements UiClientSet {
    * activations do not, because proxied pages may be open by then.
    */
   async seedOnce(clients: readonly ClientShape[], origin: string): Promise<void> {
+    if (this.#seedTried) return;
+    this.#seedTried = true;
     await this.ready();
-    if (this.#seeded) return;
-    this.#seeded = true;
+    if (!this.#seedable) return;
+    try {
+      await this.#records.put(STORE, SEEDED, true);
+    } catch {
+      // A seed nothing remembers would run again at a later activation, with proxied pages open.
+      return;
+    }
     for (const client of clients) if (hasUiShape(client, origin)) this.add(client.id);
-    await this.#records.put(STORE, SEEDED, true).catch(() => {});
   }
 
   async #load(): Promise<void> {
@@ -82,11 +98,13 @@ export class UiClients implements UiClientSet {
     try {
       records = await this.#records.load(STORE);
     } catch {
+      // The next ready() reads again.
+      this.#loaded = null;
       return;
     }
     const addedMeanwhile = [...this.#ids];
     this.#ids.clear();
-    this.#seeded = records.some((record) => record.key === SEEDED);
+    this.#seedable = !records.some((record) => record.key === SEEDED);
     const stored = records
       .filter((record) => record.key !== SEEDED)
       .map(({ key, value }) => [key, typeof value === "number" ? value : 0] as const)
@@ -95,14 +113,27 @@ export class UiClients implements UiClientSet {
       this.#ids.delete(id);
       this.#ids.set(id, at);
     }
-    this.#trim();
+    void this.#trim();
   }
 
-  #trim(): void {
-    for (const id of this.#ids.keys()) {
-      if (this.#ids.size <= this.#limit) return;
-      this.#ids.delete(id);
-      this.#records.delete(STORE, id).catch(() => {});
+  /**
+   * IDs without a window go first, oldest first, so loads a page floods in cannot push out an open UI tab. A new load
+   * has no window until its page arrives, but it is the newest of those.
+   */
+  async #trim(): Promise<void> {
+    if (this.#trimming || this.#ids.size <= this.#limit) return;
+    this.#trimming = true;
+    try {
+      const live = await this.#liveIds().catch(() => null);
+      const alive = (id: string) => !live || live.has(id);
+      const order = [...this.#ids.keys()].sort((a, b) => Number(alive(a)) - Number(alive(b)));
+      for (const id of order) {
+        if (this.#ids.size <= this.#limit) break;
+        this.#ids.delete(id);
+        this.#records.delete(STORE, id).catch(() => {});
+      }
+    } finally {
+      this.#trimming = false;
     }
   }
 }

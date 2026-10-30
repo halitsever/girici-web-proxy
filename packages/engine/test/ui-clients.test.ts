@@ -59,7 +59,37 @@ describe("UiClients", () => {
     const ui = new UiClients(memoryRecords(), { limit: 2 });
     await ui.ready();
     for (const id of ["a", "b", "c"]) ui.add(id);
+    await flush();
     expect(["a", "b", "c"].map((id) => ui.has(id))).toEqual([false, true, true]);
+  });
+
+  it("drops clients whose window has closed before open ones", async () => {
+    const live = async () => new Set(["a", "c"]);
+    const ui = new UiClients(memoryRecords(), { limit: 2, liveIds: live });
+    await ui.ready();
+    for (const id of ["a", "b", "c"]) ui.add(id);
+    await flush();
+    expect(["a", "b", "c"].map((id) => ui.has(id))).toEqual([true, false, true]);
+  });
+
+  it("keeps an open UI tab while a page floods UI loads", async () => {
+    const ui = new UiClients(memoryRecords(), { limit: 3, liveIds: async () => new Set(["tab"]) });
+    await ui.ready();
+    ui.add("tab");
+    for (let i = 0; i < 20; i++) ui.add(`flood-${i}`);
+    await flush();
+    expect([ui.has("tab"), ui.has("flood-0"), ui.has("flood-19")]).toEqual([true, false, true]);
+  });
+
+  it("keeps a new load whose page has not arrived over older closed clients", async () => {
+    const records = memoryRecords();
+    await records.put("ui", "old-1", 1);
+    await records.put("ui", "old-2", 2);
+    const ui = new UiClients(records, { limit: 2, liveIds: async () => new Set() });
+    await ui.ready();
+    ui.add("new");
+    await flush();
+    expect(["old-1", "old-2", "new"].map((id) => ui.has(id))).toEqual([false, true, true]);
   });
 
   it("keeps the newest clients when it reloads more than its limit", async () => {
@@ -81,6 +111,38 @@ describe("UiClients", () => {
     ui.add("new");
     await loading;
     expect([ui.has("old"), ui.has("new")]).toEqual([true, true]);
+  });
+
+  it("seeds nothing when it cannot store the marker", async () => {
+    const records = memoryRecords();
+    const ui = new UiClients({
+      ...records,
+      put: async (store, key, value) => {
+        if (key === "#seeded") throw new Error("quota");
+        await records.put(store, key, value);
+      },
+    });
+    await ui.seedOnce([{ id: "s", type: "window", frameType: "top-level", url: `${origin}/settings` }], origin);
+    expect(ui.has("s")).toBe(false);
+  });
+
+  it("reads its records again after a failed read, and still does not seed", async () => {
+    const records = memoryRecords();
+    await records.put("ui", "old", 1);
+    let failures = 1;
+    const ui = new UiClients({
+      ...records,
+      load: async (store) => {
+        if (failures-- > 0) throw new Error("busy");
+        return records.load(store);
+      },
+    });
+    const window = { id: "s", type: "window", frameType: "top-level", url: `${origin}/settings` };
+    await ui.seedOnce([window], origin);
+    expect([ui.has("old"), ui.has("s")]).toEqual([false, false]);
+    await ui.ready();
+    await ui.seedOnce([window], origin);
+    expect([ui.has("old"), ui.has("s")]).toEqual([true, false]);
   });
 
   it("starts empty and seeds nothing when its records cannot be read", async () => {

@@ -59,7 +59,10 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
-const ui = new UiClients(createIdbClientRecords());
+const ui = new UiClients(createIdbClientRecords(), {
+  liveIds: async () =>
+    new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
+});
 // A UI tab can message the worker before the activation that records it has finished.
 let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
@@ -127,8 +130,9 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (loadsUi(event.request, url, self.location.origin)) {
     if (event.resultingClientId) ui.add(event.resultingClientId);
-    // Answering keeps the page controlled under this ID. Playwright's Firefox loses both when a navigation falls back.
-    event.respondWith(fetch(event.request));
+    // Answering keeps the page controlled under this ID, which Playwright's Firefox loses when a navigation falls
+    // back. Once the worker answers, a server that is down gets Girici's error page instead of the browser's.
+    event.respondWith(fetch(event.request).catch(() => htmlError("connect", 502, url)));
     return;
   }
   // The query is ignored: workers import the runtime with a nonce suffix.

@@ -8,9 +8,11 @@ import { reloadThroughEngine } from "./lib/proxy";
 import { loadSettings } from "./lib/settings";
 import router from "./router";
 
-void reloadThroughEngine().then((reloading) => {
-  if (reloading) return;
-  createApp(App).use(router).mount("#app");
-  // A worker installed before the last settings change still holds the old choice until it hears this.
-  void syncEnginePrefs(loadSettings());
-});
+void reloadThroughEngine()
+  .catch(() => false)
+  .then((reloading) => {
+    if (reloading) return;
+    createApp(App).use(router).mount("#app");
+    // A worker installed before the last settings change still holds the old choice until it hears this.
+    void syncEnginePrefs(loadSettings());
+  });

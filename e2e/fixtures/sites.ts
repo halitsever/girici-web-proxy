@@ -660,6 +660,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/runtime": html(RUNTIME),
     "/cookie/login": login,
     "/cookie/whoami": whoami,
+    "/ui-link": html(page("UI link", '<a id="settings" href="/settings">settings</a>')),
+    "/settings": html(page("Site settings", "<p>site settings</p>")),
     "/third-party": html(
       page(
         "Third party",

@@ -25,31 +25,32 @@ export async function openProxied(path: string): Promise<void> {
 }
 
 const RELOAD_KEY = "girici:engine-reload";
-// One reload is enough when the engine works; a tab it still cannot take is left as it is.
-const RELOAD_GAP_MS = 10_000;
 
 export interface ReloadEnv {
-  container: ServiceWorkerContainer | undefined;
-  storage: () => Pick<Storage, "getItem" | "setItem">;
+  container: () => ServiceWorkerContainer | undefined;
+  storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem">;
   reload: () => void;
-  now: number;
 }
 
 /**
  * The engine takes settings and site data only from UI tabs whose load it saw. A hard reload goes around it, so such a
- * tab loads once more. True when the reload has started.
+ * tab loads once more. A mark still there on the next load means that reload did not help; a controlled load clears it.
  */
 export async function reloadThroughEngine(env: ReloadEnv = browserEnv()): Promise<boolean> {
-  const { container } = env;
-  if (!container || container.controller) return false;
   try {
+    const container = env.container();
+    if (!container) return false;
+    if (container.controller) {
+      env.storage().removeItem(RELOAD_KEY);
+      return false;
+    }
     const registration = await container.getRegistration("/");
     if (!registration?.active) return false;
     const storage = env.storage();
-    if (env.now - Number(storage.getItem(RELOAD_KEY)) < RELOAD_GAP_MS) return false;
-    storage.setItem(RELOAD_KEY, String(env.now));
+    if (storage.getItem(RELOAD_KEY) !== null) return false;
+    storage.setItem(RELOAD_KEY, "1");
   } catch {
-    // Without storage nothing would stop a reload loop, and the UI must still load.
+    // The UI must still load, and without storage nothing would stop a reload loop.
     return false;
   }
   env.reload();
@@ -58,9 +59,8 @@ export async function reloadThroughEngine(env: ReloadEnv = browserEnv()): Promis
 
 function browserEnv(): ReloadEnv {
   return {
-    container: navigator.serviceWorker,
+    container: () => navigator.serviceWorker,
     storage: () => sessionStorage,
     reload: () => location.reload(),
-    now: Date.now(),
   };
 }
