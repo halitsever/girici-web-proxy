@@ -1,6 +1,7 @@
 import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
+import { brandOf, hashOf, hrefOf, newUrl, originOf, pathnameOf, searchOf, setUrlPart } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
@@ -228,7 +229,7 @@ export function install(
       ctx,
       toolbarNatives,
       {
-        assign: (path) => ownLocation.navigate(new URL(path, ctx.origin).href, "assign"),
+        assign: (path) => ownLocation.navigate(hrefOf(newUrl(path, ctx.origin)), "assign"),
         reload: ownLocation.reload,
       },
       toolbarKeys,
@@ -244,7 +245,7 @@ function locationCalls(location: Location, invoke: Invoke): Pick<LocationEnv, "n
     reload: () => invoke(location.reload, location, []),
     setHash: (hash) => {
       // Location members are own properties of each instance, not of Location.prototype.
-      const set = Object.getOwnPropertyDescriptor(location, "hash")?.set;
+      const set = ownDescriptor(location, "hash")?.set;
       if (set) invoke(set, location, [hash]);
       else location.hash = hash;
     },
@@ -286,7 +287,7 @@ function serviceWorkerContainer(win: Realm): () => ServiceWorkerContainer | null
 
 function isLocation(value: unknown): boolean {
   try {
-    return Object.prototype.toString.call(value) === "[object Location]";
+    return brandOf(value) === "[object Location]";
   } catch {
     return false;
   }
@@ -311,9 +312,9 @@ function fakeFor(win: Realm, location: object): object | null {
 
 function realUrlOfLocation(location: Location, origin: string): URL | null {
   try {
-    const url = new URL(location.href);
-    const real = url.origin === origin ? decodeUrl(url.pathname + url.search) : null;
-    if (real) real.hash = url.hash;
+    const url = newUrl(location.href);
+    const real = originOf(url) === origin ? decodeUrl(pathnameOf(url) + searchOf(url)) : null;
+    if (real) setUrlPart(real, "hash", hashOf(url));
     return real;
   } catch {
     // A cross-origin window hides its address; the caller falls back to this page's URL.

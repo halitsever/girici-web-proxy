@@ -1,4 +1,15 @@
 import { prefixFor } from "../shared/partition.ts";
+import {
+  apply,
+  brandOf,
+  hrefOf,
+  isWebUrl,
+  mapOf,
+  newUrl,
+  parseUrl,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 import { hookConstructor } from "./constructors.ts";
 import { createHelpers } from "./helpers.ts";
@@ -6,10 +17,6 @@ import { createFakeLocation } from "./location.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { hookWorkers } from "./worker-bootstrap.ts";
-
-// Taken at load, so a replaced Function.prototype.call or String never receives a native or the URL.
-const apply = Reflect.apply;
-const toText = String;
 
 /** The worker globals this runtime touches; typed narrowly so it needs neither the DOM nor the WebWorker lib. */
 export interface WorkerScope {
@@ -81,22 +88,17 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
   // The bootstrap passes the worker's real URL, since scope.location is the proxy or a blob address.
   const href = base ?? scope.location.href;
   const origin = scope.location.origin;
-  const realBase = (): URL => new URL(href);
+  const realBase = (): URL => newUrl(href);
   return {
     origin,
     realUrl: realBase,
     realBase,
     // A worker loads from a blob address, so a relative URL is resolved against the real base and proxied absolutely.
     toProxy: (raw) => {
-      let absolute: URL;
-      try {
-        absolute = new URL(raw, realBase());
-      } catch {
-        return raw;
-      }
-      if (absolute.protocol !== "http:" && absolute.protocol !== "https:") return raw;
-      const proxied = rewriteUrl(absolute.href, realBase(), origin);
-      return proxied.startsWith("/") ? origin + proxied : proxied;
+      const absolute = parseUrl(raw, realBase());
+      if (!absolute || !isWebUrl(absolute)) return raw;
+      const proxied = rewriteUrl(hrefOf(absolute), realBase(), origin);
+      return startsWith(proxied, "/") ? origin + proxied : proxied;
     },
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
     // A worker never loads a second document.
@@ -112,7 +114,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
   return createHelpers({
     nativeLocation: scope.location,
     fakeLocation,
-    isLocation: (value) => Object.prototype.toString.call(value) === "[object WorkerLocation]",
+    isLocation: (value) => brandOf(value) === "[object WorkerLocation]",
     fakeFor: () => null,
     // A worker has no window or document, so location writes fall through to the native (read-only) property.
     isWindowOrDocument: () => false,
@@ -167,7 +169,7 @@ function hookImportScripts(scope: WorkerScope, ctx: UrlContext): void {
     apply(
       native,
       scope,
-      urls.map((url) => ctx.toProxy(toText(url))),
+      mapOf(urls, (url) => ctx.toProxy(toText(url))),
     );
 }
 

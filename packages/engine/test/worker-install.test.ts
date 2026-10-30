@@ -8,6 +8,7 @@ import { prefixFor } from "../src/shared/partition.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
 import { recordingCalls } from "./recording-calls.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const ORIGIN = "http://p.test";
 const RUNTIME = `${ORIGIN}/_g/worker.X.js`;
@@ -298,6 +299,24 @@ describe("installWorker", () => {
     const proxied = new scope.Request(`${ORIGIN}/~/https/a.test/y`);
     void scope.fetch(proxied);
     expect(received[1]).toBe(proxied);
+  });
+
+  it("keeps imported scripts in the proxy when the page replaced built-ins", () => {
+    const { scope, log } = installedScope();
+    const builtIns: Array<[object, PropertyKey, PropertyDescriptor]> = [
+      [Array.prototype, "map", { value: () => ["https://b.test/raw.js"] }],
+      [String.prototype, "startsWith", { value: () => false }],
+      ...REPLACED_BUILTINS.map(([, target, key, replacement]): [object, PropertyKey, PropertyDescriptor] => [
+        target,
+        key,
+        replacement,
+      ]),
+    ];
+    for (const [target, key, replacement] of builtIns) {
+      withReplaced(target, key, replacement, () => scope.importScripts("https://b.test/x.js", "y.js"));
+    }
+    const expected = [`import:${ORIGIN}/~/https/b.test/x.js`, `import:${ORIGIN}/~/https/a.test/y.js`];
+    expect(log).toEqual(builtIns.flatMap(() => expected));
   });
 
   it("forgets the boot globals after reading them", () => {

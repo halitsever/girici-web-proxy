@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { decodeUrl } from "../src/shared/codec.ts";
 import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const base = new URL("https://site.test/dir/page.html");
 const origin = "http://proxy.test";
@@ -88,4 +90,17 @@ describe("rewriteSrcset", () => {
     expect(rewriteSrcset("data:image/png;base64,AA== 1x", mark)).toBe("[data:image/png;base64,AA==] 1x");
     expect(rewriteSrcset("", mark)).toBe("");
   });
+});
+
+describe("with built-ins the page replaced", () => {
+  for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
+    it(`keeps proxying URLs when ${name} is replaced`, () => {
+      const results = withReplaced(target, key, replacement, () => [
+        rewriteUrl("https://other.test/a?b=1", base, origin),
+        decodeUrl("/~/https/other.test/a?b=1")?.href,
+        unrewriteUrl("/~/https/other.test/a", base, origin),
+      ]);
+      expect(results).toEqual(["/~/https/other.test/a?b=1", "https://other.test/a?b=1", "https://other.test/a"]);
+    });
+  }
 });

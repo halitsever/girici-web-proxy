@@ -877,6 +877,34 @@ const ATTR_NODE = page(
 </script>`,
 );
 
+/** Replaces the built-ins the engine's URL checks once leaned on, then navigates to site-b every way it can. */
+const DOORS_BUILTINS = page(
+  "Doors built-ins",
+  `<a id="link">b</a><iframe id="frame"></iframe>
+<button id="assign">assign</button><button id="open">open</button><button id="frame-src">frame</button>
+<script>
+  const startsWith = String.prototype.startsWith;
+  String.prototype.startsWith = function (prefix, position) {
+    return prefix === "#" || startsWith.call(this, prefix, position);
+  };
+  const exec = RegExp.prototype.exec;
+  RegExp.prototype.exec = function (text) {
+    return this.source.slice(-2) === "*:" ? ["javascript:"] : exec.call(this, text);
+  };
+  window.URL = class extends URL {
+    get protocol() {
+      return "x:";
+    }
+  };
+  document.getElementById("link").href = "https://site-b.test/";
+  document.getElementById("assign").addEventListener("click", () => location.assign("https://site-b.test/"));
+  document.getElementById("open").addEventListener("click", () => window.open("https://site-b.test/"));
+  document.getElementById("frame-src").addEventListener("click", () => {
+    document.getElementById("frame").src = "https://site-b.test/frame";
+  });
+</script>`,
+);
+
 const NOTIFY = page(
   "Notify",
   `<p id="perm"></p>
@@ -1156,6 +1184,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/doors-workers": html(DOORS_WORKERS),
     "/doors-frames": html(DOORS_FRAMES),
     "/doors-srcdoc": html(DOORS_SRCDOC),
+    "/doors-builtins": html(DOORS_BUILTINS),
     "/attr-node": html(ATTR_NODE),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(

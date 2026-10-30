@@ -1,3 +1,4 @@
+import { toText } from "../shared/primordials.ts";
 import type { RewriteBridge } from "./rewrite-bridge.ts";
 
 export interface HelperEnv {
@@ -41,14 +42,14 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
 
   return {
     L,
-    N: (target, value) => (isRealLocation(target) ? env.toProxy(String(value)) : value),
+    N: (target, value) => (isRealLocation(target) ? env.toProxy(toText(value)) : value),
     S: (object, key, value) => {
       if (env.isWindowOrDocument(object)) {
         const location = (object as { location: { href: string } }).location;
         const fake = L(location) as { href: string };
         // A window whose stand-in cannot be found still must not navigate outside the proxy.
-        if (fake === location) location.href = env.toProxy(String(value));
-        else fake.href = String(value);
+        if (fake === location) location.href = env.toProxy(toText(value));
+        else fake.href = toText(value);
       } else {
         (object as Record<string, unknown>)[key] = value;
       }

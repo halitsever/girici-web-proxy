@@ -1,0 +1,167 @@
+/**
+ * Built-ins taken when the engine bundle loads, before any page script. Pages share our realm and can replace the
+ * originals, which would let a navigation's URL skip the proxy or hand a native to page code.
+ */
+
+export const apply = Reflect.apply;
+const defineProperty = Reflect.defineProperty;
+const ownDescriptor = Reflect.getOwnPropertyDescriptor;
+const NativeUrl = URL;
+const NativeString = String;
+const strings = String.prototype;
+const nativeStartsWith = strings.startsWith;
+const nativeEndsWith = strings.endsWith;
+const nativeSlice = strings.slice;
+const nativeIndexOf = strings.indexOf;
+const nativeIncludes = strings.includes;
+const nativeToLowerCase = strings.toLowerCase;
+const nativeTrim = strings.trim;
+const nativeExec = RegExp.prototype.exec;
+const nativeSetHas = Set.prototype.has;
+const objectToString = Object.prototype.toString;
+
+/** String(value), which runs the value's own conversion once and gives a primitive the checks can trust. */
+export const toText = NativeString as (value: unknown) => string;
+
+export function startsWith(text: string, prefix: string): boolean {
+  return apply(nativeStartsWith, text, [prefix]);
+}
+
+export function endsWith(text: string, suffix: string): boolean {
+  return apply(nativeEndsWith, text, [suffix]);
+}
+
+export function sliceOf(text: string, start: number, end?: number): string {
+  return apply(nativeSlice, text, [start, end]);
+}
+
+export function indexOf(text: string, search: string): number {
+  return apply(nativeIndexOf, text, [search]);
+}
+
+export function includes(text: string, search: string): boolean {
+  return apply(nativeIncludes, text, [search]);
+}
+
+export function lowerCase(text: string): string {
+  return apply(nativeToLowerCase, text, []);
+}
+
+export function trim(text: string): string {
+  return apply(nativeTrim, text, []);
+}
+
+export function exec(pattern: RegExp, text: string): RegExpExecArray | null {
+  return apply(nativeExec, pattern, [text]);
+}
+
+/** Replaces every match of a global pattern; String.prototype.replace would look `exec` up on the prototype. */
+export function replaceAll(text: string, pattern: RegExp, replacement: (match: string) => string): string {
+  pattern.lastIndex = 0;
+  let result = "";
+  let last = 0;
+  for (let match = exec(pattern, text); match; match = exec(pattern, text)) {
+    const found = match[0];
+    result += sliceOf(text, last, match.index) + replacement(found);
+    last = match.index + found.length;
+    if (!found) pattern.lastIndex++;
+  }
+  return result + sliceOf(text, last);
+}
+
+/** Array.prototype.map without the prototype: entries are defined, so an index setter on Array.prototype never runs. */
+export function mapOf<T, U>(items: ArrayLike<T>, map: (item: T) => U): U[] {
+  const result: U[] = [];
+  for (let index = 0; index < items.length; index++) {
+    defineProperty(result, index, {
+      __proto__: null,
+      value: map(items[index] as T),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    } as PropertyDescriptor);
+  }
+  return result;
+}
+
+export function setHas<T>(set: Set<T>, value: T): boolean {
+  return apply(nativeSetHas, set, [value]);
+}
+
+/** The [object Tag] brand, read without Function.prototype.call. */
+export function brandOf(value: unknown): string {
+  return apply(objectToString, value, []);
+}
+
+type UrlPart =
+  | "href"
+  | "origin"
+  | "protocol"
+  | "username"
+  | "password"
+  | "host"
+  | "hostname"
+  | "port"
+  | "pathname"
+  | "search"
+  | "hash";
+
+type WritableUrlPart = Exclude<UrlPart, "origin">;
+
+const PARTS: UrlPart[] = [
+  "href",
+  "origin",
+  "protocol",
+  "username",
+  "password",
+  "host",
+  "hostname",
+  "port",
+  "pathname",
+  "search",
+  "hash",
+];
+const getters: Partial<Record<UrlPart, () => string>> = { __proto__: null } as never;
+const setters: Partial<Record<UrlPart, (value: string) => void>> = { __proto__: null } as never;
+for (let index = 0; index < PARTS.length; index++) {
+  const part = PARTS[index] as UrlPart;
+  const descriptor = ownDescriptor(NativeUrl.prototype, part);
+  getters[part] = descriptor?.get as () => string;
+  setters[part] = descriptor?.set as (value: string) => void;
+}
+
+export function urlPart(url: URL, part: UrlPart): string {
+  return apply(getters[part] as () => string, url, []);
+}
+
+export function setUrlPart(url: URL, part: WritableUrlPart, value: string): void {
+  apply(setters[part] as (value: string) => void, url, [value]);
+}
+
+export const hrefOf = (url: URL): string => urlPart(url, "href");
+export const originOf = (url: URL): string => urlPart(url, "origin");
+export const protocolOf = (url: URL): string => urlPart(url, "protocol");
+export const hostOf = (url: URL): string => urlPart(url, "host");
+export const pathnameOf = (url: URL): string => urlPart(url, "pathname");
+export const searchOf = (url: URL): string => urlPart(url, "search");
+export const hashOf = (url: URL): string => urlPart(url, "hash");
+
+/** new URL(raw, base) with the native constructor; a URL base is passed as text so its toString is never called. */
+export function newUrl(raw: string, base?: string | URL): URL {
+  if (base === undefined) return new NativeUrl(raw);
+  return new NativeUrl(raw, typeof base === "string" ? base : hrefOf(base));
+}
+
+/** Safari 17.4, which the engine supports, has no URL.parse. */
+export function parseUrl(raw: string, base?: string | URL): URL | null {
+  try {
+    return newUrl(raw, base);
+  } catch {
+    return null;
+  }
+}
+
+export function isWebUrl(url: URL): boolean {
+  const protocol = protocolOf(url);
+  return protocol === "http:" || protocol === "https:";
+}

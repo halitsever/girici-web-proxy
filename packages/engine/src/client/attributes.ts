@@ -1,3 +1,4 @@
+import { hrefOf, indexOf, parseUrl, setUrlPart, sliceOf, toText, urlPart } from "../shared/primordials.ts";
 import { attributeKind, restoreAttribute, rewriteAttribute } from "./attribute-values.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
@@ -84,17 +85,17 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   const element = win.Element.prototype;
   const { setAttribute, getAttribute, setAttributeNS, getAttributeNS } = element;
   element.setAttribute = function (this: Element, name: string, value: string) {
-    setAttribute.call(this, name, rewrite(this, name, String(value)));
+    apply(setAttribute, this, [name, rewrite(this, name, toText(value))]);
   };
   element.getAttribute = function (this: Element, name: string) {
-    const value = getAttribute.call(this, name);
+    const value = apply(getAttribute, this, [name]);
     return value === null ? value : restore(this, name, value);
   };
   element.setAttributeNS = function (this: Element, namespace: string | null, name: string, value: string) {
-    setAttributeNS.call(this, namespace, name, rewrite(this, attributeName(namespace, name), String(value)));
+    apply(setAttributeNS, this, [namespace, name, rewrite(this, attributeName(namespace, name), toText(value))]);
   };
   element.getAttributeNS = function (this: Element, namespace: string | null, name: string) {
-    const value = getAttributeNS.call(this, namespace, name);
+    const value = apply(getAttributeNS, this, [namespace, name]);
     return value === null ? value : restore(this, attributeName(namespace, name), value);
   };
 
@@ -108,13 +109,13 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       configurable: true,
       enumerable: descriptor.enumerable ?? true,
       get(this: Attr) {
-        const value = get.call(this);
+        const value: unknown = apply(get, this, []);
         const owner = this.ownerElement;
         return owner && typeof value === "string" ? restore(owner, this.name, value) : value;
       },
       set(this: Attr, value: unknown) {
         const owner = this.ownerElement;
-        set.call(this, owner ? rewrite(owner, this.name, String(value)) : String(value));
+        apply(set, this, [owner ? rewrite(owner, this.name, toText(value)) : toText(value)]);
       },
     });
   }
@@ -196,11 +197,11 @@ function wrap(
     configurable: true,
     enumerable: descriptor.enumerable ?? true,
     get(this: unknown) {
-      return read(String(get.call(this)));
+      return read(toText(apply(get, this, [])));
     },
     set: set
       ? function (this: unknown, value: unknown) {
-          set.call(this, write(String(value)));
+          apply(set, this, [write(toText(value))]);
         }
       : undefined,
   });
@@ -211,18 +212,13 @@ function installLinkParts(win: Realm, constructorName: string): void {
   const proto = prototypeOf(win, constructorName);
   if (!proto) return;
   // A link without a parsable href reports empty parts, as browsers do.
-  const realUrl = (link: object): URL | null => {
-    try {
-      return new URL(String((link as { href: string }).href));
-    } catch {
-      return null;
-    }
-  };
+  const realUrl = (link: object): URL | null => parseUrl(toText((link as { href: string }).href));
   Object.defineProperty(proto, "origin", {
     configurable: true,
     enumerable: true,
     get(this: object) {
-      return realUrl(this)?.origin ?? "";
+      const url = realUrl(this);
+      return url ? urlPart(url, "origin") : "";
     },
   });
   for (const part of LINK_PARTS) {
@@ -230,13 +226,14 @@ function installLinkParts(win: Realm, constructorName: string): void {
       configurable: true,
       enumerable: true,
       get(this: object) {
-        return realUrl(this)?.[part] ?? "";
+        const url = realUrl(this);
+        return url ? urlPart(url, part) : "";
       },
       set(this: object, value: unknown) {
         const next = realUrl(this);
         if (!next) return;
-        next[part] = String(value);
-        (this as { href: string }).href = next.href;
+        setUrlPart(next, part, toText(value));
+        (this as { href: string }).href = hrefOf(next);
       },
     });
   }
@@ -244,7 +241,7 @@ function installLinkParts(win: Realm, constructorName: string): void {
     configurable: true,
     writable: true,
     value(this: object) {
-      return String((this as { href: string }).href);
+      return toText((this as { href: string }).href);
     },
   });
 }
@@ -254,7 +251,8 @@ function prototypeOf(win: Realm, constructorName: string): object | undefined {
 }
 
 function attributeName(namespace: string | null, name: string): string {
-  const local = name.includes(":") ? name.slice(name.indexOf(":") + 1) : name;
+  const colon = indexOf(name, ":");
+  const local = colon >= 0 ? sliceOf(name, colon + 1) : name;
   return namespace === XLINK_NAMESPACE ? `xlink:${local}` : name;
 }
 
