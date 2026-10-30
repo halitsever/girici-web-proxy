@@ -27,7 +27,7 @@ export interface WorkerScope {
   WebSocketStream?: unknown;
   WebTransport?: unknown;
   eval: (code: string) => unknown;
-  Request?: new (input: unknown, init?: unknown) => { url: string };
+  Request?: { new (input: unknown, init?: unknown): { url: string }; prototype: object };
   EventSource?: new (url: string, init?: unknown) => object;
   navigator?: {
     sendBeacon?: (url: string, data?: unknown) => boolean;
@@ -190,6 +190,8 @@ function hookFetch(scope: WorkerScope, ctx: UrlContext): void {
   const native = scope.fetch;
   const Request = scope.Request;
   if (!native) return;
+  // Addresses are read once through the native getter, so a script's getter cannot answer differently the second time.
+  const requestUrl = Object.getOwnPropertyDescriptor(Request?.prototype ?? {}, "url")?.get as () => string;
   // The service worker sees this worker only as a blob: address, so its fetches name the real script as referrer.
   const withOwnReferrer = (init: unknown): unknown => {
     const options = (init ?? {}) as { referrer?: unknown };
@@ -197,8 +199,9 @@ function hookFetch(scope: WorkerScope, ctx: UrlContext): void {
   };
   scope.fetch = (input: unknown, init?: unknown) => {
     if (Request && input instanceof Request) {
-      const url = ctx.toProxy(input.url);
-      return apply(native, scope, [url === input.url ? input : new Request(url, input), withOwnReferrer(init)]);
+      const address = apply(requestUrl, input, []);
+      const url = ctx.toProxy(address);
+      return apply(native, scope, [url === address ? input : new Request(url, input), withOwnReferrer(init)]);
     }
     return apply(native, scope, [ctx.toProxy(toText(input)), withOwnReferrer(init)]);
   };

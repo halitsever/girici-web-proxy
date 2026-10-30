@@ -12,6 +12,8 @@ const toText = String;
 export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
   const nativeFetch = win.fetch;
   const Request = win.Request;
+  // The native getter, taken before the masking below wraps it, reads the address the request will really use.
+  const requestUrl = Object.getOwnPropertyDescriptor(Request.prototype, "url")?.get as (this: Request) => string;
   win.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     const seq = cookies.currentSeq();
     let request: RequestInfo = proxiedInput(input);
@@ -29,11 +31,13 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   };
   maskNative(win.fetch, nativeFetch);
 
-  // A Request built from an already proxied URL is passed on unchanged.
+  // A Request built from an already proxied URL is passed on unchanged. Its address is read once, since a page
+  // getter could answer the foreign address first and the proxied one second.
   const proxiedInput = (input: RequestInfo | URL): RequestInfo => {
     if (!(input instanceof Request)) return ctx.toProxy(toText(input));
-    const url = ctx.toProxy(input.url);
-    return url === input.url ? input : new Request(url, input);
+    const address = apply(requestUrl, input, []);
+    const url = ctx.toProxy(address);
+    return url === address ? input : new Request(url, input);
   };
 
   const fromProxy = (value: string) => (value ? ctx.fromProxy(value) : value);

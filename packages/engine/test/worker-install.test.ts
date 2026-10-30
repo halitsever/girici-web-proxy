@@ -20,6 +20,7 @@ function fakeGlobals() {
   const log: string[] = [];
   const workers: string[] = [];
   const blobs = new Map<string, string>();
+  const received: unknown[] = [];
   class IDBFactory {
     open(name: string) {
       log.push(`idb:${name}`);
@@ -61,6 +62,18 @@ function fakeGlobals() {
       log.push(`xhr:${url}`);
     }
   }
+  // Like the native, a request keeps its address in an internal slot that only the prototype getter reads.
+  const addresses = new WeakMap<object, string>();
+  class Request {
+    constructor(input: unknown) {
+      addresses.set(this, input instanceof Request ? (addresses.get(input) as string) : String(input));
+    }
+    get url(): string {
+      const address = addresses.get(this);
+      if (address === undefined) throw new TypeError("Illegal invocation");
+      return address;
+    }
+  }
   class Blob {
     readonly parts: string[];
     constructor(parts: string[]) {
@@ -77,6 +90,7 @@ function fakeGlobals() {
     SharedWorker,
     EventSource,
     XMLHttpRequest,
+    Request,
     Blob,
     URL: {
       createObjectURL: (blob: Blob) => {
@@ -86,7 +100,8 @@ function fakeGlobals() {
       },
     },
     fetch: (input: unknown) => {
-      log.push(`fetch:${String(input)}`);
+      received.push(input);
+      log.push(`fetch:${typeof input === "object" && input ? addresses.get(input) : String(input)}`);
       return Promise.resolve();
     },
     importScripts: (...urls: string[]) => {
@@ -99,7 +114,7 @@ function fakeGlobals() {
       },
     },
   };
-  return { globals, log, workers, blobs };
+  return { globals, log, workers, blobs, received };
 }
 
 function workerScope(fake: ReturnType<typeof fakeGlobals>, boot: Record<string, string> = {}) {
@@ -233,6 +248,23 @@ describe("installWorker", () => {
       "idb:__g|https://a.test|db",
     ]);
     expect(fake.workers).toHaveLength(1);
+  });
+
+  it("reads a request's address once, through the native getter", () => {
+    const { scope, log, received } = installedScope();
+    const foreign = new scope.Request("https://evil.test/x");
+    let reads = 0;
+    // Answers the foreign address first, then its proxied form, so a second read would look already proxied.
+    Object.defineProperty(foreign, "url", {
+      get: () => (reads++ % 2 === 0 ? "https://evil.test/x" : `${ORIGIN}/~/https/evil.test/x`),
+    });
+    void scope.fetch(foreign);
+    expect(log).toEqual([`fetch:${ORIGIN}/~/https/evil.test/x`]);
+    expect(received[0]).not.toBe(foreign);
+
+    const proxied = new scope.Request(`${ORIGIN}/~/https/a.test/y`);
+    void scope.fetch(proxied);
+    expect(received[1]).toBe(proxied);
   });
 
   it("forgets the boot globals after reading them", () => {
