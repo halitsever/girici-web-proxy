@@ -13,7 +13,7 @@ import {
 } from "../shared/protocol.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
-import { errorResponse } from "./error-page.ts";
+import { errorResponse, forbiddenResponse } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
 import { classifyRequest, isGuardedPath, realUrlOf, reservedAccess } from "./route.ts";
@@ -108,7 +108,7 @@ self.addEventListener("fetch", (event) => {
     if (event.request.mode === "navigate") {
       // Navigations are judged without a client lookup, so the login and setup screens load at once.
       if (reservedAccess(url.pathname, event.request, undefined, self.location.origin) === "deny") {
-        event.respondWith(forbidden());
+        event.respondWith(forbiddenResponse());
       }
       return;
     }
@@ -123,11 +123,7 @@ self.addEventListener("fetch", (event) => {
 async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
   const client = await clientOf(event);
   const decision = reservedAccess(pathname, event.request, client, self.location.origin);
-  return decision === "allow" ? fetch(event.request) : forbidden();
-}
-
-function forbidden(): Response {
-  return new Response(null, { status: 403 });
+  return decision === "allow" ? fetch(event.request) : forbiddenResponse();
 }
 
 async function handle(event: FetchEvent): Promise<Response> {

@@ -13,10 +13,10 @@ import {
   type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
-import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
+import { decodeText, rewriteKind, sandboxesDocument, type BodyKind } from "./body.ts";
 import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
-import { errorResponse } from "./error-page.ts";
+import { errorResponse, inertHeaders } from "./error-page.ts";
 import type { TransportResult } from "./transport.ts";
 
 export interface PageContext {
@@ -70,6 +70,11 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     const encoded = envelope.some(([name]) => name === "content-encoding");
     const length = envelope.find(([name]) => name === "content-length")?.[1];
     if (!encoded && length) headers.set("content-length", length);
+    if (sandboxesDocument(ctx.destination, ctx.navigation, contentType)) {
+      for (const [name, value] of Object.entries(inertHeaders())) headers.set(name, value);
+      // With nosniff, a missing type leaves some browsers an empty same-origin document.
+      if (!contentType) headers.set("content-type", "text/plain; charset=utf-8");
+    }
     return new Response(body, { status, headers });
   }
   const validators: Validators = {

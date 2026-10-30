@@ -1,5 +1,7 @@
 export type BodyKind = "html" | "css" | "js";
 
+const DOCUMENT_DESTINATIONS = new Set<string>(["document", "iframe", "frame", "object", "embed"]);
+
 /** Only bodies the browser will parse as a document, stylesheet or script need rewriting; fetch() data stays untouched. */
 export function rewriteKind(
   destination: RequestDestination,
@@ -7,10 +9,22 @@ export function rewriteKind(
   contentType: string | null,
 ): BodyKind | null {
   const type = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-  if (navigation) return type === "text/html" ? "html" : null;
+  if (navigation || DOCUMENT_DESTINATIONS.has(destination)) return type === "text/html" ? "html" : null;
   if (destination === "style") return type === "" || type.includes("css") ? "css" : null;
   if (destination === "script") return type === "" || /(?:java|ecma)script/.test(type) ? "js" : null;
   return null;
+}
+
+/** Documents the browser runs on our origin that no rewriter touched, so they need a sandbox. PDFs and media keep their viewers. */
+export function sandboxesDocument(
+  destination: RequestDestination,
+  navigation: boolean,
+  contentType: string | null,
+): boolean {
+  if (!navigation && !DOCUMENT_DESTINATIONS.has(destination)) return false;
+  if (rewriteKind(destination, navigation, contentType)) return false;
+  const type = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  return !(type === "application/pdf" || type.startsWith("audio/") || type.startsWith("video/"));
 }
 
 const CHARSET = /charset\s*=\s*["']?([^"';\s>]+)/i;

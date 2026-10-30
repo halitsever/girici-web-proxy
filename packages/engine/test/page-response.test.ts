@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STANDALONE_SHIM } from "../src/rewrite/js.ts";
+import { SANDBOX_CSP } from "../src/sw/error-page.ts";
 import { buildPageResponse, type PageContext } from "../src/sw/page-response.ts";
 import type { TransportResult } from "../src/sw/transport.ts";
 
@@ -25,6 +26,28 @@ function context(overrides: Partial<PageContext> = {}): PageContext {
 }
 
 describe("buildPageResponse", () => {
+  it("serves an untyped navigation inert", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-security-policy", "default-src *"]], "<script>x()</script>"),
+      context({ navigation: true, destination: "iframe" }),
+    );
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("leaves subresources and media without a sandbox", async () => {
+    const image = await buildPageResponse(
+      upstream([["content-type", "image/svg+xml"]]),
+      context({ destination: "image" }),
+    );
+    expect(image.headers.get("content-security-policy")).toBeNull();
+    const video = await buildPageResponse(
+      upstream([["content-type", "video/mp4"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(video.headers.get("content-security-policy")).toBeNull();
+  });
+
   it("injects an absolute runtime URL and the page's site", async () => {
     const res = await buildPageResponse(
       upstream([["content-type", "text/html"]], "<p>x</p>"),

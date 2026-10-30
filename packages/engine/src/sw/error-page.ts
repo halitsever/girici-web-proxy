@@ -1,5 +1,12 @@
 import type { RelayErrorCode } from "../shared/protocol.ts";
 
+export const SANDBOX_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+
+/** A sandbox without allow-scripts or allow-same-origin gives the document an opaque origin and no script. */
+export function inertHeaders(): Record<string, string> {
+  return { "content-security-policy": SANDBOX_CSP, "x-content-type-options": "nosniff" };
+}
+
 const MESSAGES: Record<RelayErrorCode, string> = {
   ssrf_blocked: "Girici does not open local or private network addresses.",
   dns: "Girici could not find {host}.",
@@ -39,10 +46,15 @@ export function errorResponse(code: RelayErrorCode, status: number, target: URL 
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
-      "content-security-policy": "sandbox; default-src 'none'",
+      ...inertHeaders(),
       "cross-origin-opener-policy": "same-origin",
     },
   });
+}
+
+/** Every service-worker refusal is an inert document, so a navigation to it cannot run script on our origin. */
+export function forbiddenResponse(): Response {
+  return new Response(null, { status: 403, headers: inertHeaders() });
 }
 
 function escapeHtml(value: string): string {

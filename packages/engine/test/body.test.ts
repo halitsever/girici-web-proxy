@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { decodeText, rewriteKind } from "../src/sw/body.ts";
+import { decodeText, rewriteKind, sandboxesDocument } from "../src/sw/body.ts";
 
 describe("rewriteKind", () => {
+  it("rewrites HTML that object and embed elements load", () => {
+    expect(rewriteKind("object", false, "text/html")).toBe("html");
+    expect(rewriteKind("embed", false, "text/html; charset=utf-8")).toBe("html");
+    expect(rewriteKind("image", false, "text/html")).toBeNull();
+  });
+
   it("picks the rewriter from the destination and the content type", () => {
     expect(rewriteKind("document", true, "text/html; charset=utf-8")).toBe("html");
     expect(rewriteKind("iframe", true, "TEXT/HTML")).toBe("html");
@@ -41,5 +47,25 @@ describe("decodeText", () => {
       ),
     ).toContain("ı");
     expect(decodeText(encode('<meta charset="windows-1254">', 0xc4, 0x9f), "text/html; charset=utf-8")).toContain("ğ");
+  });
+});
+
+describe("sandboxesDocument", () => {
+  it("sandboxes every document body it does not rewrite, except PDFs and media", () => {
+    const cases: Array<[RequestDestination, boolean, string | null]> = [
+      ["iframe", true, "text/plain"],
+      ["document", true, "image/svg+xml"],
+      ["document", true, null],
+      ["document", true, "application/xhtml+xml"],
+      ["object", false, "image/svg+xml"],
+      ["embed", false, "application/octet-stream"],
+      ["frame", true, "application/xml"],
+    ];
+    for (const [destination, navigation, type] of cases)
+      expect(sandboxesDocument(destination, navigation, type), `${destination} ${type}`).toBe(true);
+    for (const type of ["application/pdf", "video/mp4", "audio/mpeg"])
+      expect(sandboxesDocument("document", true, type)).toBe(false);
+    expect(sandboxesDocument("image", false, "image/svg+xml")).toBe(false);
+    expect(sandboxesDocument("document", true, "text/html")).toBe(false);
   });
 });

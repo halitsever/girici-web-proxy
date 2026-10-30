@@ -566,6 +566,39 @@ const RAW_ATTR = page(
 </script>`,
 );
 
+const PLAIN_BODY = '<script>parent.postMessage("ran", "*")</script>';
+const SVG_BODY = `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-ran", "1"); parent.postMessage("ran", "*")</script></svg>`;
+const XML_BODY = `<html xmlns="http://www.w3.org/1999/xhtml"><body><script>parent.postMessage("ran", "*")</script></body></html>`;
+
+const INERT = page(
+  "Inert",
+  `<pre id="results"></pre>
+<iframe src="/plain.txt"></iframe>
+<iframe src="/doc.svg"></iframe>
+<iframe src="/untyped"></iframe>
+<iframe src="/data.xml"></iframe>
+<object data="/doc.svg" type="image/svg+xml"></object>
+<embed src="/untyped">
+<script>
+  let ran = 0;
+  window.addEventListener("message", (event) => { if (event.data === "ran") ran++; });
+  setTimeout(() => {
+    const readable = [];
+    for (let i = 0; i < frames.length; i++) {
+      try { readable.push(Boolean(frames[i].document)); } catch { readable.push(false); }
+    }
+    document.getElementById("results").textContent = JSON.stringify({ ran, readable });
+  }, 1500);
+</script>`,
+);
+
+const typed =
+  (type: string | null, body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, type ? { "content-type": type } : {});
+    res.end(body);
+  };
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -652,6 +685,11 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
     "/reuse": html(REUSE),
+    "/plain.txt": typed("text/plain", PLAIN_BODY),
+    "/doc.svg": typed("image/svg+xml", SVG_BODY),
+    "/untyped": typed(null, PLAIN_BODY),
+    "/data.xml": typed("application/xml", XML_BODY),
+    "/inert": html(INERT),
     "/frame-worker": html(FRAME_WORKER),
     "/sri": html(SRI),
     "/sri-a.js": script(SRI_A),
