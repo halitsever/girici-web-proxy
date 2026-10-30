@@ -13,6 +13,7 @@ function deps(
     origin,
     windowClients: async () => overrides.clients ?? [],
     askTop: overrides.askTop ?? (async () => null),
+    workers: async () => null,
   };
 }
 
@@ -27,6 +28,7 @@ const nav = (
   target: new URL(target),
   referrer,
   resultingClientId,
+  clientId: "",
 });
 const sub = (target: string) => ({
   navigation: false,
@@ -34,6 +36,7 @@ const sub = (target: string) => ({
   target: new URL(target),
   referrer: null,
   resultingClientId: "",
+  clientId: "",
 });
 const top = (id: string, url: string): ClientInfo => ({
   id,
@@ -127,34 +130,35 @@ describe("topSiteFor", () => {
     expect(asked).toBe(1);
   });
 
-  it("judges a worker by its own script's site, asking the worker once", async () => {
+  it("judges a worker by the page that started it, whatever referrer it sends", async () => {
     let asked = 0;
-    const d = deps({
-      askTop: async () => {
-        asked++;
-        return "https://a.test/worker.js";
-      },
-    });
+    const d = {
+      ...deps({ askTop: async () => (asked++, "https://b.test/") }),
+      workers: async () => ({ page: "https://a.test/app", top: "https://a.test" }),
+    };
     const worker: ClientInfo = { id: "w1", type: "worker", frameType: "none", url: "blob:https://girici.test/0a1b" };
-    const api = new URL("https://api.a.test/data");
-    expect(isThirdParty(api, await topSiteFor(sub(api.href), worker, d))).toBe(false);
-    await topSiteFor(sub(api.href), worker, d);
-    expect(asked).toBe(1);
+    const forged = { ...sub("https://b.test/api"), referrer: proxied("https://b.test/"), clientId: "w1" };
+    expect(isThirdParty(new URL("https://b.test/api"), await topSiteFor(forged, worker, d))).toBe(true);
+    expect(asked).toBe(0);
   });
 
-  it("learns a worker's site from the referrer its runtime sets, then remembers it", async () => {
-    let asked = 0;
-    const d = deps({
-      askTop: async () => {
-        asked++;
-        return null;
-      },
-    });
-    const worker: ClientInfo = { id: "w2", type: "worker", frameType: "none", url: "blob:https://girici.test/0c2d" };
-    const withReferrer = { ...sub("https://a.test/api"), referrer: proxied("https://a.test/worker.js") };
-    expect(await topSiteFor(withReferrer, worker, d)).toBe("https://a.test");
-    expect(await topSiteFor(sub("https://a.test/xhr"), worker, d)).toBe("https://a.test");
-    expect(asked).toBe(0);
+  it("counts a worker nobody announced as third-party", async () => {
+    const d = { ...deps(), workers: async () => null };
+    const worker: ClientInfo = { id: "w9", type: "worker", frameType: "none", url: "blob:https://girici.test/9" };
+    expect(
+      await topSiteFor({ ...sub("https://a.test/x"), referrer: proxied("https://a.test/"), clientId: "w9" }, worker, d),
+    ).toBeNull();
+  });
+
+  it("judges a client that cannot be looked up by its binding, never by its referrer", async () => {
+    const bound = {
+      ...deps(),
+      workers: async (id: string) => (id === "w1" ? { page: "https://a.test/", top: "https://a.test" } : null),
+    };
+    const forged = { ...sub("https://b.test/api"), referrer: proxied("https://b.test/") };
+    expect(await topSiteFor({ ...forged, clientId: "w1" }, undefined, bound)).toBe("https://a.test");
+    expect(await topSiteFor({ ...forged, clientId: "w2" }, undefined, bound)).toBeNull();
+    expect(await topSiteFor(forged, undefined, bound)).toBeNull();
   });
 
   it("counts an unknown top as third-party", async () => {

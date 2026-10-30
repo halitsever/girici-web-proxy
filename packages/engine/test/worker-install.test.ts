@@ -5,6 +5,7 @@ import { workerBootstrapCode } from "../src/client/worker-bootstrap.ts";
 import { installWorker, type WorkerScope } from "../src/client/worker-install.ts";
 import { installWorkers } from "../src/client/workers.ts";
 import { prefixFor } from "../src/shared/partition.ts";
+import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
 import { recordingCalls } from "./recording-calls.ts";
 
@@ -12,8 +13,13 @@ const ORIGIN = "http://p.test";
 const RUNTIME = `${ORIGIN}/_g/worker.X.js`;
 const PARTITION = "__g|https://a.test|";
 
-const bootFor = (scriptUrl: string, base: string, module = false) =>
-  workerBootstrapCode({ runtimeUrl: RUNTIME, scriptUrl, base, partition: PARTITION, module });
+const ANNOUNCE = `${ORIGIN}/_g/rpc/worker`;
+
+/** Each bootstrap carries a fresh nonce, so the expected code takes the one the blob holds. */
+const bootFor = (code: string | undefined, scriptUrl: string, base: string, module = false) =>
+  workerBootstrapCode({ runtimeUrl: RUNTIME, nonce: nonceIn(code), scriptUrl, base, partition: PARTITION, module });
+
+const nonceIn = (code: string | undefined) => /\?n=([A-Za-z0-9_-]+)"/.exec(code ?? "")?.[1] ?? "";
 
 /** Worker-starting, network and storage globals that log what reaches the natives. */
 function fakeGlobals() {
@@ -21,6 +27,8 @@ function fakeGlobals() {
   const workers: string[] = [];
   const blobs = new Map<string, string>();
   const received: unknown[] = [];
+  const inits: unknown[] = [];
+  const order: string[] = [];
   class IDBFactory {
     open(name: string) {
       log.push(`idb:${name}`);
@@ -49,11 +57,13 @@ function fakeGlobals() {
   class Worker {
     constructor(...[url]: [string, unknown?]) {
       workers.push(url);
+      order.push("worker");
     }
   }
   class SharedWorker {
     constructor(...[url]: [string, unknown?]) {
       workers.push(url);
+      order.push("worker");
     }
   }
   class EventSource {}
@@ -99,9 +109,12 @@ function fakeGlobals() {
         return url;
       },
     },
-    fetch: (input: unknown) => {
+    fetch: (input: unknown, init?: unknown) => {
       received.push(input);
-      log.push(`fetch:${typeof input === "object" && input ? addresses.get(input) : String(input)}`);
+      inits.push(init);
+      const address = typeof input === "object" && input ? addresses.get(input) : String(input);
+      log.push(`fetch:${address}`);
+      order.push(`fetch:${address}`);
       return Promise.resolve();
     },
     importScripts: (...urls: string[]) => {
@@ -114,7 +127,7 @@ function fakeGlobals() {
       },
     },
   };
-  return { globals, log, workers, blobs, received };
+  return { globals, log, workers, blobs, received, inits, order };
 }
 
 function workerScope(fake: ReturnType<typeof fakeGlobals>, boot: Record<string, string> = {}) {
@@ -187,7 +200,7 @@ describe("installWorker", () => {
     page.globals.indexedDB.open("db");
     scope.indexedDB.open("db");
     expect(worker.log).toEqual(["idb:__g|https://a.test|db"]);
-    expect(page.log).toEqual(worker.log);
+    expect(page.log).toEqual([`fetch:${ANNOUNCE}`, ...worker.log]);
   });
 
   it("gives a nested worker the bootstrap with its real base and this worker's runtime", () => {
@@ -195,16 +208,18 @@ describe("installWorker", () => {
     new scope.Worker("sub.js");
     expect(workers).toHaveLength(1);
     expect(workers[0]).toMatch(/^blob:/);
-    expect(blobs.get(workers[0] as string)).toBe(bootFor(`${ORIGIN}/~/https/a.test/sub.js`, "https://a.test/sub.js"));
+    const code = blobs.get(workers[0] as string);
+    expect(code).toBe(bootFor(code, `${ORIGIN}/~/https/a.test/sub.js`, "https://a.test/sub.js"));
   });
 
   it("gives nested shared and module workers the bootstrap too", () => {
     const { scope, workers, blobs } = installedScope();
     new scope.SharedWorker("shared.js", "name");
     new scope.Worker("mod.js", { type: "module" });
-    expect(workers.map((url) => blobs.get(url))).toEqual([
-      bootFor(`${ORIGIN}/~/https/a.test/shared.js`, "https://a.test/shared.js"),
-      bootFor(`${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true),
+    const [shared, mod] = workers.map((url) => blobs.get(url));
+    expect([shared, mod]).toEqual([
+      bootFor(shared, `${ORIGIN}/~/https/a.test/shared.js`, "https://a.test/shared.js"),
+      bootFor(mod, `${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true),
     ]);
   });
 
@@ -212,10 +227,27 @@ describe("installWorker", () => {
     const { scope, workers, blobs } = installedScope();
     new scope.Worker(`blob:${ORIGIN}/inner`);
     new scope.Worker(` BLOB:${ORIGIN}/inner`);
-    expect(workers.map((url) => blobs.get(url))).toEqual([
-      bootFor(`blob:${ORIGIN}/inner`, "https://a.test/w.js"),
-      bootFor(` BLOB:${ORIGIN}/inner`, "https://a.test/w.js"),
+    const [plain, upper] = workers.map((url) => blobs.get(url));
+    expect([plain, upper]).toEqual([
+      bootFor(plain, `blob:${ORIGIN}/inner`, "https://a.test/w.js"),
+      bootFor(upper, ` BLOB:${ORIGIN}/inner`, "https://a.test/w.js"),
     ]);
+  });
+
+  it("announces a nested worker before starting it", () => {
+    const { scope, workers, blobs, inits, order } = installedScope();
+    new scope.Worker("sub.js");
+    new scope.Worker("sub.js");
+    expect(order).toEqual([`fetch:${ANNOUNCE}`, "worker", `fetch:${ANNOUNCE}`, "worker"]);
+    const sent = inits.map((init) => {
+      const { method, body } = init as { method: string; body: string };
+      expect(method).toBe("POST");
+      return JSON.parse(body) as { v: number; n: string };
+    });
+    expect(sent.map(({ v }) => v)).toEqual([PROTOCOL_VERSION, PROTOCOL_VERSION]);
+    expect(sent.map(({ n }) => n)).toEqual(workers.map((url) => nonceIn(blobs.get(url))));
+    expect(sent[0]?.n).toMatch(/^[0-9a-f]{32}$/);
+    expect(sent[0]?.n).not.toBe(sent[1]?.n);
   });
 
   it("never hands a native to a replaced call or apply", () => {
@@ -245,6 +277,7 @@ describe("installWorker", () => {
       `import:${ORIGIN}/~/https/a.test/b.js`,
       `xhr:${ORIGIN}/~/https/a.test/c`,
       `beacon:${ORIGIN}/~/https/a.test/d`,
+      `fetch:${ANNOUNCE}`,
       "idb:__g|https://a.test|db",
     ]);
     expect(fake.workers).toHaveLength(1);

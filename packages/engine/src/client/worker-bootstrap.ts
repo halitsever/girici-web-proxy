@@ -1,7 +1,10 @@
+import { PROTOCOL_VERSION, WORKER_NONCE_PARAM, WORKER_RPC_PATH } from "../shared/protocol.ts";
 import { hookConstructor } from "./constructors.ts";
 
 export interface WorkerBoot {
   runtimeUrl: string;
+  /** Announced to the service worker by the starting realm; the runtime import names it to claim that binding. */
+  nonce: string;
   scriptUrl: string;
   /** The worker's real URL, since its own location is a blob or proxy address. */
   base: string;
@@ -26,6 +29,10 @@ export interface WorkerGlobals {
 export interface WorkerStart {
   /** Missing when the runtime itself was loaded without one; such a realm cannot start workers. */
   runtimeUrl: string | undefined;
+  /** The proxy origin, where the service worker hears announcements. */
+  origin: string;
+  /** The realm's fetch, taken before any hook rewrites its URLs. */
+  fetch: ((input: string, init: object) => unknown) | undefined;
   partition: () => string;
   /** The real URL a blob worker runs under, since it has none of its own. */
   blobBase: () => string;
@@ -39,13 +46,18 @@ const apply = Reflect.apply;
 const toText = String;
 const NativeURL = URL;
 const protocolOf = Object.getOwnPropertyDescriptor(URL.prototype, "protocol")?.get as (this: URL) => string;
+const nativeCrypto = globalThis.crypto;
+const randomUUID = nativeCrypto.randomUUID;
+const replaceAll = String.prototype.replaceAll;
+const then = Promise.prototype.then;
 
 /** A worker's first script: it hands the runtime its boot values, then loads the runtime before the real script. */
 export function workerBootstrapCode(boot: WorkerBoot): string {
-  const runtime = quote(boot.runtimeUrl);
+  const runtime = quote(`${boot.runtimeUrl}?${WORKER_NONCE_PARAM}=${boot.nonce}`);
   const script = quote(boot.scriptUrl);
+  // Nested workers announce their own nonce, so the global keeps the plain runtime URL.
   const globals =
-    `self.__giriciBase=${quote(boot.base)};self.__giriciRuntime=${runtime};` +
+    `self.__giriciBase=${quote(boot.base)};self.__giriciRuntime=${quote(boot.runtimeUrl)};` +
     `self.__giriciPartition=${quote(boot.partition)};`;
   return boot.module
     ? `${globals}await import(${runtime});await import(${script});`
@@ -59,12 +71,25 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
   const createObjectURL = urls?.createObjectURL;
   const Blob = globals.Blob;
   const bootstrapUrl = (raw: string, options: unknown): string => {
-    if (!start.runtimeUrl || !createObjectURL || !Blob) {
+    if (!start.runtimeUrl || !start.fetch || !createObjectURL || !Blob) {
       throw new TypeError("Girici: no worker runtime to start this worker");
     }
     const source = isBlob(raw) ? { scriptUrl: raw, base: start.blobBase() } : start.resolve(raw);
+    const nonce = apply(replaceAll, apply(randomUUID, nativeCrypto, []), ["-", ""]) as string;
+    // Sent before the worker exists, so the service worker learns who started it before its first request.
+    const announced = apply(start.fetch, globals, [
+      start.origin + WORKER_RPC_PATH,
+      { method: "POST", body: quote({ v: PROTOCOL_VERSION, n: nonce }) },
+    ]);
+    // A failed announcement leaves the worker unbound, which the service worker treats as third-party.
+    try {
+      apply(then, announced, [undefined, () => {}]);
+    } catch {
+      // Not a promise, so there is no rejection to swallow.
+    }
     const code = workerBootstrapCode({
       runtimeUrl: start.runtimeUrl,
+      nonce,
       ...source,
       partition: start.partition(),
       module: (options as { type?: unknown } | null | undefined)?.type === "module",

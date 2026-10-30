@@ -1,6 +1,4 @@
-import { encodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
-import { TOP_SITE_QUERY } from "../shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 import { hookConstructor } from "./constructors.ts";
 import { createHelpers } from "./helpers.ts";
@@ -31,13 +29,6 @@ export interface WorkerScope {
   EventSource?: new (url: string, init?: unknown) => object;
   navigator?: {
     sendBeacon?: (url: string, data?: unknown) => boolean;
-    serviceWorker?: {
-      addEventListener(
-        type: "message",
-        listener: (event: { data: unknown; ports: ReadonlyArray<{ postMessage(message: unknown): void }> }) => void,
-      ): void;
-      startMessages?(): void;
-    };
   };
   Worker?: new (url: string, options?: unknown) => object;
   SharedWorker?: new (url: string, options?: unknown) => object;
@@ -54,6 +45,8 @@ export function installWorker(scope: WorkerScope): void {
   const boot = takeBoot(scope);
   const ctx = workerContext(scope, boot.base);
   const partition = boot.partition ?? prefixFor(ctx.realUrl().origin);
+  // Taken before hookFetch, which would send the announcement to the proxied site.
+  const nativeFetch = scope.fetch;
 
   Object.defineProperty(scope, "__g$", { value: workerHelpers(scope, ctx) });
   maskOrigin(scope, ctx);
@@ -65,6 +58,8 @@ export function installWorker(scope: WorkerScope): void {
   // Nested workers get this worker's runtime and partition; a blob one also keeps this worker's base.
   hookWorkers(scope, {
     runtimeUrl: boot.runtimeUrl,
+    origin: ctx.origin,
+    fetch: nativeFetch,
     partition: () => partition,
     blobBase: () => ctx.realBase().href,
     resolve: (raw) => {
@@ -73,7 +68,6 @@ export function installWorker(scope: WorkerScope): void {
     },
   });
   blockRealtime(scope);
-  answerTopQueries(scope, ctx);
 }
 
 /** The bootstrap leaves these on the global; they are removed so the worker's own script never sees them. */
@@ -175,35 +169,19 @@ function hookImportScripts(scope: WorkerScope, ctx: UrlContext): void {
     );
 }
 
-/** Requests a worker starts without fetch, such as XHR, still need its site; the service worker asks for it. */
-function answerTopQueries(scope: WorkerScope, ctx: UrlContext): void {
-  const container = scope.navigator?.serviceWorker;
-  if (!container) return;
-  container.addEventListener("message", (event) => {
-    if ((event.data as { type?: unknown } | null)?.type !== TOP_SITE_QUERY) return;
-    event.ports[0]?.postMessage({ top: ctx.realBase().href });
-  });
-  container.startMessages?.();
-}
-
 function hookFetch(scope: WorkerScope, ctx: UrlContext): void {
   const native = scope.fetch;
   const Request = scope.Request;
   if (!native) return;
   // Addresses are read once through the native getter, so a script's getter cannot answer differently the second time.
   const requestUrl = Object.getOwnPropertyDescriptor(Request?.prototype ?? {}, "url")?.get as () => string;
-  // The service worker sees this worker only as a blob: address, so its fetches name the real script as referrer.
-  const withOwnReferrer = (init: unknown): unknown => {
-    const options = (init ?? {}) as { referrer?: unknown };
-    return options.referrer === undefined ? { ...options, referrer: ctx.origin + encodeUrl(ctx.realBase()) } : init;
-  };
   scope.fetch = (input: unknown, init?: unknown) => {
     if (Request && input instanceof Request) {
       const address = apply(requestUrl, input, []);
       const url = ctx.toProxy(address);
-      return apply(native, scope, [url === address ? input : new Request(url, input), withOwnReferrer(init)]);
+      return apply(native, scope, [url === address ? input : new Request(url, input), init]);
     }
-    return apply(native, scope, [ctx.toProxy(toText(input)), withOwnReferrer(init)]);
+    return apply(native, scope, [ctx.toProxy(toText(input)), init]);
   };
 }
 

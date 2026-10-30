@@ -18,6 +18,9 @@ export const PROTOCOL_VERSION = 2;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
+/** A page announces each worker it starts here; the worker names the same nonce when it loads the runtime. */
+export const WORKER_RPC_PATH = "/_g/rpc/worker";
+export const WORKER_NONCE_PARAM = "n";
 // Only the service worker calls these two; pages never need them.
 export const POT_PATH = "/_g/pot";
 export const WS_SEAL_PATH = "/_g/ws-seal";

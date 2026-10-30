@@ -7,6 +7,7 @@ import {
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
   TOP_SITE_QUERY,
+  WORKER_RPC_PATH,
   WS_PREP_PATH,
   WS_SEAL_PATH,
   type CookieSnapshot,
@@ -19,14 +20,15 @@ import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
 import { errorResponse, forbiddenResponse } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { classifyRequest, isGuardedPath, realUrlOf, reservedAccess } from "./route.ts";
+import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
-import { FrameTops, isThirdParty, topSiteFor, type TopSiteDeps } from "./third-party.ts";
+import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
 import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
+import { readAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
@@ -59,10 +61,12 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
-const ui = new UiClients(createIdbClientRecords(), {
+const clientRecords = createIdbClientRecords();
+const ui = new UiClients(clientRecords, {
   liveIds: async () =>
     new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
 });
+const workers = new WorkerRegistry(clientRecords);
 // A UI tab can message the worker before the activation that records it has finished.
 let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
@@ -70,6 +74,7 @@ const topSiteDeps: TopSiteDeps = {
   origin: self.location.origin,
   windowClients: () => self.clients.matchAll({ type: "window" }),
   askTop,
+  workers: (clientId) => workers.identityOf(clientId),
 };
 // Tabs of the same site keep their document.cookie mirrors current through these messages.
 // One chain keeps deliveries in write order.
@@ -135,9 +140,15 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(fetch(event.request).catch(() => htmlError("connect", 502, url)));
     return;
   }
-  // The query is ignored: workers import the runtime with a nonce suffix.
+  // The query is ignored for serving: a worker's import carries the nonce its page announced.
   if (url.origin === self.location.origin && runtime.has(url.pathname)) {
+    const nonce = readNonce(url);
+    if (nonce && event.clientId) event.waitUntil(workers.claim(event.clientId, nonce));
     event.respondWith(runtime.response(url.pathname));
+    return;
+  }
+  if (url.origin === self.location.origin && url.pathname === WORKER_RPC_PATH && event.request.method === "POST") {
+    event.respondWith(handleWorkerRpc(event));
     return;
   }
   if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
@@ -191,8 +202,9 @@ async function handle(event: FetchEvent): Promise<Response> {
   const navigation = request.mode === "navigate";
   const client = await clientOf(event);
   const referrer = request.referrer || null;
-  // A worker stuck in importScripts cannot be looked up, but its requests still name it as the referrer.
-  const clientUrl = client?.url ?? (navigation ? null : referrer);
+  // A worker stuck in importScripts cannot be looked up, but its binding is known by its client ID.
+  const identity = await identityOf(event, client);
+  const clientUrl = requestClientUrl({ client, identity }, origin);
   const route = classifyRequest({ url: request.url, origin, navigation, clientUrl, referrer });
 
   switch (route.kind) {
@@ -274,6 +286,7 @@ async function cookiesBlocked(event: FetchEvent, client: Client | undefined, tar
       target,
       referrer: request.referrer || null,
       resultingClientId: event.resultingClientId ?? "",
+      clientId: event.clientId,
     },
     client,
     topSiteDeps,
@@ -315,7 +328,9 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
 async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await cookies.ready();
   const client = await clientOf(event);
-  const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
+  const identity = await identityOf(event, client);
+  const pageUrl =
+    client?.type === "window" ? realUrlOf(client.url, self.location.origin) : identity && new URL(identity.page);
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -349,11 +364,45 @@ async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   await cookies.ready();
   const client = await clientOf(event);
+  // Only a page's document.cookie calls here, and a worker cannot show which page it acts for.
+  if (client?.type !== "window") return new Response(null, { status: 403 });
   const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
   const blocked = pageUrl ? await cookiesBlocked(event, client, pageUrl) : false;
   const response = await rpc.handle(event.request, event.clientId, pageUrl, { blocked });
   event.waitUntil(forgetClosedClients());
   return response;
+}
+
+/**
+ * A page announces each worker it starts, and a worker its nested ones, before they exist. The caller's own place,
+ * never the body, decides the identity the nonce binds to.
+ */
+async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
+  let nonce: string | null;
+  try {
+    nonce = readAnnouncement(await event.request.json());
+  } catch {
+    nonce = null;
+  }
+  if (!nonce) return new Response(null, { status: 400 });
+  const client = await clientOf(event);
+  let identity: WorkerIdentity | null = null;
+  if (client?.type === "window") {
+    // A blank frame's address is about:blank, so its workers stay unbound.
+    const page = realUrlOf(client.url, self.location.origin);
+    if (page) identity = { page: page.href, top: await windowTop(client, topSiteDeps) };
+  } else {
+    identity = await identityOf(event, client);
+  }
+  if (!identity) return new Response(null, { status: 403 });
+  workers.announce(nonce, identity);
+  return new Response(null, { status: 204 });
+}
+
+/** The page that started the request's client, when that client is not a window. */
+async function identityOf(event: FetchEvent, client: Client | undefined): Promise<WorkerIdentity | null> {
+  if (client?.type === "window" || !event.clientId) return null;
+  return workers.identityOf(event.clientId);
 }
 
 /** Sequence numbers are kept per tab, so tabs that have closed are dropped once the list grows. */

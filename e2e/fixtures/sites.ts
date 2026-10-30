@@ -841,6 +841,46 @@ const ROUTES: Record<string, Record<string, Route>> = {
       'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));',
     ),
     "/worker-module.js": script("postMessage(self.location.href);"),
+    "/worker-kinds": html(
+      page(
+        "Worker kinds",
+        `<p id="module"></p><p id="blob"></p><p id="nested"></p>
+<script>
+  const show = (id, worker) => {
+    worker.onmessage = (e) => { document.getElementById(id).textContent = e.data || "none"; };
+    worker.onerror = () => { document.getElementById(id).textContent = "error"; };
+  };
+  const echo = 'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));';
+  show("module", new Worker("/worker-cookie.js", { type: "module" }));
+  show("blob", new Worker(URL.createObjectURL(new Blob([echo], { type: "text/javascript" }))));
+  show("nested", new Worker("/worker-nest-cookie.js"));
+</script>`,
+      ),
+    ),
+    "/worker-nest-cookie.js": script(
+      'const inner = new Worker("/worker-cookie.js");\ninner.onmessage = (e) => postMessage(e.data);\ninner.onerror = () => postMessage("error");',
+    ),
+    "/worker-forge": html(
+      page(
+        "Worker forge",
+        `<p id="worker"></p>
+<script>
+  const query = new URLSearchParams(location.search);
+  const proxy = query.get("proxy");
+  const blobOf = (code) => URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  const forge =
+    'fetch("https://site-b.test/cookie/echo", { credentials: "include", referrer: ' +
+    JSON.stringify(proxy + "/~/https/site-b.test/") +
+    ' }).then((r) => r.text()).then((t) => postMessage(t));';
+  // The nested form starts the forging worker from inside another worker.
+  const code = query.has("nested")
+    ? 'const inner = new Worker(' + JSON.stringify(blobOf(forge)) + '); inner.onmessage = (e) => postMessage(e.data);'
+    : forge;
+  const w = new Worker(blobOf(code));
+  w.onmessage = (e) => { document.getElementById("worker").textContent = e.data || "none"; };
+</script>`,
+      ),
+    ),
     "/doors-workers": html(DOORS_WORKERS),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(

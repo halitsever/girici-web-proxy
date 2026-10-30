@@ -1,6 +1,6 @@
 import { encodeUrl } from "../shared/codec.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
-import { hookWorkers, type WorkerGlobals } from "./worker-bootstrap.ts";
+import { hookWorkers, type WorkerGlobals, type WorkerStart } from "./worker-bootstrap.ts";
 
 declare const __GIRICI_WORKER__: string;
 
@@ -9,6 +9,9 @@ export function installWorkers(win: Realm, ctx: UrlContext, partition: () => str
   hookWorkers(win as unknown as WorkerGlobals, {
     // A blank frame's own location is about:blank, whose origin is "null"; the runtime lives on our origin.
     runtimeUrl: ctx.origin + __GIRICI_WORKER__,
+    origin: ctx.origin,
+    // This step runs before the network hooks, so this is still the native fetch.
+    fetch: win.fetch as WorkerStart["fetch"],
     partition,
     blobBase: () => ctx.realUrl().href,
     resolve: (raw) => {

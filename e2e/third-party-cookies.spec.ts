@@ -31,3 +31,29 @@ test("keeps cookies on a worker's requests to its own site", async ({ page }) =>
   await page.goto("/~/https/site-a.test/worker-cookie");
   await expect(page.locator("#worker")).toHaveText("sid=abc; theme=dark");
 });
+
+test("keeps cookies on module and blob workers' requests to their own site", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/login");
+  await expect(page.locator("#server")).toHaveText("sid=abc; theme=dark");
+  await page.goto("/~/https/site-a.test/worker-kinds");
+  for (const id of ["#module", "#blob"]) await expect(page.locator(id)).toHaveText("sid=abc; theme=dark");
+});
+
+test("keeps cookies on a nested worker's requests to its own site", async ({ page, browserName }) => {
+  test.skip(
+    browserName === "chromium",
+    "Chromium sends a nested dedicated worker's requests without a client ID, so it cannot be bound",
+  );
+  await openThroughUi(page, "https://site-a.test/cookie/login");
+  await expect(page.locator("#server")).toHaveText("sid=abc; theme=dark");
+  await page.goto("/~/https/site-a.test/worker-kinds");
+  await expect(page.locator("#nested")).toHaveText("sid=abc; theme=dark");
+});
+
+test("a worker cannot borrow another site's cookies with a forged referrer", async ({ page }) => {
+  await setThirdPartyCookie(page);
+  await page.goto("/~/https/site-a.test/worker-forge?proxy=http://127.0.0.1:41000");
+  await expect(page.locator("#worker")).toHaveText("none");
+  await page.goto("/~/https/site-a.test/worker-forge?proxy=http://127.0.0.1:41000&nested=1");
+  await expect(page.locator("#worker")).toHaveText("none");
+});

@@ -3,6 +3,7 @@ import {
   classifyRequest,
   isGuardedPath,
   isUiWindow,
+  requestClientUrl,
   reservedAccess,
   type Route,
   type RouteInput,
@@ -182,5 +183,28 @@ describe("guarded path variants", () => {
       expect(isGuardedPath(path), path).toBe(true);
     expect(reservedAccess("/_g/POT", call, ui, origin, known)).toBe("deny");
     expect(reservedAccess("/_g/Admin/settings", call, undefined, origin, known)).toBe("deny");
+  });
+});
+
+describe("requestClientUrl", () => {
+  const identity = { page: "https://site-a.test/app?x=1", top: "https://site-a.test" };
+  const window = { id: "t", type: "window", frameType: "top-level", url: page };
+  const worker = { id: "w", type: "worker", frameType: "none", url: `blob:${origin}/0a1b` };
+  const base = { client: undefined, identity: null };
+
+  it("takes a window's own address", () => {
+    expect(requestClientUrl({ ...base, client: window, identity }, origin)).toBe(page);
+  });
+
+  it("takes the proxy address of the page that started a worker", () => {
+    expect(requestClientUrl({ ...base, client: worker, identity }, origin)).toBe(
+      `${origin}/~/https/site-a.test/app?x=1`,
+    );
+    expect(requestClientUrl({ ...base, identity }, origin)).toBe(`${origin}/~/https/site-a.test/app?x=1`);
+  });
+
+  it("places no worker or clientless request that no page announced", () => {
+    expect(requestClientUrl({ ...base, client: worker }, origin)).toBeNull();
+    expect(requestClientUrl(base, origin)).toBeNull();
   });
 });
