@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { installCookies } from "../src/client/cookies.ts";
-import { encodeHeaderValue, type CookieSnapshot } from "../src/shared/protocol.ts";
+import { encodeHeaderValue, PROTOCOL_VERSION, type CookieSnapshot } from "../src/shared/protocol.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 
 type Channel = { onmessage: ((event: { data: unknown }) => void) | null };
@@ -49,17 +49,30 @@ describe("installCookies", () => {
     expect(cb.currentSeq()).toBe(0);
   });
 
+  it("posts cookie writes to an absolute RPC URL, so blob documents can reach it", () => {
+    const urls: unknown[] = [];
+    const { win, ctx, document } = makeRealm();
+    (win as unknown as { fetch: unknown }).fetch = (url: unknown) => {
+      urls.push(url);
+      return Promise.resolve({ status: 200, json: () => Promise.resolve({ cookies: [] }) });
+    };
+    (ctx as { origin: string }).origin = "http://proxy.test";
+    installCookies(win, ctx, { v: 1, cookies: [] });
+    document.cookie = "a=1";
+    expect(urls[0]).toBe("http://proxy.test/_g/rpc/cookie");
+  });
+
   it("applies cookies that other tabs set", () => {
     const { win, ctx, document, channels } = makeRealm();
     installCookies(win, ctx, { v: 1, cookies: [] });
-    channels[0]?.onmessage?.({ data: { type: "cookies", v: 1, changes: [fromOtherTab] } });
+    channels[0]?.onmessage?.({ data: { type: "cookies", v: PROTOCOL_VERSION, changes: [fromOtherTab] } });
     expect(document.cookie).toBe("t=1");
   });
 
   it("shows no cookies at all in a frame whose cookies are blocked", () => {
     const { win, ctx, document, channels } = makeRealm();
     const bridge = installCookies(win, ctx, { v: 1, cookies: [], cookiesBlocked: true });
-    channels[0]?.onmessage?.({ data: { type: "cookies", v: 1, changes: [fromOtherTab] } });
+    channels[0]?.onmessage?.({ data: { type: "cookies", v: PROTOCOL_VERSION, changes: [fromOtherTab] } });
     bridge.applySync(encodeHeaderValue(JSON.stringify([fromOtherTab])));
     document.cookie = "own=1";
     expect(document.cookie).toBe("");

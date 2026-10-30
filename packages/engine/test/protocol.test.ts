@@ -17,7 +17,7 @@ describe("cookie protocol", () => {
       "x-girici-cseq",
       "x-girici-cookie-sync",
     ]);
-    expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, BROADCAST_CHANNEL]).toEqual([1, "/_g/rpc/cookie", "__girici"]);
+    expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, BROADCAST_CHANNEL]).toEqual([2, "/_g/rpc/cookie", "__girici"]);
   });
 });
 

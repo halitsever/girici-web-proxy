@@ -24,12 +24,12 @@ import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, installToolbar, shouldShowToolbar } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
-import { createUrlContext, type InheritedContext, type Realm } from "./url-context.ts";
+import { createUrlContext, type Realm } from "./url-context.ts";
 
-export function install(win: Realm, config: ClientConfig, inherited?: InheritedContext): void {
+export function install(win: Realm, config: ClientConfig, clientUrl: string): void {
   // A realm is set up once; a child frame that already carries the runtime is left alone.
   if (Object.getOwnPropertyDescriptor(win, "__g$")) return;
-  const ctx = createUrlContext(win, inherited);
+  const ctx = createUrlContext(win, config.inherit);
   const toolbarNatives = captureToolbarNatives(win);
   const nativeLocation = win.location;
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
@@ -112,14 +112,14 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
-    ["frames", () => installFrames(win, ctx, config, install)],
+    ["frames", () => installFrames(win, ctx, config, clientUrl, install)],
     [
       "toolbar",
       () => {
         const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
-        if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: inherited !== undefined, prefs })) return;
+        if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: config.inherit !== undefined, prefs })) return;
         installToolbar(win, ctx, toolbarNatives, {
-          assign: (path) => nativeLocation.assign(path),
+          assign: (path) => nativeLocation.assign(new URL(path, ctx.origin).href),
           reload: () => nativeLocation.reload(),
         });
       },

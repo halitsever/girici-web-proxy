@@ -52,7 +52,7 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     if (!blocked) mirror = applyCookieChanges(mirror, [cookie], Date.now());
     const mySeq = ++seq;
     inflight++;
-    const request = nativeFetch(COOKIE_RPC_PATH, {
+    const request = nativeFetch(ctx.origin + COOKIE_RPC_PATH, {
       method: "POST",
       body: JSON.stringify({ v: PROTOCOL_VERSION, seq: mySeq, cookie: text }),
     })

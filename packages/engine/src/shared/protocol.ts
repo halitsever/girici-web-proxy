@@ -14,7 +14,7 @@ export const HEADER = {
 } as const;
 
 /** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
@@ -59,9 +59,21 @@ export type SiteDataRequest =
   | { v: number; op: "clear"; site?: string }
   | { v: number; op: "clear-all" };
 
+/** What a blank or srcdoc frame inherits from its parent, since its own origin is opaque and it has no proxy URL. */
+export interface InheritedContext {
+  /** The proxy origin. */
+  origin: string;
+  /** The real URL of the parent page. */
+  base: string;
+}
+
 export interface ClientConfig {
   v: number;
   cookies: CookieSnapshot[];
+  /** Set for frames and documents that cannot derive their context from their own address. */
+  inherit?: InheritedContext;
+  /** The page's registrable site, for storage partitioning. */
+  site?: string;
   /** Set for a third-party frame while blocking is on: its document.cookie stays empty whatever other tabs do. */
   cookiesBlocked?: boolean;
 }

@@ -25,6 +25,16 @@ function context(overrides: Partial<PageContext> = {}): PageContext {
 }
 
 describe("buildPageResponse", () => {
+  it("injects an absolute runtime URL and the page's site", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      context({ navigation: true, destination: "document", target: new URL("https://www.site-a.test/p") }),
+    );
+    const html = await res.text();
+    expect(html).toContain(`<script src="${origin}/_g/client.test.js"`);
+    expect(html).toContain("&quot;site&quot;:&quot;https://site-a.test&quot;");
+  });
+
   it("rebuilds the upstream response from the envelope", async () => {
     const res = await buildPageResponse(
       upstream(
@@ -145,7 +155,7 @@ describe("buildPageResponse", () => {
     );
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(await res.text()).toBe(
-      '<!doctype html><head><script src="/_g/client.test.js" data-girici="{&quot;v&quot;:1,&quot;cookies&quot;:[]}"></script><title>t</title><a href="/~/https/site-b.test/">b</a>',
+      '<!doctype html><head><script src="http://127.0.0.1:41000/_g/client.test.js" data-girici="{&quot;v&quot;:2,&quot;cookies&quot;:[],&quot;site&quot;:&quot;https://site-a.test&quot;}"></script><title>t</title><a href="/~/https/site-b.test/">b</a>',
     );
   });
 

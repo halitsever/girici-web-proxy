@@ -1,13 +1,14 @@
 import { decodeUrl } from "../shared/codec.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
-import type { InheritedContext, Realm, UrlContext } from "./url-context.ts";
+import type { Realm, UrlContext } from "./url-context.ts";
 
 /** Same-origin child frames (blank, srcdoc, dynamic) get the runtime the first time the page reaches into them. */
 export function installFrames(
   win: Realm,
   ctx: UrlContext,
   config: ClientConfig,
-  install: (win: Realm, config: ClientConfig, inherited?: InheritedContext) => void,
+  clientUrl: string,
+  install: (win: Realm, config: ClientConfig, clientUrl: string) => void,
 ): void {
   const proto = win.HTMLIFrameElement?.prototype;
   if (!proto) return;
@@ -30,7 +31,7 @@ export function installFrames(
       const frameWin = (value as Document | null)?.defaultView ?? (value as Window | null);
       // A blank or srcdoc frame shares our origin and inherits this page's real base.
       if (frameWin && frameWin !== (win as Window) && !loadsProxiedPage(frame, frameWin)) {
-        install(frameWin as Realm, config, { origin: ctx.origin, base: ctx.realUrl().href });
+        install(frameWin as Realm, { ...config, inherit: { origin: ctx.origin, base: ctx.realUrl().href } }, clientUrl);
       }
     } catch {
       // A cross-origin frame throws on access and cannot be reached anyway.

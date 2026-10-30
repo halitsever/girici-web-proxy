@@ -2,18 +2,20 @@ import { rewriteCss } from "../rewrite/css.ts";
 import { rewriteHtml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { rewriteRefresh } from "../rewrite/refresh.ts";
+import { clientTag } from "../shared/client-tag.ts";
 import { encodeUrl } from "../shared/codec.ts";
 import {
   encodeHeaderValue,
   HEADER,
   LOGIN_PATH,
   PROTOCOL_VERSION,
+  type ClientConfig,
   type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { decodeText, rewriteKind, type BodyKind } from "./body.ts";
 import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
-import { clientTag } from "./client-tag.ts";
+import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse } from "./error-page.ts";
 import type { TransportResult } from "./transport.ts";
 
@@ -83,8 +85,13 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
 async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, validators: Validators): Promise<string> {
   switch (kind) {
     case "html": {
-      const config = { v: PROTOCOL_VERSION, cookies: await ctx.cookies() };
-      const inject = clientTag(ctx.clientScript, ctx.cookiesBlocked ? { ...config, cookiesBlocked: true } : config);
+      const config: ClientConfig = {
+        v: PROTOCOL_VERSION,
+        cookies: await ctx.cookies(),
+        site: schemefulSite(ctx.target),
+      };
+      if (ctx.cookiesBlocked) config.cookiesBlocked = true;
+      const inject = clientTag(new URL(ctx.clientScript, ctx.origin).href, config);
       return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
     }
     case "css":
