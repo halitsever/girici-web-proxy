@@ -1,4 +1,5 @@
 import { decodeUrl } from "../shared/codec.ts";
+import { prefixFor } from "../shared/partition.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
@@ -86,6 +87,7 @@ export function install(win: Realm, config: ClientConfig, clientUrl: string): vo
     return fake;
   };
   const rewrite = createRewriteBridge(ctx);
+  const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
     nativeLocation,
     fakeLocation,
@@ -117,7 +119,7 @@ export function install(win: Realm, config: ClientConfig, clientUrl: string): vo
     ["attributes", () => installAttributes(win, ctx)],
     ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
-    ["workers", () => installWorkers(win, ctx)],
+    ["workers", () => installWorkers(win, ctx, partition)],
     ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container)))],
     ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke))],
     ["top site", () => listeners.push(installTopSiteResponder(win, container))],
@@ -126,7 +128,7 @@ export function install(win: Realm, config: ClientConfig, clientUrl: string): vo
     ["websocket", () => installWebSocket(win, ctx)],
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
-    ["storage isolation", () => installStorageIsolation(win, ctx)],
+    ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
     ["messaging", () => installMessaging(win, ctx, invoke)],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],

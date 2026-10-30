@@ -247,6 +247,70 @@ const OLD_CHANNEL = page(
 </script>`,
 );
 
+/** Source of `girProbe(scope)`, which reports whether a realm reaches Girici's own storage or another site's channel. */
+export const PROBE = `async function girProbe(scope) {
+  const jar = await new Promise((resolve) => {
+    const request = scope.indexedDB.open("__girici");
+    // Aborting the upgrade stops the probe from creating a database it did not find.
+    request.onupgradeneeded = () => request.transaction.abort();
+    request.onsuccess = () => {
+      const found = request.result.objectStoreNames.contains("cookies");
+      request.result.close();
+      resolve(found);
+    };
+    request.onerror = (event) => {
+      event.preventDefault();
+      resolve(false);
+    };
+  });
+  const engineCaches = (await scope.caches.keys()).some((name) => name.startsWith("girici:"));
+  const heard = await new Promise((resolve) => {
+    const channel = new scope.BroadcastChannel("__g|https://site-b.test|probe");
+    const timer = setTimeout(() => {
+      channel.close();
+      resolve(false);
+    }, 1500);
+    channel.onmessage = () => {
+      clearTimeout(timer);
+      channel.close();
+      resolve(true);
+    };
+  });
+  return { jar, engineCaches, heard };
+}`;
+
+const PROBE_WORKER = `${PROBE}\ngirProbe(self).then((result) => postMessage(result));`;
+
+const DOORS_WORKERS = page(
+  "Doors workers",
+  `<button id="start">start</button><pre id="results"></pre>
+<script>
+  const probeUrl = () => URL.createObjectURL(new Blob([${JSON.stringify(PROBE_WORKER)}], { type: "text/javascript" }));
+  const answer = (worker) =>
+    new Promise((resolve) => {
+      worker.onmessage = (event) => resolve(event.data);
+      worker.onerror = () => resolve("error");
+    });
+  const listen = (channel) =>
+    new Promise((resolve) => {
+      channel.onmessage = () => resolve(true);
+      setTimeout(() => resolve(false), 1500);
+    });
+  document.getElementById("start").onclick = async () => {
+    const worker = new Worker(probeUrl());
+    const LeakedWorker = Object.getPrototypeOf(worker).constructor;
+    const LeakedChannel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
+    const [own, nested, leakedWorker, leakedChannel] = await Promise.all([
+      answer(worker),
+      answer(new Worker("/nest.js")),
+      answer(new LeakedWorker(probeUrl())),
+      listen(new LeakedChannel("__g|https://site-b.test|probe")),
+    ]);
+    document.getElementById("results").textContent = JSON.stringify({ worker: own, nested, leakedWorker, leakedChannel });
+  };
+</script>`,
+);
+
 const api: Route = (req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ method: req.method, origin: req.headers.origin ?? null }));
@@ -777,6 +841,11 @@ const ROUTES: Record<string, Record<string, Route>> = {
       'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));',
     ),
     "/worker-module.js": script("postMessage(self.location.href);"),
+    "/doors-workers": html(DOORS_WORKERS),
+    "/probe-worker.js": script(PROBE_WORKER),
+    "/nest.js": script(
+      'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
+    ),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
@@ -798,6 +867,12 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
     "/reuse-child": html(REUSE_CHILD),
+    "/broadcast": html(
+      page(
+        "Broadcast",
+        `<script>const channel = new BroadcastChannel("probe"); setInterval(() => channel.postMessage("x"), 200);</script>`,
+      ),
+    ),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

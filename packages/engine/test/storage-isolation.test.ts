@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { installStorageIsolation } from "../src/client/storage-isolation.ts";
+import { prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 
 function ctxFor(origin: string): UrlContext {
@@ -65,7 +66,7 @@ describe("installStorageIsolation", () => {
       cookieStore: store,
       document: { cookie: "session=abc; theme=dark" },
     } as unknown as Realm;
-    installStorageIsolation(win, ctxFor("https://site.test"));
+    installStorageIsolation(win, ctxFor("https://site.test"), () => prefixFor("https://site.test"));
     const get = store.get as (name: unknown) => Promise<{ name: string; value: string } | null>;
     expect(await get("theme")).toEqual({ name: "theme", value: "dark" });
     expect(await get({ name: "session" })).toEqual({ name: "session", value: "abc" });
@@ -77,18 +78,28 @@ describe("installStorageIsolation", () => {
       ["__g|https://site-b.test|c", new Map([["/x", "B"]])],
     ]);
     const win = fakeCachesWin(backing);
-    installStorageIsolation(win, ctxFor("https://site-b.test"));
+    installStorageIsolation(win, ctxFor("https://site-b.test"), () => prefixFor("https://site-b.test"));
     expect(await win.caches.match("/x")).toBe("B");
   });
 
   it("prefixes IndexedDB and Cache names by origin and strips them back", async () => {
     const opened: string[] = [];
     const win = fakeStorageWin(opened, ["__g|https://site.test|db1", "other"], ["__g|https://site.test|c1", "x"]);
-    installStorageIsolation(win, ctxFor("https://site.test"));
+    installStorageIsolation(win, ctxFor("https://site.test"), () => prefixFor("https://site.test"));
     win.indexedDB.open("db1");
     void win.caches.open("c1");
     expect(opened).toEqual(["idb:__g|https://site.test|db1", "cache:__g|https://site.test|c1"]);
     expect(await win.indexedDB.databases()).toEqual([{ name: "db1" }]);
     expect(await win.caches.keys()).toEqual(["c1"]);
+  });
+
+  it("uses the partition it is given", async () => {
+    const opened: string[] = [];
+    const partition = "__g^|https://top.test|https://a.test|";
+    const win = fakeStorageWin(opened, [`${partition}db1`, "__g|https://a.test|db2"], []);
+    installStorageIsolation(win, ctxFor("https://a.test"), () => partition);
+    win.indexedDB.open("db1");
+    expect(opened).toEqual([`idb:${partition}db1`]);
+    expect(await win.indexedDB.databases()).toEqual([{ name: "db1" }]);
   });
 });

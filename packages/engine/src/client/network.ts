@@ -1,4 +1,5 @@
 import { HEADER } from "../shared/protocol.ts";
+import { hookConstructor } from "./constructors.ts";
 import type { CookieBridge } from "./cookies.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
@@ -65,10 +66,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   };
   maskNative(navigatorProto.sendBeacon, nativeBeacon);
 
-  win.EventSource = new Proxy(win.EventSource, {
-    construct: (target, args: [string | URL, EventSourceInit?], newTarget: NewableFunction) =>
-      Reflect.construct(target, [ctx.toProxy(String(args[0])), args[1]], newTarget) as object,
-  });
+  win.EventSource = hookConstructor(win.EventSource, (input) => [ctx.toProxy(String(input[0])), ...input.slice(1)]);
 }
 
 function wrapGetter(proto: object, name: string, read: (value: string) => string): void {
