@@ -22,16 +22,32 @@ test("replaces a tampered runtime after the service worker restarts", async ({ p
   ).not.toContain("__tampered");
 });
 
-test("serves the same verified runtime whatever query string asks for it", async ({ page }) => {
+test("serves the same verified runtime whatever query string asks for it", async ({ page, browserName }) => {
+  test.skip(
+    browserName === "firefox",
+    "Firefox leaves the Girici home uncontrolled, so the service worker never answers",
+  );
   await openThroughUi(page, "https://site-a.test/runtime?x=1#h");
   // The proxied page's fetch is rewritten to the site, so ask from the Girici origin itself.
   await page.goto("/");
+  // Only the service worker answers without the static handler's cache-control and etag.
   const [plain, withQuery] = await page.evaluate(async () => {
     const key = (await caches.keys()).find((k) => k.startsWith("girici:/_g/client."))!;
     const path = key.slice("girici:".length);
-    const read = async (url: string) => (await fetch(url)).text();
+    const read = async (url: string) => {
+      const res = await fetch(url);
+      return {
+        text: await res.text(),
+        type: res.headers.get("content-type"),
+        cacheControl: res.headers.get("cache-control"),
+        etag: res.headers.get("etag"),
+      };
+    };
     return [await read(path), await read(`${path}?n=abc`)];
   });
-  expect(plain.length).toBeGreaterThan(1000);
-  expect(withQuery).toBe(plain);
+  expect(plain.text.length).toBeGreaterThan(1000);
+  expect(withQuery).toEqual(plain);
+  expect(plain.type).toBe("text/javascript; charset=utf-8");
+  expect(plain.cacheControl).toBeNull();
+  expect(plain.etag).toBeNull();
 });
