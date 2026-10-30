@@ -58,6 +58,26 @@ describe("createPartitionedStorage", () => {
     expect(a.getItem("n")).toBe("5");
   });
 
+  it("never hands the raw store to a replaced Storage method", () => {
+    const native = new MemoryStorage();
+    native.setItem("__g|https://b.test|secret", "b");
+    const a = createPartitionedStorage(native, "https://a.test");
+    const proto = MemoryStorage.prototype as unknown as Record<string, unknown>;
+    const original = proto.getItem;
+    const seen: unknown[] = [];
+    proto.getItem = function (this: unknown) {
+      seen.push(this);
+      return null;
+    };
+    try {
+      expect(a.getItem("x")).toBeNull();
+      expect((a as unknown as Record<string, unknown>).x).toBeUndefined();
+    } finally {
+      proto.getItem = original;
+    }
+    expect(seen).toEqual([]);
+  });
+
   it("ignores proxy traps a page adds to Object.prototype", () => {
     const a = createPartitionedStorage(new MemoryStorage(), "https://a.test");
     const proto = Object.prototype as Record<string, unknown>;
