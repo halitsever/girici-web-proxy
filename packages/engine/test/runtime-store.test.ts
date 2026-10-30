@@ -15,7 +15,7 @@ class FakeCache implements CacheLike {
   }
 }
 
-async function storeFor(options: { network: Uint8Array; cached?: string }) {
+async function storeFor(options: { network: Uint8Array<ArrayBuffer>; cached?: string }) {
   const cache = new FakeCache();
   if (options.cached !== undefined) cache.store.set(path, options.cached);
   let count = 0;

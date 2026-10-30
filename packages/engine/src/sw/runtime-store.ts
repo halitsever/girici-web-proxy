@@ -24,11 +24,10 @@ export async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
 export class RuntimeStore {
   readonly #expected: Map<string, string>;
   readonly #memory = new Map<string, ArrayBuffer>();
+  readonly #deps: RuntimeStoreDeps;
 
-  constructor(
-    files: readonly RuntimeFile[],
-    private readonly deps: RuntimeStoreDeps,
-  ) {
+  constructor(files: readonly RuntimeFile[], deps: RuntimeStoreDeps) {
+    this.#deps = deps;
     this.#expected = new Map(files.map((file) => [file.path, file.sha256]));
   }
 
@@ -71,12 +70,12 @@ export class RuntimeStore {
   }
 
   async #verified(path: string, bytes: ArrayBuffer): Promise<boolean> {
-    return (await this.deps.digest(bytes)) === this.#expected.get(path);
+    return (await this.#deps.digest(bytes)) === this.#expected.get(path);
   }
 
   async #fromNetwork(path: string): Promise<ArrayBuffer | null> {
     try {
-      const response = await this.deps.fetch(path);
+      const response = await this.#deps.fetch(path);
       if (!response.ok) return null;
       const bytes = await response.arrayBuffer();
       return (await this.#verified(path, bytes)) ? bytes : null;
@@ -87,7 +86,7 @@ export class RuntimeStore {
 
   async #fromCache(path: string): Promise<ArrayBuffer | null> {
     try {
-      const response = await (await this.deps.open()).match(path);
+      const response = await (await this.#deps.open()).match(path);
       if (!response) return null;
       const bytes = await response.arrayBuffer();
       return (await this.#verified(path, bytes)) ? bytes : null;
@@ -98,7 +97,7 @@ export class RuntimeStore {
 
   async #store(path: string, bytes: ArrayBuffer): Promise<void> {
     try {
-      await (await this.deps.open()).put(path, new Response(bytes.slice(0)));
+      await (await this.#deps.open()).put(path, new Response(bytes.slice(0)));
     } catch {
       // The copy in memory is enough for this worker's lifetime.
     }
