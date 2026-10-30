@@ -23,10 +23,14 @@ export function rewriteKind(
   contentType: string | null,
 ): BodyKind | null {
   const type = mimeOf(contentType) ?? "";
-  if (navigation || DOCUMENT_DESTINATIONS.has(destination)) return type === "text/html" ? "html" : null;
+  if (isDocumentLoad(destination, navigation)) return type === "text/html" ? "html" : null;
   if (destination === "style") return type === "" || type.includes("css") ? "css" : null;
   if (destination === "script") return type === "" || /(?:java|ecma)script/.test(type) ? "js" : null;
   return null;
+}
+
+export function isDocumentLoad(destination: RequestDestination, navigation: boolean): boolean {
+  return navigation || DOCUMENT_DESTINATIONS.has(destination);
 }
 
 /** Documents the browser runs on our origin that no rewriter touched, so they need a sandbox. PDFs and media keep their viewers. */
@@ -35,7 +39,7 @@ export function sandboxesDocument(
   navigation: boolean,
   contentType: string | null,
 ): boolean {
-  if (!navigation && !DOCUMENT_DESTINATIONS.has(destination)) return false;
+  if (!isDocumentLoad(destination, navigation)) return false;
   if (rewriteKind(destination, navigation, contentType)) return false;
   const type = mimeOf(contentType) ?? "";
   return !(type === "application/pdf" || type.startsWith("audio/") || type.startsWith("video/"));

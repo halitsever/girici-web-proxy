@@ -59,6 +59,24 @@ describe("buildPageResponse", () => {
     expect(res.headers.get("content-security-policy")).toBeNull();
   });
 
+  it("sends an exempt navigation with only the type that exempted it", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", 'text/html; x="a, video/mp4; "']]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("video/mp4");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("sends a sandboxed navigation with the single parsed type", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/plain; charset=x, text/xml"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/xml");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+  });
+
   it("leaves subresources and media without a sandbox", async () => {
     const image = await buildPageResponse(
       upstream([["content-type", "image/svg+xml"]]),

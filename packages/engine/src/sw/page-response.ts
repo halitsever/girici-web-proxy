@@ -13,7 +13,7 @@ import {
   type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
-import { decodeText, mimeOf, rewriteKind, sandboxesDocument, type BodyKind } from "./body.ts";
+import { decodeText, isDocumentLoad, mimeOf, rewriteKind, sandboxesDocument, type BodyKind } from "./body.ts";
 import { cacheKey, readRewritten, writeRewritten, REWRITE_CACHE, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
@@ -72,8 +72,12 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     if (!encoded && length) headers.set("content-length", length);
     if (sandboxesDocument(ctx.destination, ctx.navigation, contentType)) {
       for (const [name, value] of Object.entries(inertHeaders())) headers.set(name, value);
-      // One parsed type, so every reader agrees. With nosniff, a missing type leaves some browsers an empty document.
+      // With nosniff, a missing type leaves some browsers an empty document.
       headers.set("content-type", mimeOf(contentType) ?? "text/plain; charset=utf-8");
+    } else if (isDocumentLoad(ctx.destination, ctx.navigation)) {
+      // The browser parses the header on its own, so it may only ever see the one type decided here.
+      const mime = mimeOf(contentType);
+      if (mime) headers.set("content-type", mime);
     }
     return new Response(body, { status, headers });
   }
