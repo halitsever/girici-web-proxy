@@ -40,8 +40,20 @@ test("renews a frame window the page touched before setting its src", async ({ p
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
     cookie: "",
     href: "https://site-b.test/reuse-child",
+    reused: true,
     fromChild: true,
   });
+});
+
+test("keeps cookie writes and top-site answers working in renewed same-site frames", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/reuse-same");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  for (const key of ["told", "asked"]) {
+    expect(out[key], key).toMatchObject({ key, reused: true, fromChild: true });
+    // The write right before the fetch must already be in the jar, and so must the parent's.
+    expect(out[key].echo.split("; "), key).toEqual(expect.arrayContaining(["a=1", `${key}=1`]));
+  }
 });
 
 test("denies notifications", async ({ page }) => {

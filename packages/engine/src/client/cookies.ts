@@ -28,7 +28,8 @@ export function installCookies(
   win: Realm,
   ctx: UrlContext,
   config: ClientConfig,
-  container: ServiceWorkerContainer | null,
+  container: () => ServiceWorkerContainer | null,
+  reload: () => void,
 ): CookieBridge {
   let mirror = [...config.cookies];
   let blocked = config.cookiesBlocked === true;
@@ -71,7 +72,7 @@ export function installCookies(
       .then(async (response) => {
         if (response.status === 409) {
           // The worker updated under this page; one reload brings a matching runtime.
-          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) win.location.reload();
+          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
           return;
         }
         const body = (await response.json()) as { cookies?: CookieSnapshot[] };
@@ -98,10 +99,11 @@ export function installCookies(
     if (type === COOKIE_MESSAGE && v === PROTOCOL_VERSION && Array.isArray(changes)) apply(changes as CookieSnapshot[]);
   };
   const listen = () => {
-    if (!container) return;
-    container.addEventListener("message", onMessage);
+    const current = container();
+    if (!current) return;
+    current.addEventListener("message", onMessage);
     // Messages wait in a queue until this runs.
-    container.startMessages();
+    current.startMessages();
   };
   listen();
 

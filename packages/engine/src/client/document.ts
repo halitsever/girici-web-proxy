@@ -2,7 +2,8 @@ import { decodeUrl } from "../shared/codec.ts";
 import { refererFor } from "../shared/referrer.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
-export function installDocument(win: Realm, ctx: UrlContext): void {
+/** Returns the reset a renewed document needs: the domain one document set must not carry over to the next. */
+export function installDocument(win: Realm, ctx: UrlContext): () => void {
   const documentProto = win.Document.prototype;
   const nativeReferrer = getter(documentProto, "referrer");
   const nativeBaseUri = getter(win.Node.prototype, "baseURI");
@@ -43,6 +44,9 @@ export function installDocument(win: Realm, ctx: UrlContext): void {
     },
   });
   Object.defineProperty(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });
+  return () => {
+    domain = null;
+  };
 }
 
 function getter(proto: object, name: string): (this: unknown) => unknown {

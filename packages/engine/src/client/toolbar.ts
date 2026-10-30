@@ -2,6 +2,7 @@ import { PROTOCOL_VERSION, SITE_DATA_RPC_PATH } from "../shared/protocol.ts";
 import { captureSiteDataEnv, clearPartitions, type SiteDataEnv } from "../shared/site-data.ts";
 import { classifyInput } from "../shared/target.ts";
 import { readToolbarPrefs, UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
+import type { DocumentListeners } from "./renewal.ts";
 import { TOOLBAR_CSS, TOOLBAR_HTML } from "./toolbar-view.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -10,6 +11,8 @@ export const TOOLBAR_TAG = "girici-bar";
 const MAX_REATTACH = 3;
 const CONFIRM_TEXT = "Clear cookies and storage for this site?";
 const KEY_EVENTS = ["keydown", "keyup", "keypress"] as const;
+// Taken at load: listen() runs again on renewal, after page code may have replaced it.
+const apply = Reflect.apply;
 
 export interface ToolbarNatives {
   isTop: boolean;
@@ -19,6 +22,11 @@ export interface ToolbarNatives {
   fetch: typeof fetch;
   /** Storage as it was before storage isolation wrapped it, so clearing reaches every partition by name. */
   siteData: SiteDataEnv;
+}
+
+/** One set of window key listeners for every document of a window, pointed at the toolbar shown now, if any. */
+export interface ToolbarKeys extends DocumentListeners {
+  use(handler: ((event: Event) => void) | null): void;
 }
 
 export interface ToolbarNavigation {
@@ -52,12 +60,33 @@ export function captureToolbarNatives(win: Realm): ToolbarNatives {
   };
 }
 
+/** Registered on window in the capture phase before any page script runs, so no page shortcut sees the toolbar's keys. */
+export function createToolbarKeys(win: Realm): ToolbarKeys {
+  const addListener = win.addEventListener;
+  let current: ((event: Event) => void) | null = null;
+  const onKey = (event: Event) => current?.(event);
+  return {
+    use: (handler) => {
+      current = handler;
+    },
+    listen: () => {
+      for (const type of KEY_EVENTS) apply(addListener, win, [type, onKey, true]);
+    },
+  };
+}
+
 export function shouldShowToolbar(input: { isTop: boolean; inherited: boolean; prefs: string | null }): boolean {
   return input.isTop && !input.inherited && readToolbarPrefs(input.prefs).toolbar;
 }
 
 /** A small overlay at the bottom-left corner; it never moves the page's own layout. */
-export function installToolbar(win: Realm, ctx: UrlContext, natives: ToolbarNatives, nav: ToolbarNavigation): void {
+export function installToolbar(
+  win: Realm,
+  ctx: UrlContext,
+  natives: ToolbarNatives,
+  nav: ToolbarNavigation,
+  keys: ToolbarKeys,
+): void {
   const doc = win.document;
   const prefs = readToolbarPrefs(natives.storage?.getItem(UI_SETTINGS_KEY) ?? null);
   const host = doc.createElement(TOOLBAR_TAG);
@@ -140,21 +169,14 @@ export function installToolbar(win: Realm, ctx: UrlContext, natives: ToolbarNati
     }
   });
   address.addEventListener("input", () => address.removeAttribute("aria-invalid"));
-  // Registered on window in the capture phase before any page script runs, so no page shortcut sees these keys.
-  for (const type of KEY_EVENTS) {
-    win.addEventListener(
-      type,
-      (event) => {
-        if (!event.composedPath().includes(host)) return;
-        event.stopImmediatePropagation();
-        if (event.type !== "keydown") return;
-        const { key } = event as KeyboardEvent;
-        if (key === "Escape" && handle.hidden) collapse();
-        else if (key === "Enter" && event.composedPath()[0] === address) submit();
-      },
-      true,
-    );
-  }
+  keys.use((event) => {
+    if (!event.composedPath().includes(host)) return;
+    event.stopImmediatePropagation();
+    if (event.type !== "keydown") return;
+    const { key } = event as KeyboardEvent;
+    if (key === "Escape" && handle.hidden) collapse();
+    else if (key === "Enter" && event.composedPath()[0] === address) submit();
+  });
 
   let reattached = 0;
   const start = () => {

@@ -69,6 +69,7 @@ const NAV = page(
 <form id="post" method="post" action="https://site-a.test/echo"><input name="q" value="posted"><button id="post-go">Go</button></form>
 <form method="post" action="/redirect-307"><input name="q" value="kept"><button id="post-307-go">Go</button></form>
 <form method="post" action="/redirect-303"><input name="q" value="dropped"><button id="post-303-go">Go</button></form>
+<button id="blank-popup" onclick="const w = window.open(); w.location = 'https://site-b.test/';">blank popup</button>
 <button id="blank-frame" onclick="const f = document.createElement('iframe'); f.id = 'blank'; document.body.append(f); f.contentWindow.location.href = 'https://site-b.test/';">blank frame</button>
 <iframe id="frame" src="https://site-b.test/frame"></iframe>`,
 );
@@ -280,6 +281,121 @@ export const PROBE = `async function girProbe(scope) {
 }`;
 
 const PROBE_WORKER = `${PROBE}\ngirProbe(self).then((result) => postMessage(result));`;
+
+// Each case makes one window and checks it at once through a raw index, which no hook sees.
+const DOORS_FRAMES = page(
+  "Doors frames",
+  `<iframe id="parsed"></iframe>
+<script>const parsedHooked = Object.getOwnPropertyDescriptor(frames[0], "__g$") !== undefined;</script>
+<button id="start">start</button><pre id="results"></pre>
+<script>
+  ${PROBE}
+  const hookedOf = (w) => Boolean(w) && Object.getOwnPropertyDescriptor(w, "__g$") !== undefined;
+  const frame = () => document.createElement("iframe");
+  // A fresh empty element at the end of body, so a frame made in it is the last window.
+  const box = () => document.getElementById("slot").appendChild(document.createElement("div"));
+  const last = () => frames[frames.length - 1];
+  const inBox = (insert) => {
+    insert(box(), frame());
+    return last();
+  };
+  // A shadow tree's frames are not indexed in every browser; one that is must be hooked.
+  const inShadow = (insert) => {
+    const before = frames.length;
+    insert(box().attachShadow({ mode: "open" }), frame());
+    return frames.length > before ? last() : "unindexed";
+  };
+  // A blank frame whose document has no element yet, for Document and DocumentType insertions.
+  const inHost = (insert) => {
+    const host = box().appendChild(frame());
+    const doc = host.contentDocument;
+    const child = host.contentWindow;
+    doc.documentElement.remove();
+    insert(doc, frame());
+    return child[0];
+  };
+  const withDoctype = (doc) => {
+    const doctype = doc.implementation.createDocumentType("html", "", "");
+    doc.appendChild(doctype);
+    return doctype;
+  };
+  const cases = {
+    "Node.appendChild": () => inBox((b, f) => b.appendChild(f)),
+    "Node.insertBefore": () => inBox((b, f) => b.insertBefore(f, null)),
+    "Node.replaceChild": () => inBox((b, f) => b.replaceChild(f, b.appendChild(document.createElement("span")))),
+    "Element.append": () => inBox((b, f) => b.append(f)),
+    "Element.prepend": () => inBox((b, f) => b.prepend(f)),
+    "Element.replaceChildren": () => inBox((b, f) => b.replaceChildren(f)),
+    "Element.before": () => inBox((b, f) => b.appendChild(document.createElement("span")).before(f)),
+    "Element.after": () => inBox((b, f) => b.appendChild(document.createElement("span")).after(f)),
+    "Element.replaceWith": () => inBox((b, f) => b.appendChild(document.createElement("span")).replaceWith(f)),
+    "Element.insertAdjacentElement": () => inBox((b, f) => b.insertAdjacentElement("beforeend", f)),
+    "Document.append": () => inHost((d, f) => d.append(f)),
+    "Document.prepend": () => inHost((d, f) => d.prepend(f)),
+    "Document.replaceChildren": () => inHost((d, f) => d.replaceChildren(f)),
+    "DocumentFragment.append": () => inShadow((r, f) => r.append(f)),
+    "DocumentFragment.prepend": () => inShadow((r, f) => r.prepend(f)),
+    "DocumentFragment.replaceChildren": () => inShadow((r, f) => r.replaceChildren(f)),
+    "CharacterData.before": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).before(f)),
+    "CharacterData.after": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).after(f)),
+    "CharacterData.replaceWith": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).replaceWith(f)),
+    // An element can never come before a doctype, so DocumentType.before cannot make a window.
+    "DocumentType.after": () => inHost((d, f) => withDoctype(d).after(f)),
+    "DocumentType.replaceWith": () => inHost((d, f) => withDoctype(d).replaceWith(f)),
+    "Range.insertNode": () =>
+      inBox((b, f) => {
+        const range = document.createRange();
+        range.selectNodeContents(b);
+        range.insertNode(f);
+      }),
+    "Range.surroundContents": () =>
+      inBox((b, f) => {
+        b.appendChild(document.createTextNode("t"));
+        const range = document.createRange();
+        range.selectNodeContents(b);
+        range.surroundContents(f);
+      }),
+    innerHTML: () => inBox((b) => (b.innerHTML = "<iframe></iframe>")),
+    outerHTML: () => inBox((b) => (b.appendChild(document.createElement("span")).outerHTML = "<iframe></iframe>")),
+    insertAdjacentHTML: () => inBox((b) => b.insertAdjacentHTML("beforeend", "<iframe></iframe>")),
+    "document.write": () => {
+      const host = box().appendChild(frame());
+      const doc = host.contentDocument;
+      const child = host.contentWindow;
+      doc.open();
+      doc.write("<iframe></iframe>");
+      const made = child[0];
+      doc.close();
+      return made;
+    },
+  };
+  document.getElementById("start").onclick = async () => {
+    const hooked = { parsed: parsedHooked };
+    for (const [name, make] of Object.entries(cases)) {
+      const made = make();
+      hooked[name] = made === "unindexed" || hookedOf(made);
+    }
+    // An object's window comes a task later, so it is checked when the object loads.
+    const object = document.createElement("object");
+    object.type = "text/html";
+    object.data = "/page2";
+    const loaded = new Promise((resolve) => {
+      object.onload = () => resolve(true);
+      setTimeout(() => resolve(false), 5000);
+    });
+    const count = frames.length;
+    box().appendChild(object);
+    await loaded;
+    // Chromium and Firefox refuse the object outright, since its load skips the service worker; no window remains.
+    hooked.object = frames.length > count ? hookedOf(last()) : "none";
+    const popup = open();
+    hooked.open = hookedOf(popup);
+    const [frameProbe, popupProbe] = await Promise.all([girProbe(last()), girProbe(popup)]);
+    popup.close();
+    document.getElementById("results").textContent = JSON.stringify({ hooked, frameProbe, popupProbe });
+  };
+</script><div id="slot"></div>`,
+);
 
 const DOORS_WORKERS = page(
   "Doors workers",
@@ -581,26 +697,86 @@ const PM_SOURCE_CHILD = page(
 </script>`,
 );
 
-// Reading contentWindow installs the runtime into the blank frame before the page gives the frame its src.
+// A src set before insertion is the one order in which every browser reuses the blank window for the child page.
 const REUSE = page(
   "Reuse",
   `<pre id="results"></pre>
 <script>
   document.cookie = "a=1; path=/";
   const frame = document.createElement("iframe");
+  frame.src = "https://site-b.test/reuse-child";
   document.body.appendChild(frame);
-  const blank = frame.contentWindow;
+  frame.contentWindow.mark = "reused";
   window.addEventListener("message", (event) => {
     const out = { ...event.data, fromChild: event.source === frame.contentWindow };
     document.getElementById("results").textContent = JSON.stringify(out);
   });
-  frame.src = "https://site-b.test/reuse-child";
 </script>`,
 );
 
+// Same-site children in reused windows: one learns its top from its parent, one only by asking the frame itself.
+const REUSE_SAME = page(
+  "Reuse same site",
+  `<pre id="results"></pre>
+<script>
+  document.cookie = "a=1; path=/";
+  const out = {};
+  const children = {};
+  const make = (key, policy) => {
+    const frame = document.createElement("iframe");
+    if (policy) frame.referrerPolicy = policy;
+    frame.src = "/reuse-same-child?k=" + key;
+    document.body.appendChild(frame);
+    const blank = frame.contentWindow;
+    blank.mark = key;
+    // A write from the blank document first, so the renewed one cannot start from its sequence.
+    blank.document.cookie = key + "-blank=1; path=/";
+    children[key] = frame;
+  };
+  window.addEventListener("message", (event) => {
+    const { key } = event.data;
+    out[key] = { ...event.data, fromChild: event.source === children[key].contentWindow };
+    if (Object.keys(out).length === 2) document.getElementById("results").textContent = JSON.stringify(out);
+  });
+  make("told");
+  make("asked", "no-referrer");
+</script>`,
+);
+
+const REUSE_SAME_CHILD = page(
+  "Reuse same site child",
+  `<script>
+  const key = new URLSearchParams(location.search).get("k");
+  const reused = window.mark === key;
+  document.cookie = key + "=1; path=/";
+  fetch("/cookie/echo")
+    .then((r) => r.text())
+    .then((echo) => parent.postMessage({ key, reused, echo }, "*"));
+</script>`,
+);
+
+// The worker comes from a blank frame, whose own address names no page to bind it to.
+const BLANK_WORKER = page(
+  "Blank worker",
+  `<p id="worker"></p>
+<script>
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const code = 'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));';
+  const blob = frame.contentWindow.URL.createObjectURL(new frame.contentWindow.Blob([code], { type: "text/javascript" }));
+  const worker = new frame.contentWindow.Worker(blob);
+  worker.onmessage = (e) => { document.getElementById("worker").textContent = e.data || "none"; };
+  worker.onerror = () => { document.getElementById("worker").textContent = "error"; };
+</script>`,
+);
+
+// A third-party frame's own write stays out of its mirror only once the window runs on this document's config.
 const REUSE_CHILD = page(
   "Reuse child",
-  `<script>parent.postMessage({ cookie: document.cookie, href: location.href }, "*");</script>`,
+  `<script>
+  document.cookie = "own=1; path=/";
+  parent.postMessage({ cookie: document.cookie, href: location.href, reused: window.mark === "reused" }, "*");
+</script>`,
 );
 
 // Workers come from a blank frame's constructor, the way anti-tamper code reaches for untouched natives.
@@ -802,6 +978,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
     "/reuse": html(REUSE),
+    "/reuse-same": html(REUSE_SAME),
+    "/reuse-same-child": html(REUSE_SAME_CHILD),
+    "/blank-worker": html(BLANK_WORKER),
     "/plain.txt": typed("text/plain", PLAIN_BODY),
     "/doc.svg": typed("image/svg+xml", SVG_BODY),
     "/untyped": typed(null, PLAIN_BODY),
@@ -928,6 +1107,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
       ),
     ),
     "/doors-workers": html(DOORS_WORKERS),
+    "/doors-frames": html(DOORS_FRAMES),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',

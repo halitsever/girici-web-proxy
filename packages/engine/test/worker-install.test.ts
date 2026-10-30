@@ -190,7 +190,7 @@ describe("installWorker", () => {
     const partition = () => prefixFor(ctx.realUrl().origin);
     const win = page.globals as unknown as Realm;
     installStorageIsolation(win, ctx, partition);
-    installWorkers(win, ctx, partition);
+    installWorkers(win, ctx, partition, (url, init) => Reflect.apply(win.fetch, win, [url, init]));
     new page.globals.Worker("w.js");
 
     const worker = fakeGlobals();

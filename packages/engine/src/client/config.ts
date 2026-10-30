@@ -1,6 +1,12 @@
 import { PROTOCOL_VERSION, type ClientConfig, type InheritedContext } from "../shared/protocol.ts";
 
 export function readConfig(raw: string | null): ClientConfig {
+  // A missing or broken config leaves the page with an empty cookie mirror.
+  return parseConfig(raw) ?? { v: PROTOCOL_VERSION, cookies: [] };
+}
+
+/** The config as written, or null when it is missing or broken. */
+export function parseConfig(raw: string | null): ClientConfig | null {
   try {
     const parsed = JSON.parse(raw ?? "") as Partial<ClientConfig> | null;
     if (parsed && typeof parsed.v === "number" && Array.isArray(parsed.cookies)) {
@@ -10,9 +16,9 @@ export function readConfig(raw: string | null): ClientConfig {
       return config;
     }
   } catch {
-    // A missing or broken config leaves the page with an empty cookie mirror.
+    // Not JSON.
   }
-  return { v: PROTOCOL_VERSION, cookies: [] };
+  return null;
 }
 
 function isInherited(value: unknown): value is InheritedContext {

@@ -84,6 +84,14 @@ test("resolves URLs against <base>, srcset and stylesheets", async ({ page }) =>
   await expect(page.locator("#external")).toHaveCSS("background-image", /\/~\/https\/cdn\.site-a\.test\/b\.png/);
 });
 
+test("keeps a blank popup the page navigates later inside the proxy", async ({ page }) => {
+  const popup = page.waitForEvent("popup");
+  await page.click("#blank-popup");
+  const opened = await popup;
+  await expect(opened.locator("h1")).toHaveText("Site B");
+  await expect(opened).toHaveURL(/\/~\/https\/site-b\.test\/$/);
+});
+
 test("keeps script navigation of a blank frame inside the proxy", async ({ page }) => {
   await page.click("#blank-frame");
   await expect(page.frameLocator("#blank").locator("h1")).toHaveText("Site B");

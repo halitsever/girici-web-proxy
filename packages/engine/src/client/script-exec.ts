@@ -48,6 +48,6 @@ export function installScriptExec(
       return native.call(win, typeof handler === "string" ? rewriteScript(handler) : handler, ...rest);
     } as AnyFunction;
     maskNative(hooked, native);
-    win[name] = hooked as unknown as Window[typeof name];
+    (win as unknown as Record<string, unknown>)[name] = hooked;
   }
 }
