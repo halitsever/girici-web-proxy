@@ -20,8 +20,9 @@ export function isUiNavigation(
 }
 
 /**
- * A UI navigation that loads the UI. One from a proxied page can be sent back into that site instead, and a same-origin
- * redirect keeps the client ID, so it must not count.
+ * A UI navigation that loads the UI. A proxied page's load of /settings or /account is redirected into its own site
+ * under the same client ID, so it does not count. Its load of /, /_g/login or /_g/setup does: those paths are never a
+ * site's, and the shell's COOP and frame-ancestors keep the page from scripting that window.
  */
 export function loadsUi(
   request: { mode: RequestMode; destination: RequestDestination; method: string; referrer: string },

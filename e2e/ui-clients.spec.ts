@@ -41,6 +41,58 @@ test("a proxied page sent to a UI address stays in its site and cannot call the 
   expect(await adminStatus()).toBe(403);
 });
 
+type Opener = Window & { __nativeOpen: typeof window.open; __popup: Window | null };
+
+// The UI shell sends COOP same-origin, so the popup leaves the opener's browsing context group and its handle dies.
+test("a UI window a proxied page opens is out of that page's reach", async ({ page, context }) => {
+  await page.addInitScript(() => {
+    (window as unknown as Opener).__nativeOpen = window.open;
+  });
+  await openThroughUi(page, "https://site-a.test/");
+  for (const path of ["/", "/_g/login", "/_g/setup"]) {
+    for (const variant of ["opener", "noopener", "opener cut"]) {
+      const popupEvent = context.waitForEvent("page");
+      await page.evaluate(
+        ([path, variant]) => {
+          const win = window as unknown as Opener;
+          const popup = win.__nativeOpen.call(window, path, "_blank", variant === "noopener" ? "noopener" : "");
+          if (variant === "opener cut" && popup) popup.opener = null;
+          win.__popup = popup;
+        },
+        [path, variant] as const,
+      );
+      const popup = await popupEvent;
+      await popup.waitForLoadState("load");
+      // The popup is a real UI window, so what its opener can reach is what matters.
+      expect(await popup.evaluate(async () => (await fetch("/_g/auth/state")).status)).toBe(200);
+      const reach = await page.evaluate(async () => {
+        const popup = (window as unknown as Opener).__popup;
+        if (!popup) return { closed: true, document: null, fetch: "throws" };
+        let document: string | null = null;
+        try {
+          // Firefox and WebKit leave the handle on the popup's first, blank document.
+          document = popup.document?.URL ?? null;
+        } catch {
+          document = null;
+        }
+        let fetched: number | "throws";
+        try {
+          fetched = (await popup.fetch("/_g/auth/state")).status;
+        } catch {
+          fetched = "throws";
+        }
+        return { closed: popup.closed, document, fetch: fetched };
+      });
+      expect(reach, `${path} with ${variant}`).toEqual({
+        closed: true,
+        document: reach.document === null ? null : "about:blank",
+        fetch: "throws",
+      });
+      await popup.close();
+    }
+  }
+});
+
 test("a UI load the server cannot answer shows Girici's error page", async ({ page, browserName }) => {
   test.skip(browserName !== "chromium", "only Chromium lets a test fail the service worker's own requests");
   await openThroughUi(page, "https://site-a.test/");

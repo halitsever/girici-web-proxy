@@ -60,3 +60,38 @@ test("shares cookie changes with other tabs", async ({ page, context }) => {
   });
   await expect.poll(() => page.evaluate(() => document.cookie)).toContain("shared=1");
 });
+
+type Natives = Window & { __native: { push: History["pushState"]; fetch: typeof fetch } };
+
+test("judges a page by the address it loaded, not one it pushed", async ({ page, context }) => {
+  await page.addInitScript(() => {
+    (window as unknown as Natives).__native = { push: History.prototype.pushState, fetch: window.fetch };
+  });
+  const siteB = await context.newPage();
+  await siteB.goto("/~/https/site-b.test/cookie/set");
+  await expect(siteB.getByText("set")).toBeVisible();
+  await siteB.goto("/~/https/site-b.test/cookie/whoami");
+  // Site B's own requests carry its cookie, so its absence below is the verdict and not a missing cookie.
+  expect(await siteB.evaluate(() => fetch("/cookie/echo").then((r) => r.text()))).toBe("tp=1");
+
+  await openThroughUi(page, "https://site-a.test/cookie/whoami");
+  const sent = await page.evaluate(async () => {
+    const native = (window as unknown as Natives).__native;
+    native.push.call(history, null, "", "/~/https/site-b.test/cookie/whoami");
+    document.cookie = "moved=1; path=/";
+    const response = await native.fetch.call(window, "/~/https/site-b.test/cookie/echo", { credentials: "include" });
+    return response.text();
+  });
+  // Third-party cookies are blocked by default, so a request judged as site A's carries no site B cookie.
+  expect(sent).toBe("");
+
+  const siteA = await context.newPage();
+  await expect
+    .poll(async () => {
+      await siteA.goto("/~/https/site-a.test/cookie/whoami");
+      return siteA.locator("#server").textContent();
+    })
+    .toContain("moved=1");
+  expect(await siteB.evaluate(() => fetch("/cookie/echo").then((r) => r.text()))).toBe("tp=1");
+  expect(await siteB.evaluate(() => document.cookie)).not.toContain("moved");
+});
