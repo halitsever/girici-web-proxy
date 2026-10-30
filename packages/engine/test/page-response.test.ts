@@ -35,6 +35,30 @@ describe("buildPageResponse", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
+  it("serves an untyped or invalid-typed navigation as plain text", async () => {
+    for (const headers of [[], [["content-type", "foo"]], [["content-type", "text/"]]] as Array<
+      Array<[string, string]>
+    >) {
+      const res = await buildPageResponse(upstream(headers), context({ navigation: true, destination: "document" }));
+      expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    }
+  });
+
+  it("serves a comma-joined html type as rewritten html", async () => {
+    const res = await buildPageResponse(
+      upstream(
+        [
+          ["content-type", "video/mp4"],
+          ["content-type", "text/html"],
+        ],
+        "<p>x</p>",
+      ),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
   it("leaves subresources and media without a sandbox", async () => {
     const image = await buildPageResponse(
       upstream([["content-type", "image/svg+xml"]]),

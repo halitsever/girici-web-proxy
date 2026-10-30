@@ -2,13 +2,27 @@ export type BodyKind = "html" | "css" | "js";
 
 const DOCUMENT_DESTINATIONS = new Set<string>(["document", "iframe", "frame", "object", "embed"]);
 
+const TOKEN = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
+
+/** Fetch's "extract a MIME type": the last valid comma-separated piece wins, which is the type the browser renders. */
+export function mimeOf(contentType: string | null): string | null {
+  let essence: string | null = null;
+  for (const piece of (contentType ?? "").split(",")) {
+    const [type, subtype, ...rest] = (piece.split(";")[0] ?? "").trim().toLowerCase().split("/");
+    if (!type || !subtype || rest.length || !TOKEN.test(type) || !TOKEN.test(subtype)) continue;
+    if (type === "*" && subtype === "*") continue;
+    essence = `${type}/${subtype}`;
+  }
+  return essence;
+}
+
 /** Only bodies the browser will parse as a document, stylesheet or script need rewriting; fetch() data stays untouched. */
 export function rewriteKind(
   destination: RequestDestination,
   navigation: boolean,
   contentType: string | null,
 ): BodyKind | null {
-  const type = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  const type = mimeOf(contentType) ?? "";
   if (navigation || DOCUMENT_DESTINATIONS.has(destination)) return type === "text/html" ? "html" : null;
   if (destination === "style") return type === "" || type.includes("css") ? "css" : null;
   if (destination === "script") return type === "" || /(?:java|ecma)script/.test(type) ? "js" : null;
@@ -23,14 +37,14 @@ export function sandboxesDocument(
 ): boolean {
   if (!navigation && !DOCUMENT_DESTINATIONS.has(destination)) return false;
   if (rewriteKind(destination, navigation, contentType)) return false;
-  const type = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  const type = mimeOf(contentType) ?? "";
   return !(type === "application/pdf" || type.startsWith("audio/") || type.startsWith("video/"));
 }
 
 const CHARSET = /charset\s*=\s*["']?([^"';\s>]+)/i;
 
 export function decodeText(bytes: ArrayBuffer, contentType: string | null): string {
-  const isHtml = (contentType ?? "").split(";")[0]?.trim().toLowerCase() === "text/html";
+  const isHtml = mimeOf(contentType) === "text/html";
   const label = CHARSET.exec(contentType ?? "")?.[1] ?? (isHtml ? metaCharset(bytes) : undefined);
   let decoder: TextDecoder;
   try {

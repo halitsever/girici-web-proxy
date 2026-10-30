@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeText, rewriteKind, sandboxesDocument } from "../src/sw/body.ts";
+import { decodeText, mimeOf, rewriteKind, sandboxesDocument } from "../src/sw/body.ts";
 
 describe("rewriteKind", () => {
   it("rewrites HTML that object and embed elements load", () => {
@@ -67,5 +67,24 @@ describe("sandboxesDocument", () => {
       expect(sandboxesDocument("document", true, type)).toBe(false);
     expect(sandboxesDocument("image", false, "image/svg+xml")).toBe(false);
     expect(sandboxesDocument("document", true, "text/html")).toBe(false);
+  });
+});
+
+describe("mimeOf", () => {
+  it("reads the type the way a browser does", () => {
+    expect(mimeOf("Text/HTML; charset=utf-8")).toBe("text/html");
+    expect(mimeOf("video/mp4, text/html")).toBe("text/html");
+    expect(mimeOf("text/html, video/mp4")).toBe("video/mp4");
+    expect(mimeOf("text/html, */*")).toBe("text/html");
+    expect(mimeOf("text/html, foo")).toBe("text/html");
+    for (const bad of [null, "", "foo", "text/", "*/*", "a b/c"]) expect(mimeOf(bad), String(bad)).toBeNull();
+  });
+
+  it("keeps a comma-joined type from slipping past the rewriter or the media exemption", () => {
+    expect(rewriteKind("document", true, "video/mp4, text/html")).toBe("html");
+    expect(sandboxesDocument("document", true, "video/mp4, text/html")).toBe(false);
+    expect(sandboxesDocument("document", true, "text/html, video/mp4")).toBe(false);
+    expect(sandboxesDocument("document", true, "text/plain, video/mp4")).toBe(false);
+    expect(sandboxesDocument("document", true, "video/mp4, text/plain")).toBe(true);
   });
 });
