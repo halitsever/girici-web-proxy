@@ -158,3 +158,22 @@ test("a UI tab loaded around the service worker loads again through it", async (
   await page.getByRole("switch", { name: "Block third-party cookies" }).click();
   await thirdPartyCookieSent(page);
 });
+
+test("a UI tab that gains control from an engine that did not see it load loads again", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  await page.goto("/");
+  // Unregistering keeps the engine's records, as an unregister from DevTools does.
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration("/"))?.unregister());
+  await page.reload();
+  expect(await page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(false);
+  await page.evaluate(() => navigator.serviceWorker.register("/_g/sw.js", { scope: "/" }));
+  // The tab reloads on its own, so the check retries across it.
+  await expect(async () => {
+    expect(
+      await page.evaluate(async () => ({
+        controlled: !!navigator.serviceWorker.controller,
+        status: (await fetch("/_g/auth/state")).status,
+      })),
+    ).toEqual({ controlled: true, status: 200 });
+  }).toPass({ timeout: 10_000 });
+});
