@@ -59,6 +59,8 @@ async function onChangePassword() {
       password: password.value,
       currentPassword: currentPassword.value,
     });
+    // The server now checks the next save against the new password.
+    currentPassword.value = password.value;
     password.value = "";
     confirm.value = "";
     savedPassword.value = true;

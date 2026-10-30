@@ -18,6 +18,24 @@ test("an admin signs in, blocks a site, and proxied pages cannot use the admin A
   await page.waitForURL("http://127.0.0.1:41000/account");
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
 
+  // After a password change the page must confirm the next save with the new password. One browser covers it, since
+  // all browsers share the admin's write limit of ten a minute.
+  if (browserName === "chromium") {
+    const accountWrite = () =>
+      page.waitForResponse((res) => res.url().endsWith("/_g/account") && res.request().method() === "POST");
+    const changePassword = async (next: string) => {
+      await page.getByLabel("New password").fill(next);
+      await page.getByLabel("Confirm").fill(next);
+      const [res] = await Promise.all([accountWrite(), page.getByRole("button", { name: "Change password" }).click()]);
+      expect(res.status()).toBe(200);
+    };
+    await page.getByLabel("Current password").fill("e2e-password");
+    await changePassword("e2e-password-2");
+    const [saved] = await Promise.all([accountWrite(), page.getByRole("button", { name: "Save changes" }).click()]);
+    expect(saved.status()).toBe(200);
+    await changePassword("e2e-password");
+  }
+
   await page.goto("/settings");
   await page.getByLabel("Current password").fill("e2e-password");
   await page.getByLabel("Blocked sites").fill("blocked.test");
