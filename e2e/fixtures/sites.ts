@@ -233,6 +233,19 @@ const COOKIE_API_PAGE = page(
 </script>`,
 );
 
+const OLD_CHANNEL = page(
+  "Old channel",
+  `<p id="heard">waiting</p>
+<script>
+  const Channel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
+  const old = new Channel("__girici");
+  old.onmessage = () => { document.getElementById("heard").textContent = "yes"; };
+  setTimeout(() => {
+    if (document.getElementById("heard").textContent !== "yes") document.getElementById("heard").textContent = "no";
+  }, 2000);
+</script>`,
+);
+
 const api: Route = (req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ method: req.method, origin: req.headers.origin ?? null }));
@@ -658,6 +671,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/api": api,
     "/sse": sse,
     "/cookie/echo": cookieEcho,
+    "/old-channel": html(OLD_CHANNEL),
     "/cookie/script": html(COOKIE_SCRIPT),
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),

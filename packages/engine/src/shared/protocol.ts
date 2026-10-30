@@ -23,7 +23,7 @@ export const POT_PATH = "/_g/pot";
 export const WS_SEAL_PATH = "/_g/ws-seal";
 export const PREFS_MESSAGE = "girici:prefs";
 export const TOP_SITE_QUERY = "girici:top?";
-export const BROADCAST_CHANNEL = "__girici";
+export const COOKIE_MESSAGE = "girici:cookies";
 // Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
 export const LOGIN_PATH = "/_g/login";
 export const SETUP_PATH = "/_g/setup";

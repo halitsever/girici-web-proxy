@@ -1,6 +1,6 @@
 import { isReservedPath } from "../shared/codec.ts";
 import {
-  BROADCAST_CHANNEL,
+  COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
   POT_PATH,
@@ -9,8 +9,10 @@ import {
   TOP_SITE_QUERY,
   WS_PREP_PATH,
   WS_SEAL_PATH,
+  type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
+import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
 import { errorResponse, forbiddenResponse } from "./error-page.ts";
@@ -61,9 +63,8 @@ const topSiteDeps: TopSiteDeps = {
   windowClients: () => self.clients.matchAll({ type: "window" }),
   askTop,
 };
-const channel = new BroadcastChannel(BROADCAST_CHANNEL);
-// Other tabs of the same site keep their document.cookie mirrors current through this channel.
-cookies.onChange((changes) => channel.postMessage({ type: "cookies", v: PROTOCOL_VERSION, changes }));
+// Tabs of the same site keep their document.cookie mirrors current through these messages.
+cookies.onChange((changes) => void announceCookies(changes));
 
 self.addEventListener("install", (event) => {
   event.waitUntil(runtime.install().then(() => self.skipWaiting()));
@@ -128,6 +129,17 @@ self.addEventListener("fetch", (event) => {
   if (url.origin === self.location.origin && isReservedPath(url.pathname)) return;
   event.respondWith(handle(event));
 });
+
+async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
+  const clients = await self.clients.matchAll({ type: "window" });
+  for (const delivery of cookieDeliveries(clients, changes, self.location.origin)) {
+    (clients.find((client) => client.id === delivery.id) as Client).postMessage({
+      type: COOKIE_MESSAGE,
+      v: PROTOCOL_VERSION,
+      changes: delivery.changes,
+    });
+  }
+}
 
 /** A client that cannot be looked up in time counts as a page, not as the UI. */
 async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {

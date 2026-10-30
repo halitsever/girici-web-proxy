@@ -117,7 +117,7 @@ export function install(win: Realm, config: ClientConfig, clientUrl: string): vo
     ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx)],
-    ["cookies", () => (cookies = installCookies(win, ctx, config))],
+    ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container)))],
     ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke))],
     ["top site", () => listeners.push(installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],

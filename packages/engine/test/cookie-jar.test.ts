@@ -80,6 +80,15 @@ describe("CookieService", () => {
     ]);
   });
 
+  it("never reports HttpOnly cookies to change listeners", async () => {
+    const jar = await service();
+    const heard: CookieSnapshot[][] = [];
+    jar.onChange((changes) => heard.push(changes));
+    await jar.store(new URL("https://site-a.test/"), ["s=1; HttpOnly", "v=2"], nav());
+    expect(heard).toHaveLength(1);
+    expect(heard[0]?.map((c) => c.name)).toEqual(["v"]);
+  });
+
   it("persists cookies and restores them", async () => {
     const { store, records } = memoryStore();
     const jar = await service(store);

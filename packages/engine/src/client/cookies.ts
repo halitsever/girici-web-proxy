@@ -1,17 +1,18 @@
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
-  BROADCAST_CHANNEL,
+  COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   decodeHeaderValue,
   PROTOCOL_VERSION,
   type ClientConfig,
   type CookieSnapshot,
 } from "../shared/protocol.ts";
+import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { allowVersionReload } from "./version.ts";
 
 /** The per-realm cookie mirror state the network and navigation hooks read. */
-export interface CookieBridge {
+export interface CookieBridge extends DocumentListeners {
   /** The sequence number of the latest document.cookie write, sent along so the worker can wait for it. */
   currentSeq(): number;
   /** Settles once every cookie write still on its way to the worker has landed; null when none is. */
@@ -23,7 +24,12 @@ export interface CookieBridge {
 }
 
 /** document.cookie must answer synchronously, so it reads a local mirror of the worker's jar. */
-export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig): CookieBridge {
+export function installCookies(
+  win: Realm,
+  ctx: UrlContext,
+  config: ClientConfig,
+  container: ServiceWorkerContainer | null,
+): CookieBridge {
   let mirror = [...config.cookies];
   let blocked = config.cookiesBlocked === true;
   let seq = 0;
@@ -87,17 +93,20 @@ export function installCookies(win: Realm, ctx: UrlContext, config: ClientConfig
     set: (value: unknown) => write(String(value)),
   });
 
-  try {
-    const channel = new win.BroadcastChannel(BROADCAST_CHANNEL);
-    channel.onmessage = (event: MessageEvent<{ type?: unknown; v?: unknown; changes?: unknown }>) => {
-      const { type, v, changes } = event.data ?? {};
-      if (type === "cookies" && v === PROTOCOL_VERSION && Array.isArray(changes)) apply(changes as CookieSnapshot[]);
-    };
-  } catch {
-    // Without BroadcastChannel only other tabs' changes are missed.
-  }
+  const onMessage = (event: MessageEvent<{ type?: unknown; v?: unknown; changes?: unknown }>) => {
+    const { type, v, changes } = event.data ?? {};
+    if (type === COOKIE_MESSAGE && v === PROTOCOL_VERSION && Array.isArray(changes)) apply(changes as CookieSnapshot[]);
+  };
+  const listen = () => {
+    if (!container) return;
+    container.addEventListener("message", onMessage);
+    // Messages wait in a queue until this runs.
+    container.startMessages();
+  };
+  listen();
 
   return {
+    listen,
     currentSeq: () => seq,
     pendingWrites: () => pending,
     applySync: (header) => {

@@ -38,6 +38,16 @@ test("updates document.cookie from fetch responses", async ({ page }) => {
   await expect(page.locator("#after")).toHaveText("api=1");
 });
 
+test("no longer announces cookie changes on a shared channel", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/old-channel");
+  const other = await context.newPage();
+  await other.goto("/~/https/site-a.test/cookie/whoami");
+  await other.evaluate(() => {
+    document.cookie = "shared=1; path=/";
+  });
+  await expect(page.locator("#heard")).toHaveText("no");
+});
+
 test("shares cookie changes with other tabs", async ({ page, context }) => {
   await openThroughUi(page, "https://site-a.test/cookie/whoami");
   const other = await context.newPage();
