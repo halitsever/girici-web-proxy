@@ -93,6 +93,14 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
   };
 
   const selfOrigin = () => originOf(ctx.realUrl());
+  const addressOrigin = (target: object): string | null => {
+    try {
+      const real = realUrlOf((target as { location: { href: string } }).location.href, ctx.origin);
+      return real ? originOf(real) : null;
+    } catch {
+      return null;
+    }
+  };
   const sameOrigin = (target: object) => realOriginOf(target, ctx.origin) === selfOrigin();
   const deny = (): never => {
     throw new DOMException(
@@ -116,7 +124,7 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
       apply(setAdd, given, [value]);
       return value;
     }
-    const wrapper = restrict(value);
+    const wrapper = restrict(value, headedTo !== undefined && headedTo !== selfOrigin());
     apply(mapSet, wrappers, [value, wrapper]);
     apply(setAdd, ownWrappers, [wrapper]);
     return wrapper;
@@ -169,8 +177,17 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
       } as ProxyHandler<object>,
     );
 
-  const restrict = (target: object): object => {
+  const restrict = (target: object, headedElsewhere: boolean): object => {
     let location: object | null = null;
+    let pending = headedElsewhere;
+    /** A popup opened for another origin starts as this origin's blank page, so only its own address can vouch for it. */
+    const reachable = (): boolean => {
+      if (pending) {
+        if (addressOrigin(target) === null) return false;
+        pending = false;
+      }
+      return sameOrigin(target);
+    };
     const bound = new NativeWeakMap<object, unknown>();
     const members: Record<string, unknown> = {
       __proto__: null,
@@ -220,11 +237,11 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
         __proto__: null,
         get: (_dummy, property) => {
           if (property === "location") {
-            if (sameOrigin(target)) return (target as { location: unknown }).location;
+            if (reachable()) return (target as { location: unknown }).location;
             return (location ??= restrictedLocation(target));
           }
           if (allowed(property)) return crossOrigin(property);
-          if (sameOrigin(target)) return passthrough(property);
+          if (reachable()) return passthrough(property);
           // Promise resolution and console inspection read these on any object.
           if (typeof property === "symbol" || property === "then") return undefined;
           return deny();
@@ -234,13 +251,13 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
             navigate(target, value, false);
             return true;
           }
-          if (sameOrigin(target)) return reflectSet(target, property, value, target);
+          if (reachable()) return reflectSet(target, property, value, target);
           return deny();
         },
-        has: (_dummy, property) => allowed(property) || (sameOrigin(target) ? reflectHas(target, property) : deny()),
-        ownKeys: () => reflectOwnKeys(sameOrigin(target) ? target : CROSS_ORIGIN_KEYS),
+        has: (_dummy, property) => allowed(property) || (reachable() ? reflectHas(target, property) : deny()),
+        ownKeys: () => reflectOwnKeys(reachable() ? target : CROSS_ORIGIN_KEYS),
         getOwnPropertyDescriptor: (_dummy, property) => {
-          if (!allowed(property) && !sameOrigin(target)) return deny();
+          if (!allowed(property) && !reachable()) return deny();
           // Reported configurable, since the wrapper's own target never holds these.
           return {
             __proto__: null,
@@ -249,9 +266,9 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
           } as PropertyDescriptor;
         },
         defineProperty: (_dummy, property, descriptor) =>
-          sameOrigin(target) ? reflectDefine(target, property, descriptor) : deny(),
-        deleteProperty: (_dummy, property) => (sameOrigin(target) ? reflectDelete(target, property) : deny()),
-        getPrototypeOf: () => (sameOrigin(target) ? reflectProto(target) : null),
+          reachable() ? reflectDefine(target, property, descriptor) : deny(),
+        deleteProperty: (_dummy, property) => (reachable() ? reflectDelete(target, property) : deny()),
+        getPrototypeOf: () => (reachable() ? reflectProto(target) : null),
         setPrototypeOf: deny,
         preventExtensions: deny,
       } as ProxyHandler<object>,

@@ -110,6 +110,21 @@ describe("createWindowGuard", () => {
     expect(guard.isWrapper(guard.wrap(popup, "https://b.test"))).toBe(true);
   });
 
+  it("keeps a popup headed elsewhere restricted while it still shows the opener's blank page", () => {
+    const guard = guardFor("https://a.test");
+    const document = { defaultView: "raw" };
+    const popup = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" }, document });
+    const wrapped = guard.wrap(popup, "https://b.test") as Record<string, unknown>;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    expect(() => Object.getOwnPropertyDescriptor(wrapped, "document")).toThrow(/SecurityError|Blocked/);
+    expect(() => "document" in wrapped).toThrow(/SecurityError|Blocked/);
+    popup.location.href = `${proxy}/~/https/b.test/`;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    // The page it was opened for may still send it back to this origin.
+    popup.location.href = `${proxy}/~/https/a.test/back`;
+    expect(wrapped.document).toBe(document);
+  });
+
   it("keeps each window's first answer until the document changes", () => {
     const guard = guardFor("https://a.test");
     const child = fakeWindow(`${proxy}/~/https/a.test/blank`);
