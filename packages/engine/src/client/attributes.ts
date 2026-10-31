@@ -341,8 +341,17 @@ export function installAttributes(
       // Not an element of this realm.
     }
   };
+  const nodeTypeOf = win.Node ? ownDescriptor(win.Node.prototype, "nodeType")?.get : undefined;
   const normalize = (node: unknown): void => {
-    if (typeof node !== "object" || node === null) return;
+    if (typeof node !== "object" || node === null || !nodeTypeOf) return;
+    // The native getter throws for anything that is not a node, and only these node types can hold frames.
+    let type: unknown;
+    try {
+      type = apply(nodeTypeOf, node, []);
+    } catch {
+      return;
+    }
+    if (type !== 1 && type !== 9 && type !== 11) return;
     normalizeOne(node);
     for (let index = 0; index < queries.length; index++) {
       const query = queries[index];

@@ -90,10 +90,24 @@ describe("srcdoc through the DOM hooks", () => {
         return new FakeAttr(this.name, this.raw);
       }
     }
+    const queried: unknown[] = [];
+    class FakeNodeList {
+      get length() {
+        return 0;
+      }
+    }
     class FakeElement {
       // An accessor on the prototype, as in the DOM.
       get localName() {
         return "iframe";
+      }
+      get nodeType() {
+        if (!(this instanceof FakeElement)) throw new TypeError("Illegal invocation");
+        return 1;
+      }
+      querySelectorAll(): FakeNodeList {
+        queried.push(this);
+        return new FakeNodeList();
       }
       map = new Map<string, FakeAttr>();
       put(name: string, value: string): void {
@@ -154,12 +168,14 @@ describe("srcdoc through the DOM hooks", () => {
       }
     }
 
-    return { FakeAttr, FakeElement, FakeMap, FakeIframe };
+    return { FakeAttr, FakeElement, FakeMap, FakeIframe, FakeNodeList, queried };
   }
 
   function setup() {
-    const { FakeAttr, FakeElement, FakeMap, FakeIframe } = fakeDom();
+    const { FakeAttr, FakeElement, FakeMap, FakeIframe, FakeNodeList, queried } = fakeDom();
     const win = {
+      Node: FakeElement,
+      NodeList: FakeNodeList,
       Element: FakeElement,
       Attr: FakeAttr,
       NamedNodeMap: FakeMap,
@@ -178,7 +194,7 @@ describe("srcdoc through the DOM hooks", () => {
       swap: swaps,
       original: (url) => (url === "blob:boot" ? "blob:page" : url),
     });
-    return { iframe: new FakeIframe(), FakeAttr, FakeIframe, hooks };
+    return { iframe: new FakeIframe(), FakeAttr, FakeIframe, hooks, queried };
   }
   const code = "<script>go(location)</script>";
 
@@ -201,6 +217,15 @@ describe("srcdoc through the DOM hooks", () => {
     expect(iframe.map.get("srcdoc")?.raw).toContain("data-girici");
     iframe.setAttribute("src", "https://b.test/");
     expect(iframe.map.get("src")?.raw).toBe("/~/https/b.test/");
+  });
+
+  it("leaves anything that is not a node to the native insertion", () => {
+    const { hooks, queried, iframe } = setup();
+    hooks.normalize({ querySelectorAll: () => [] });
+    hooks.normalize("text");
+    expect(queried).toEqual([]);
+    hooks.normalize(iframe);
+    expect(queried).toEqual([iframe]);
   });
 
   it("rewrites the values of a frame a parser outside the hooks made, once", () => {
