@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess } from "@/lib/auth";
+import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess, setSealAddresses } from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
@@ -18,6 +18,8 @@ const history = ref<HistoryEntry[]>([]);
 const authed = ref(false);
 const publicAccess = ref(false);
 const publicError = ref("");
+const instanceSeal = ref(false);
+const instanceSealError = ref("");
 // Kept in memory only, so it is gone once the page closes.
 const adminPassword = ref("");
 const blockedText = ref("");
@@ -40,9 +42,27 @@ const siteNote = computed(() => {
 
 watch(settings, (value) => saveSettings(value), { deep: true });
 watch(
-  () => settings.value.blockCookies,
+  () => [settings.value.blockCookies, settings.value.sealAddresses],
   () => void syncEnginePrefs(settings.value),
 );
+
+async function onToggleInstanceSeal(on: boolean) {
+  instanceSealError.value = "";
+  if (!adminPassword.value) {
+    instanceSealError.value = "Enter your current password first.";
+    return;
+  }
+  const previous = instanceSeal.value;
+  instanceSeal.value = on;
+  try {
+    instanceSeal.value = await setSealAddresses(on, adminPassword.value);
+    // This browser's worker hears it now; others pick it up from the sign-in state.
+    await syncEnginePrefs(settings.value, undefined, instanceSeal.value);
+  } catch (e) {
+    instanceSeal.value = previous;
+    instanceSealError.value = e instanceof Error ? e.message : "Could not change address encryption.";
+  }
+}
 
 async function onTogglePublic(on: boolean) {
   publicError.value = "";
@@ -141,6 +161,7 @@ onMounted(async () => {
   const state = await getAuthState(true);
   authed.value = state.authed;
   publicAccess.value = state.public;
+  instanceSeal.value = state.sealAddresses;
   if (!state.authed) return;
   try {
     const admin = await getAdminSettings();
@@ -223,6 +244,23 @@ onMounted(async () => {
         </div>
         <Switch v-model="settings.blockCookies" aria-label="Block third-party cookies" />
       </div>
+
+      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+        <div>
+          <p class="text-[14px] font-medium">Encrypt page addresses</p>
+          <p class="text-[13px] text-muted-foreground">
+            Hides the sites you open from this browser's history and address bar. Links you copy will not open in
+            another browser.
+          </p>
+          <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">Turned on for everyone by the admin.</p>
+        </div>
+        <Switch
+          :model-value="settings.sealAddresses || instanceSeal"
+          :disabled="instanceSeal"
+          aria-label="Encrypt page addresses"
+          @update:model-value="(on: boolean) => (settings.sealAddresses = on)"
+        />
+      </div>
     </div>
 
     <div v-if="authed" class="rounded-xl border border-border bg-gi-panel">
@@ -246,6 +284,20 @@ onMounted(async () => {
           <p v-if="publicError" class="mt-1 text-[13px] text-gi-danger">{{ publicError }}</p>
         </div>
         <Switch :model-value="publicAccess" @update:model-value="onTogglePublic" />
+      </div>
+      <div class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
+        <div>
+          <p class="text-[14px] font-medium">Encrypt page addresses for everyone</p>
+          <p class="text-[13px] text-muted-foreground">
+            Turns on encrypted page addresses in every visitor's browser. Visitors cannot turn it off.
+          </p>
+          <p v-if="instanceSealError" class="mt-1 text-[13px] text-gi-danger">{{ instanceSealError }}</p>
+        </div>
+        <Switch
+          :model-value="instanceSeal"
+          aria-label="Encrypt page addresses for everyone"
+          @update:model-value="onToggleInstanceSeal"
+        />
       </div>
       <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
         <div>

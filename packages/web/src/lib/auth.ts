@@ -8,11 +8,13 @@ export interface AuthState {
   setup: boolean;
   authed: boolean;
   public: boolean;
+  sealAddresses: boolean;
   admin?: AdminInfo;
 }
 
 export interface AdminSettings {
   public: boolean;
+  sealAddresses: boolean;
   blockedHosts: string[];
   envBlockedHosts: string[];
 }
@@ -93,6 +95,18 @@ export async function setPublicAccess(on: boolean, currentPassword: string): Pro
   if (!res.ok) throw writeError(res.status, "Could not change public access.");
   invalidate();
   return (await res.json()).public as boolean;
+}
+
+/** The instance switch seals page addresses in every visitor's browser. */
+export async function setSealAddresses(on: boolean, currentPassword: string): Promise<boolean> {
+  const res = await fetch("/_g/admin/settings", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ sealAddresses: on, currentPassword }),
+  });
+  if (!res.ok) throw writeError(res.status, "Could not change address encryption.");
+  invalidate();
+  return (await res.json()).sealAddresses as boolean;
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {

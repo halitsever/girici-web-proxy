@@ -120,3 +120,61 @@ test("a popup a sealed page opens lands on a sealed address", async ({ page }) =
   expect(popup.url()).toMatch(SEALED);
   await expect(page.locator("#popup")).toHaveText("/sealed/next");
 });
+
+test("the Settings switch turns sealing on and off", async ({ page }) => {
+  await page.goto("/settings");
+  // Settings registers the worker, and WebKit leaves an install a navigation cuts short stuck for good.
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  const sealSwitch = page.getByRole("switch", { name: "Encrypt page addresses", exact: true });
+  await sealSwitch.click();
+  await expect(sealSwitch).toBeChecked();
+  await openThroughUi(page, "https://site-a.test/sealed/page");
+  expect(page.url()).toMatch(SEALED);
+  await page.goto("/settings");
+  await expect(sealSwitch).toBeChecked();
+  await sealSwitch.click();
+  await expect(sealSwitch).not.toBeChecked();
+  await openThroughUi(page, "https://site-a.test/sealed/page");
+  expect(page.url()).toMatch(/\/~\/https\/site-a\.test\//);
+});
+
+// The seeded instance server on 41002 comes with Task 0 on the other track; this test runs once the tracks merge.
+const INSTANCE = "http://127.0.0.1:41002";
+
+test("an admin turns sealing on for every visitor", async ({ page, browser, browserName }) => {
+  test.skip(browserName !== "chromium", "shared admin write limit");
+  test.fixme(true, "needs the seeded instance server on 41002 from Task 0, enabled when the tracks merge");
+  await page.goto(`${INSTANCE}/_g/login`);
+  await page.getByLabel("Username").fill("e2e");
+  await page.getByLabel("Password").fill("e2e-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(`${INSTANCE}/`);
+  try {
+    await page.goto(`${INSTANCE}/settings`);
+    await page.getByLabel("Current password").fill("e2e-password");
+    const everyone = page.getByRole("switch", { name: "Encrypt page addresses for everyone" });
+    await everyone.click();
+    await expect(everyone).toBeChecked();
+
+    const visitor = await browser.newContext({ baseURL: INSTANCE });
+    try {
+      const other = await visitor.newPage();
+      await openThroughUi(other, "https://site-a.test/sealed/page");
+      expect(other.url()).toMatch(SEALED);
+      await other.goto("/settings");
+      const own = other.getByRole("switch", { name: "Encrypt page addresses", exact: true });
+      await expect(own).toBeChecked();
+      await expect(own).toBeDisabled();
+      await expect(other.getByText("Turned on for everyone by the admin.")).toBeVisible();
+    } finally {
+      await visitor.close();
+    }
+  } finally {
+    await page.request.post(`${INSTANCE}/_g/admin/settings`, {
+      data: { sealAddresses: false, currentPassword: "e2e-password" },
+      headers: { origin: INSTANCE },
+    });
+  }
+});

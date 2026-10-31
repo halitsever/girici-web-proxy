@@ -76,6 +76,20 @@ their subdomains on every relay, including WebSockets, and shows visitors a page
 blocked on this server. You can paste a full URL; Girici keeps only its host name. Sites listed in the
 `GIRICI_BLOCKED_HOSTS` environment variable apply too and show under the editor as read-only.
 
+## Encrypted page addresses
+
+Each visitor can turn on **Settings → Encrypt page addresses**. Pages then open at addresses such as
+`/~/x/<token>` instead of `/~/https/example.com/...`, so the sites a visitor opened do not show in the browser's
+history or address bar. The key lives in that browser only: a copied link does not open in another browser, and
+it stops opening if the browser's data for Girici is wiped. Clearing site data in Settings keeps the key.
+
+An admin can turn on **Settings → Admin → Encrypt page addresses for everyone**. It asks for the current password,
+like the other admin settings. While it is on, every visitor's switch shows on and cannot be turned off. A browser
+that already has Girici open picks the change up on a page load within a minute. Both switches are off by default.
+
+What stays readable, and other limits, are listed under
+[Known limitations](./how-it-works.md#known-limitations).
+
 ## Scaling later
 
 The schema already carries a username per account, so the single-admin model can grow into multiple

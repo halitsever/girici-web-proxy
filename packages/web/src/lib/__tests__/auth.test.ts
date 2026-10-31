@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setPublicAccess, updateAccount } from "../auth";
+import { setPublicAccess, setSealAddresses, updateAccount } from "../auth";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -10,5 +10,16 @@ describe("admin writes", () => {
       "The current password is wrong. Forgot it? Run node reset-admin-password.js on the server.",
     );
     await expect(setPublicAccess(true, "x")).rejects.toThrow("Forgot it?");
+    await expect(setSealAddresses(true, "x")).rejects.toThrow("Forgot it?");
+  });
+
+  it("turns address encryption on for everyone with the current password", async () => {
+    const sent: unknown[] = [];
+    vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(init.body as string));
+      return Response.json({ sealAddresses: true });
+    });
+    await expect(setSealAddresses(true, "pw")).resolves.toBe(true);
+    expect(sent).toEqual([{ sealAddresses: true, currentPassword: "pw" }]);
   });
 });

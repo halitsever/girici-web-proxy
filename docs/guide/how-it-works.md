@@ -28,6 +28,13 @@ A proxied address looks like `/~/<scheme>/<host><path>?<query>`. Keeping the str
 the browser's own relative resolution keeps working: `../x`, CSS `url()`, and module imports all land
 back on a `/~/...` path without extra rewriting.
 
+With encrypted page addresses on, a top-level page opens at `/~/x/<label>.<body>` instead. The label seals the
+site's origin and the body seals the path and query, both under a key this browser's service worker keeps. A page
+gets only its own origin's key, so it can update its own address (`pushState`, links to itself) but cannot make or
+read another site's. In such a page the browser cannot resolve relative URLs, so the rewriter writes them as plain
+absolute `/~/https/...` URLs, and the worker resolves any relative request it still sees against the page's real
+address.
+
 ## Where rewriting happens
 
 The service worker is the safety net. Every subresource a controlled page requests passes through it,
@@ -70,6 +77,16 @@ subresources. Turning on public access opens the data path to everyone and skips
 - **CDNs and proxies in front of `/_g/`.** Girici checks its page script against a digest before using it. A CDN
   or proxy that rewrites or minifies JavaScript changes those bytes, so pages stop loading until that is turned off
   for `/_g/`.
+- **Encrypted addresses hide less than everything.** With encrypted page addresses on:
+  - The `#fragment` after the token stays readable.
+  - Tokens are deterministic: the same page always gets the same token, and pages of one site share its first
+    part, so someone who sees two addresses can tell they are the same page or the same site.
+  - Only top-level page loads are encrypted. Frames, and pages reached by a form `POST`, keep a plain address.
+  - `document.referrer` is empty when an encrypted page of another site linked to the page.
+  - A link to another site, `window.open` and the Navigation API first load the plain address, which the service
+    worker redirects to the encrypted one. Whether a browser lists that first address in its history has not been
+    checked yet.
+  - A `../../x` URL that the rewriter missed resolves from the site's root.
 
 ## Toolbar and site data
 

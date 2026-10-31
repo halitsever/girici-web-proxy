@@ -134,6 +134,15 @@ export class AuthStore {
     this.#setSetting("public_access", on ? "1" : "0");
   }
 
+  /** The admin's switch that seals page addresses in every visitor's browser. */
+  sealAddresses(): boolean {
+    return this.#setting("seal_addresses") === "1";
+  }
+
+  setSealAddresses(on: boolean): void {
+    this.#setSetting("seal_addresses", on ? "1" : "0");
+  }
+
   /** Normalized host entries the admin blocked in Settings; an unreadable value counts as none. */
   blockedHosts(): string[] {
     const raw = this.#setting("blocked_hosts");
