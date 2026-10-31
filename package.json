@@ -45,7 +45,7 @@
     "prettier": "^3.9.10",
     "selfsigned": "^5.5.0",
     "semantic-release": "^24.2.9",
-    "typescript": "~6.0.3",
+    "typescript": "~7.0.2",
     "vitepress": "^1.6.4",
     "vitest": "^5.0.5"
   }
