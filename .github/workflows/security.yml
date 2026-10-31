@@ -1,0 +1,70 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly, so new advisories against unchanged code still show up.
+    - cron: "23 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: /language:${{ matrix.language }}
+
+  # Report only: findings show in the log and in code scanning, and never fail the run.
+  trivy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: girici:scan
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: girici:scan
+          format: table
+          severity: CRITICAL,HIGH,MEDIUM
+          exit-code: "0"
+      - if: github.event_name != 'pull_request'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: girici:scan
+          format: sarif
+          output: trivy.sarif
+          exit-code: "0"
+          skip-setup-trivy: true
+      - if: github.event_name != 'pull_request'
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
