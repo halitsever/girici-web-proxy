@@ -177,3 +177,31 @@ test("an admin turns sealing on for every visitor", async ({ page, browser, brow
     });
   }
 });
+
+for (const [name, button] of [
+  ["", "#open"],
+  [" after the opener replaced JSON.parse", "#forge"],
+] as const) {
+  test(`another site's popup on a sealed address stays out of its opener's reach${name}`, async ({ page }) => {
+    await enableSealing(page);
+    await openThroughUi(page, "https://site-a.test/xs-sealed-opener");
+    const popupEvent = page.waitForEvent("popup");
+    await page.click(button);
+    const popup = await popupEvent;
+    await popup.waitForLoadState();
+    expect(popup.url()).toMatch(SEALED);
+    await expect(popup.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await popup.locator("#results").textContent()) ?? "{}")).toEqual({
+      runtime: true,
+      openerDocument: "SecurityError",
+      openerClosed: false,
+    });
+    await page.click("#check");
+    await expect(page.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+      document: "SecurityError",
+      leaks: 0,
+      closed: false,
+    });
+  });
+}

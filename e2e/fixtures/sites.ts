@@ -1224,6 +1224,56 @@ const XS_HELD = page(
 </script>`,
 );
 
+// Opens another site's popup and keeps trying its document until checked; with "forge" its own JSON.parse first drops
+// the seal from any engine config and names this page as the one the popup inherits from.
+const XS_SEALED_OPENER = page(
+  "Sealed opener",
+  `<button id="open">open</button><button id="forge">forge</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  let w;
+  let leaks = 0;
+  let polling = true;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    if (!polling) return;
+    try {
+      void w.document;
+      leaks++;
+    } catch {}
+    channel.port2.postMessage(0);
+  };
+  const open = () => {
+    w = window.open("https://site-b.test/xs-opened");
+    channel.port2.postMessage(0);
+    setTimeout(() => (polling = false), 10000);
+  };
+  document.getElementById("open").onclick = open;
+  document.getElementById("forge").onclick = () => {
+    const parse = JSON.parse;
+    const base = location.href;
+    JSON.parse = function (text, reviver) {
+      const value = parse(text, reviver);
+      if (value && typeof value === "object" && "cookies" in value) {
+        delete value.seal;
+        value.inherit = { origin: "forged", base };
+      }
+      return value;
+    };
+    open();
+  };
+  document.getElementById("check").onclick = () => {
+    polling = false;
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      leaks,
+      closed: w.closed,
+    });
+  };
+</script>`,
+);
+
 const XS_OPENED = page(
   "Cross-site opened",
   `<pre id="results"></pre>
@@ -1872,6 +1922,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/xs-held": html(XS_HELD),
+    "/xs-sealed-opener": html(XS_SEALED_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
     "/refresh-quote": html(REFRESH_QUOTE),

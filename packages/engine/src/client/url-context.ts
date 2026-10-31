@@ -54,9 +54,9 @@ export function realUrlOf(href: string, proxyOrigin: string, open?: OpenSealed):
  * The decoded proxy address of `other`, else the origin its own runtime reports through `__g$`, which its page cannot
  * redefine the way it can redefine `origin`. Null when neither names an http(s) origin other than ours.
  */
-export function realOriginOf(other: unknown, proxyOrigin: string): string | null {
+export function realOriginOf(other: unknown, proxyOrigin: string, open?: OpenSealed): string | null {
   try {
-    const real = realUrlOf((other as { location: { href: string } }).location.href, proxyOrigin);
+    const real = realUrlOf((other as { location: { href: string } }).location.href, proxyOrigin, open);
     if (real) return originOf(real);
     const helpers = (other as { __g$?: { realOrigin?: unknown } }).__g$;
     const own: unknown = typeof helpers?.realOrigin === "function" ? apply(helpers.realOrigin, helpers, []) : null;
@@ -90,6 +90,8 @@ export function createUrlContext(win: Realm, initial?: InheritedContext, seal?: 
   let inherited = initial;
   const nativeBaseUri = Object.getOwnPropertyDescriptor(win.Node.prototype, "baseURI")?.get;
   let sealer: OriginSealer | null = null;
+  // The seal the window took first: a renewal that drops or changes it could hand the window another origin.
+  let held: OriginSeal | null = null;
   const openSealed: OpenSealed = (pathAndQuery) => (sealer ? sealer.open(pathAndQuery) : null);
   // location and its href cannot be redefined by a page.
   const ownUrl = () => realUrlOf(win.location.href, origin, openSealed);
@@ -97,6 +99,8 @@ export function createUrlContext(win: Realm, initial?: InheritedContext, seal?: 
     const url = parseUrl(href);
     return url && originOf(url) === origin && isSealedPath(pathnameOf(url)) ? pathnameOf(url) + searchOf(url) : null;
   };
+  // An inherited context speaks only for the address the window had when it was given.
+  let inheritedAt = sealedPath(win.location.href);
 
   /**
    * A seal counts only when it opens the window's own sealed address, or names the origin of its plain one, so a tag
@@ -110,11 +114,19 @@ export function createUrlContext(win: Realm, initial?: InheritedContext, seal?: 
     const plain = realUrlOf(win.location.href, origin);
     return plain && originOf(plain) === candidate.origin ? candidate : null;
   };
-  sealer = fitting(seal);
+  const take = (offered: OriginSeal | undefined) => {
+    sealer = fitting(offered);
+    if (sealer && offered && !held)
+      held = { __proto__: null, origin: offered.origin, label: offered.label, key: offered.key } as OriginSeal;
+  };
+  take(seal);
 
   const realUrl = (): URL => {
     const real = ownUrl();
     if (real) return real;
+    // A sealed page that came into this window without its seal is not the inherited page: it names no origin.
+    const sealed = sealedPath(win.location.href);
+    if (sealed !== null && sealed !== inheritedAt) return newUrl(origin);
     // A frame with an opaque address takes the inherited base, if it is usable.
     const base = inherited ? parseUrl(inherited.base) : null;
     return base ?? parseUrl(win.location.href) ?? newUrl(origin);
@@ -155,14 +167,24 @@ export function createUrlContext(win: Realm, initial?: InheritedContext, seal?: 
     openSealed,
     inherit: (next, offered) => {
       inherited = next;
-      sealer = fitting(offered);
+      inheritedAt = sealedPath(win.location.href);
+      take(offered);
       const own = ownUrl();
       if (own) pinned = originOf(own);
     },
     accepts: (next, offered) => {
-      if (ownUrl() || fitting(offered)) return true;
+      if (held && !sameSeal(held, offered)) return false;
+      // Only the page's own seal names the origin of a sealed address.
+      if (sealedPath(win.location.href) !== null) return fitting(offered) !== null;
+      if (ownUrl()) return true;
       const base = next ? parseUrl(next.base) : null;
       return base !== null && originOf(base) === pinned;
     },
   };
+}
+
+function sameSeal(held: OriginSeal, offered: OriginSeal | undefined): boolean {
+  return (
+    offered !== undefined && offered.origin === held.origin && offered.label === held.label && offered.key === held.key
+  );
 }

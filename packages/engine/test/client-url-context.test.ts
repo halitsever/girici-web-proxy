@@ -94,6 +94,40 @@ describe("sealed addresses", () => {
     expect(ctx.realUrl().href).toBe(page.href);
   });
 
+  it("names no origin for a blank window a sealed page fills until that page's own seal arrives", () => {
+    const win = fakeWin("about:blank");
+    const opener = { origin: proxy, base: "https://opener.test/page" };
+    const ctx = createUrlContext(win, opener);
+    const sealB = master.originSeal("https://b.test");
+    win.location.href = `${proxy}${createOriginSealer(sealB)!.seal(new URL("https://b.test/x"))}`;
+    expect(ctx.realUrl().origin).toBe(proxy);
+    expect(ctx.accepts(opener)).toBe(false);
+    expect(ctx.accepts(opener, seal)).toBe(false);
+    expect(ctx.accepts(undefined, sealB)).toBe(true);
+    ctx.inherit(undefined, sealB);
+    expect(ctx.realUrl().href).toBe("https://b.test/x");
+  });
+
+  it("refuses a renewal that drops or changes the seal it holds", () => {
+    const other = new MasterSealer(new Uint8Array(32).fill(3)).originSeal("https://a.test");
+    const sealed = createUrlContext(fakeWin(`${proxy}${own.seal(page)}`), undefined, seal);
+    const plain = createUrlContext(fakeWin(`${proxy}/~/https/a.test/p`), undefined, seal);
+    for (const ctx of [sealed, plain]) {
+      expect(ctx.accepts(undefined)).toBe(false);
+      expect(ctx.accepts(undefined, other)).toBe(false);
+      expect(ctx.accepts(undefined, { ...seal })).toBe(true);
+    }
+  });
+
+  it("lets a document written into a sealed window name the page it was written from", () => {
+    // A javascript: URL's result gets a window of its own at the same address, with only an inherited context.
+    const win = fakeWin(`${proxy}${own.seal(page)}`);
+    const ctx = createUrlContext(win, { origin: proxy, base: page.href });
+    expect(ctx.realUrl().href).toBe(page.href);
+    win.location.href = `${proxy}${own.seal(new URL("https://a.test/elsewhere"))}`;
+    expect(ctx.realUrl().origin).toBe(proxy);
+  });
+
   it("ignores a seal for another origin than the page's own", () => {
     const ctx = createUrlContext(fakeWin(`${proxy}/~/https/a.test/p`), undefined, master.originSeal("https://b.test"));
     expect(ctx.documentAddress(new URL("https://b.test/x"))).toBe("/~/https/b.test/x");

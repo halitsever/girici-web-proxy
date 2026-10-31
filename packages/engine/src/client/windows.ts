@@ -104,18 +104,19 @@ export function createWindowGuard(
   const addressOrigin = (target: object): string | null => {
     try {
       const href = (target as { location: { href: string } }).location.href;
+      const real = realUrlOf(href, ctx.origin, ctx.openSealed);
+      if (real) return originOf(real);
       const address = parseUrl(href);
-      // A sealed address is the window's own page, whose runtime names the origin this realm cannot decode.
+      // Another origin's sealed address: only that page's runtime, once it holds the page's seal, can name it.
       if (address && originOf(address) === ctx.origin && isSealedPath(pathnameOf(address))) {
         return realOriginOf(target, ctx.origin);
       }
-      const real = realUrlOf(href, ctx.origin);
-      return real ? originOf(real) : null;
+      return null;
     } catch {
       return null;
     }
   };
-  const sameOrigin = (target: object) => realOriginOf(target, ctx.origin) === selfOrigin();
+  const sameOrigin = (target: object) => realOriginOf(target, ctx.origin, ctx.openSealed) === selfOrigin();
   const deny = (): never => {
     throw new DOMException(
       `Blocked a frame with origin "${selfOrigin()}" from accessing a cross-origin frame.`,

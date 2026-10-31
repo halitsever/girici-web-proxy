@@ -7,7 +7,8 @@ import {
   renewExisting,
 } from "../src/client/renewal.ts";
 import { install } from "../src/client/runtime.ts";
-import type { Realm } from "../src/client/url-context.ts";
+import { createUrlContext, type Realm } from "../src/client/url-context.ts";
+import { createOriginSealer, MasterSealer } from "../src/shared/sealed-address.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../src/shared/protocol.ts";
 
@@ -178,6 +179,28 @@ describe("createRenew", () => {
     const script = () => ({ src: engineSrc, config: JSON.stringify(next) });
     expect(createRenew(script, origin, steps, (value) => value.site !== "https://b.test")()).toBe(false);
     expect(seen).toEqual([]);
+  });
+
+  it("renews a blank popup on a sealed address only with that page's seal, whatever the opener did to JSON.parse", () => {
+    const sealB = new MasterSealer(new Uint8Array(32).fill(4)).originSeal("https://b.test");
+    const win = { location: { href: "about:blank", origin }, Node: { prototype: {} } } as unknown as Realm;
+    const opener = { origin, base: "https://a.test/opener" };
+    const ctx = createUrlContext(win, opener);
+    (win.location as { href: string }).href =
+      `${origin}${createOriginSealer(sealB)!.seal(new URL("https://b.test/x"))}`;
+    const { seen, steps } = recorded();
+    const renew = (written: object) =>
+      createRenew(
+        () => ({ src: engineSrc, config: JSON.stringify(written) }),
+        origin,
+        steps,
+        (value) => ctx.accepts(value.inherit, value.seal),
+      );
+    const nativeParse = JSON.parse;
+    const forge = { value: (text: string) => ({ ...(nativeParse(text) as object), seal: undefined, inherit: opener }) };
+    expect(renew({ v: PROTOCOL_VERSION, cookies: [], inherit: opener })()).toBe(false);
+    expect(withReplaced(JSON, "parse", forge, renew({ v: PROTOCOL_VERSION, cookies: [], seal: sealB }))).toBe(true);
+    expect(seen.map((value) => value.seal)).toEqual([sealB]);
   });
 });
 

@@ -30,6 +30,7 @@ function guardFor(
   invoke: Invoke = direct,
   navigated: string[] = [],
   swapBlob?: (url: string) => string,
+  openSealed: (pathAndQuery: string) => URL | null = () => null,
 ) {
   // A realm's own window getters, which read whatever window they are applied to. This realm is a top-level window.
   const win = { DOMException, postMessage: () => {} } as unknown as Realm;
@@ -43,6 +44,7 @@ function guardFor(
   const ctx = {
     origin: proxy,
     realUrl: () => new URL(`${realOrigin}/page`),
+    openSealed,
     toProxy: (raw: string) => {
       navigated.push(raw);
       return `${proxy}/~/proxied/${raw}`;
@@ -143,6 +145,23 @@ describe("createWindowGuard", () => {
     real = "https://a.test";
     popup.location.href = `${proxy}/~/x/LabelOfA.Body`;
     expect(wrapped.document).toBe(document);
+  });
+
+  it("opens a window on its own origin's sealed address itself, and trusts no runtime that cannot", () => {
+    const opened: string[] = [];
+    const guard = guardFor("https://a.test", direct, [], undefined, (pathAndQuery) => {
+      opened.push(pathAndQuery);
+      return pathAndQuery === "/~/x/LabelOfA.Body" ? new URL("https://a.test/back") : null;
+    });
+    const document = { title: "a" };
+    const popup = fakeWindow(`${proxy}/~/x/LabelOfA.Body`, proxy, { document });
+    popup.parent = popup;
+    expect((guard.wrap(popup, "https://b.test") as Record<string, unknown>).document).toBe(document);
+    // A runtime without the page's seal names the proxy origin, which tells nothing.
+    const other = fakeWindow(`${proxy}/~/x/LabelOfB.Body`, proxy, { __g$: { realOrigin: () => proxy }, document });
+    other.parent = other;
+    expect(() => (guard.wrap(other) as Record<string, unknown>).document).toThrow(/SecurityError|Blocked/);
+    expect(opened).toContain("/~/x/LabelOfA.Body");
   });
 
   it("keeps each window's first answer until the document changes", () => {
