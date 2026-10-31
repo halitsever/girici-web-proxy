@@ -56,8 +56,9 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
   const go = (value: unknown, mode: "assign" | "replace") => {
     // Converted once, so a value cannot read as a web URL to the check and as javascript: to the parser.
     const text = toText(value);
-    // Own members only: an env a page's Object.prototype could fill in would let it pick the owner.
+    // Own members only: an env a page's Object.prototype could fill in would let it pick the owner or the address.
     const owner = ownValue(env, "owner");
+    const address = ownValue(env, "address");
     const script = rewriteJavascriptUrl(text, typeof owner === "function" ? toText(owner()) : originOf(env.real()));
     if (script !== null) {
       env.navigate(script, mode);
@@ -69,7 +70,8 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
       env.setHash(hashOf(target));
       return;
     }
-    env.navigate(isWebUrl(target) ? (env.address ? env.address(target) : encodeUrl(target)) : hrefOf(target), mode);
+    if (!isWebUrl(target)) env.navigate(hrefOf(target), mode);
+    else env.navigate(typeof address === "function" ? toText(address(target)) : encodeUrl(target), mode);
   };
 
   // Null prototypes throughout, so no descriptor field comes from the page's Object.prototype.

@@ -90,6 +90,7 @@ describe("createFakeLocation", () => {
     const additions = {
       ...DESCRIPTOR_ADDITIONS,
       owner: { value: () => "https://evil.test", writable: true },
+      address: { value: () => "javascript:alert(document.domain)", writable: true },
     };
     const calls = withPrototypeAdditions(additions, () => {
       const { location, calls } = setup();
