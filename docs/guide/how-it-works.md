@@ -83,9 +83,11 @@ subresources. Turning on public access opens the data path to everyone and skips
     part, so someone who sees two addresses can tell they are the same page or the same site.
   - Only top-level page loads are encrypted. Frames, and pages reached by a form `POST`, keep a plain address.
   - `document.referrer` is empty when an encrypted page of another site linked to the page.
-  - A link to another site, `window.open` and the Navigation API first load the plain address, which the service
-    worker redirects to the encrypted one. Whether a browser lists that first address in its history has not been
-    checked yet.
+  - Some loads go to the plain address first, which the service worker redirects to the encrypted one: a link to
+    another site, `window.open`, the Navigation API, and a site opened from Girici's own search field when the
+    worker is slow to answer. Browsers may keep that first address in their history, so encrypted addresses do not
+    keep sites out of it.
+  - Girici's own recent sites list keeps real addresses. Turn off **Remember history** to stop that.
   - A `../../x` URL that the rewriter missed resolves from the site's root.
 
 ## Toolbar and site data

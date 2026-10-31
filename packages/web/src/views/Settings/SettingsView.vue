@@ -301,8 +301,9 @@ onMounted(async () => {
         <div>
           <p class="text-[14px] font-medium">Encrypt page addresses</p>
           <p class="text-[13px] text-muted-foreground">
-            Hides the sites you open from this browser's history and address bar. Links you copy will not open in
-            another browser.
+            Pages open at encrypted addresses, so the address bar does not name the site. The browser's history may
+            still list some plain addresses, and recent sites keep real ones. Links you copy will not open in another
+            browser.
           </p>
           <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">Turned on for everyone by the admin.</p>
         </div>
@@ -341,7 +342,8 @@ onMounted(async () => {
         <div>
           <p class="text-[14px] font-medium">Encrypt page addresses for everyone</p>
           <p class="text-[13px] text-muted-foreground">
-            Turns on encrypted page addresses in every visitor's browser. Visitors cannot turn it off.
+            Turns on encrypted page addresses in every visitor's browser. Visitors cannot turn it off. Browsers that
+            have Girici open pick the change up on a page load within a minute.
           </p>
           <p v-if="instanceSealError" class="mt-1 text-[13px] text-gi-danger">{{ instanceSealError }}</p>
         </div>

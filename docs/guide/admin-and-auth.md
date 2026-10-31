@@ -94,9 +94,12 @@ blocked on this server. You can paste a full URL; Girici keeps only its host nam
 ## Encrypted page addresses
 
 Each visitor can turn on **Settings → Encrypt page addresses**. Pages then open at addresses such as
-`/~/x/<token>` instead of `/~/https/example.com/...`, so the sites a visitor opened do not show in the browser's
-history or address bar. The key lives in that browser only: a copied link does not open in another browser, and
-it stops opening if the browser's data for Girici is wiped. Clearing site data in Settings keeps the key.
+`/~/x/<token>` instead of `/~/https/example.com/...`, so the address bar shows a token instead of the site. It
+does not keep sites out of the browser's history. A link to another site, `window.open` and the Navigation API
+first load the plain `/~/https/...` address, which the service worker then redirects to the token, and browsers
+may keep that first address in their history. Girici's own recent sites list (**Remember history**) also keeps
+real addresses. The key lives in that browser only: a copied link does not open in another browser, and it stops
+opening if the browser's data for Girici is wiped. Clearing site data in Settings keeps the key.
 
 An admin can turn on **Settings → Admin → Encrypt page addresses for everyone**. It asks for the current password,
 like the other admin settings. While it is on, every visitor's switch shows on and cannot be turned off. A browser
