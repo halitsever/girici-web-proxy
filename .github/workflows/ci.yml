@@ -43,6 +43,13 @@ jobs:
           curl -fsS -o /dev/null http://localhost:3000/_g/sw.js
           docker stop -t 5 girici
           test "$(docker inspect -f '{{.State.ExitCode}}' girici)" = 0
+      # No QEMU on purpose: the arm64 stage must stay free of RUN steps so releases build without emulation.
+      - name: Build for arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
 
   e2e:
     runs-on: ubuntu-latest
