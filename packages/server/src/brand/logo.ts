@@ -26,13 +26,16 @@ function isSvg(bytes: Uint8Array): boolean {
   } catch {
     return false;
   }
-  if (text.includes("<!ENTITY")) return false;
+  // Browsers decode by the declared encoding, so anything but UTF-8 could show markup this reading never saw.
+  if (text.includes("<!ENTITY") || text.includes("\x1b")) return false;
   let rest = text;
   for (;;) {
     rest = rest.trimStart();
     if (rest.startsWith("<?xml")) {
       const end = rest.indexOf("?>");
       if (end < 0) return false;
+      const encoding = /\sencoding\s*=\s*["']([^"']*)["']/.exec(rest.slice(0, end))?.[1];
+      if (encoding !== undefined && encoding.toLowerCase() !== "utf-8") return false;
       rest = rest.slice(end + 2);
     } else if (rest.startsWith("<!--")) {
       const end = rest.indexOf("-->");

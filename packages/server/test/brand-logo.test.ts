@@ -27,6 +27,16 @@ describe("logo", () => {
     ).toBeNull();
   });
 
+  it("refuses an SVG that names another encoding, which browsers would decode differently", () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    expect(sniffLogo(Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>${svg}`))).toBe("image/svg+xml");
+    expect(sniffLogo(Buffer.from(`<?xml version='1.0' encoding='utf-8'?>${svg}`))).toBe("image/svg+xml");
+    expect(sniffLogo(Buffer.from(`<?xml version="1.0" encoding="ISO-2022-JP"?>${svg}`))).toBeNull();
+    expect(sniffLogo(Buffer.from(`<?xml version="1.0" encoding = "windows-1252"?>${svg}`))).toBeNull();
+    // ISO-2022-JP switches with escape sequences, which can hide markup from a UTF-8 reading.
+    expect(sniffLogo(Buffer.from(`<svg>\x1b(J</svg>`))).toBeNull();
+  });
+
   it("refuses an upload whose bytes do not match its type, or that is too large", () => {
     expect(readLogoUpload({ type: "image/png", data: b64(PNG) })?.type).toBe("image/png");
     expect(readLogoUpload({ type: "image/svg+xml", data: b64(PNG) })).toBeNull();
