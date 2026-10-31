@@ -7,7 +7,7 @@
 <h1 align="center">Girici</h1>
 
 <p align="center">
-A self-hosted web proxy built on its own service worker engine.
+🌐 Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.
 <br/>
 <br/>
 <img src="https://img.shields.io/github/sponsors/halitsever"/>
@@ -16,13 +16,28 @@ A self-hosted web proxy built on its own service worker engine.
 <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker"/></a>
 </p>
 
+> **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.
+> `latest` now points to v2; the last v1 image stays available as `halitsever/girici-web-proxy:v1`.
+
+<div align="center">
+<img src="https://halitsever-api.vercel.app/api/details"/>
+</div>
+
+- 📝 [**Http/Https Support**](#) - http/https protocols are supported
+- 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
+- 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
+- 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
+
 Girici runs on a server you control and lets you browse other sites through it. Pages open from Girici's own
 address, and a service worker in your browser rewrites them so links, forms, logins, media and WebSockets keep
 working inside the proxy. The server only checks and relays the traffic.
 
-<p align="center">
-<img src="docs/public/screenshot.png" alt="The Girici browse screen" width="820"/>
-</p>
+<div align="center">
+<b>Screenshot</b>
+<br/>
+<br/>
+<img src="docs/public/screenshot.png" alt="Girici Web Proxy Node.js Screenshot" width="820"/>
+</div>
 
 **[Documentation](https://halitsever.github.io/girici-web-proxy/)** ·
 [Getting started](https://halitsever.github.io/girici-web-proxy/guide/getting-started) ·
