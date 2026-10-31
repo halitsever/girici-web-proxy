@@ -1,4 +1,4 @@
-import { append, listIncludes } from "../shared/primordials.ts";
+import { append, apply, exec, listIncludes, sliceOf, startsWith, toText } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { parseConfig } from "./config.ts";
 import type { Realm } from "./url-context.ts";
@@ -10,13 +10,10 @@ export interface EngineScript {
 
 const CLIENT_FILE = /^\/_g\/client\.[A-Za-z0-9]+\.js$/;
 
-// Taken at load, so a page that replaced them never steers which script counts as the engine's.
-const apply = Reflect.apply;
-const toText = String;
-
 /** Only the engine's own file on our origin may renew a window: every way a page inserts a script rewrites its src. */
 export function engineScriptConfig(script: EngineScript | null, origin: string): ClientConfig | null {
-  if (!script?.src.startsWith(`${origin}/`) || !CLIENT_FILE.test(script.src.slice(origin.length))) return null;
+  if (!script || !startsWith(script.src, `${origin}/`)) return null;
+  if (exec(CLIENT_FILE, sliceOf(script.src, origin.length)) === null) return null;
   // A broken config must not renew the window to an empty, unblocked cookie mirror.
   const config = parseConfig(script.config);
   return config?.v === PROTOCOL_VERSION ? config : null;
@@ -33,9 +30,10 @@ export function captureCurrentScript(win: Realm): () => EngineScript | null {
       const script = currentScript ? (apply(currentScript, win.document, []) as object | null) : null;
       if (!script || !src) return null;
       return {
+        __proto__: null,
         src: toText(apply(src, script, [])),
         config: apply(getAttribute, script, ["data-girici"]) as string | null,
-      };
+      } as EngineScript;
     } catch {
       // An SVG script has no HTML src and is never the engine's.
       return null;

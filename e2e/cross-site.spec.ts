@@ -99,3 +99,28 @@ test("runs no code another site sends to its top through javascript: URLs", asyn
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ pwned: 0 });
 });
+
+for (const [name, open] of [
+  ["a blank popup", ["#blank"]],
+  ["a popup of the same site", ["#same", "#hold"]],
+] as const) {
+  test(`takes ${name} away from its opener once the opener sends it to another site`, async ({ page }) => {
+    await openThroughUi(page, "https://site-a.test/xs-held");
+    const popupEvent = page.waitForEvent("popup");
+    await page.click(open[0]);
+    const popup = await popupEvent;
+    await popup.waitForLoadState();
+    if (open[1]) await page.click(open[1]);
+    await page.click("#away");
+    await popup.waitForURL(/\/~\/https\/site-b\.test\/xs-opened/);
+    await expect(popup.locator("#results")).not.toBeEmpty();
+    await page.click("#check");
+    await expect(page.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+      before: "open",
+      document: "SecurityError",
+      global: "SecurityError",
+      closed: false,
+    });
+  });
+}

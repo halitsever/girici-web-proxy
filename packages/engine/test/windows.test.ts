@@ -31,12 +31,12 @@ function guardFor(
   navigated: string[] = [],
   swapBlob?: (url: string) => string,
 ) {
-  // A realm's own window getters, which read whatever window they are applied to.
+  // A realm's own window getters, which read whatever window they are applied to. This realm is a top-level window.
   const win = { DOMException, postMessage: () => {} } as unknown as Realm;
   for (const name of ["closed", "length", "top", "parent", "opener"]) {
     Object.defineProperty(win, name, {
       get(this: Record<string, unknown>) {
-        return this[name];
+        return this === (win as unknown) ? (name === "top" || name === "parent" ? win : null) : this[name];
       },
     });
   }
@@ -153,6 +153,40 @@ describe("createWindowGuard", () => {
     expect(guard.wrap(child)).toBe(child);
     guard.reset();
     expect(guard.isWrapper(guard.wrap(child))).toBe(true);
+  });
+
+  it("hands out another tab only through a wrapper that follows the site the tab shows now", () => {
+    const guard = guardFor("https://a.test");
+    const runtime = { realOrigin: () => "https://a.test" };
+    const popup = fakeWindow("about:blank", proxy, { __g$: runtime, document: "blank", Image: class {} });
+    popup.parent = popup;
+    popup.globalThis = popup;
+    const held = guard.wrap(popup) as Record<string, unknown>;
+    expect(guard.isWrapper(held)).toBe(true);
+    expect(held.document).toBe("blank");
+    expect(held.globalThis).toBe(held);
+    expect(held.Image).toBe(popup.Image);
+    popup.location.href = `${proxy}/~/https/b.test/`;
+    expect(() => held.document).toThrow(/SecurityError|Blocked/);
+    expect(guard.wrap(popup)).toBe(held);
+    const opened = fakeWindow(`${proxy}/~/https/a.test/x`, "", { document: "a" });
+    opened.parent = opened;
+    const sameSite = guard.wrap(opened, "https://a.test") as Record<string, unknown>;
+    expect(guard.isWrapper(sameSite)).toBe(true);
+    opened.location.href = `${proxy}/~/https/b.test/`;
+    expect(() => sameSite.document).toThrow(/SecurityError|Blocked/);
+  });
+
+  it("constructs through a wrapper with the window's own constructors", () => {
+    const guard = guardFor("https://a.test");
+    class Native {
+      readonly made = true;
+    }
+    const popup = fakeWindow(`${proxy}/~/https/b.test/`, "", { Native });
+    const wrapped = guard.wrap(popup) as { Native: typeof Native };
+    popup.location.href = `${proxy}/~/https/a.test/callback`;
+    expect(new wrapped.Native()).toBeInstanceOf(Native);
+    expect(new Native()).toBeInstanceOf(wrapped.Native);
   });
 
   it("gives full access through a wrapper while its window shows this origin", () => {

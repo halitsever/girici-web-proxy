@@ -1,4 +1,17 @@
-import { apply } from "../shared/primordials.ts";
+import {
+  append,
+  apply,
+  hrefOf,
+  isArray,
+  mapOf,
+  newUrl,
+  ownValue,
+  parseJson,
+  quoteJson,
+  sliceOf,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { WS_PREP_PATH } from "../shared/protocol.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -19,14 +32,22 @@ function sendableClose(code: number | undefined): number | undefined {
 
 function protocolList(protocols: string | string[] | undefined): string[] {
   if (protocols == null) return [];
-  return Array.isArray(protocols) ? protocols : [protocols];
+  return isArray(protocols) ? mapOf(protocols, toText) : [toText(protocols)];
+}
+
+/** Written out from strings, so neither a replaced JSON.stringify nor a toJSON the page added ever sees the seal. */
+function openingFrame(url: string, protocols: string[], seal: string | null): string {
+  let list = "";
+  for (let index = 0; index < protocols.length; index++)
+    list += (index ? "," : "") + quoteJson(protocols[index] as string);
+  return `{"u":${quoteJson(url)},"p":[${list}],"s":${seal === null ? "null" : quoteJson(seal)}}`;
 }
 
 /** Route page WebSockets through the server relay while keeping the browser API intact. */
 export function installWebSocket(win: Realm, ctx: UrlContext): void {
   const Native = win.WebSocket;
   const nativeFetch = win.fetch;
-  const relayUrl = ctx.origin.replace(/^http/, "ws") + "/_g/ws";
+  const relayUrl = (startsWith(ctx.origin, "http") ? `ws${sliceOf(ctx.origin, 4)}` : ctx.origin) + "/_g/ws";
 
   class GiriciWebSocket extends win.EventTarget {
     static readonly CONNECTING = 0;
@@ -53,8 +74,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
 
     constructor(url: string | URL, protocols?: string | string[]) {
       super();
-      const real = new URL(String(url), ctx.realUrl().href);
-      this.url = real.href;
+      const real = newUrl(toText(url), ctx.realUrl());
+      this.url = hrefOf(real);
       void this.#connect(real, protocolList(protocols));
     }
 
@@ -67,11 +88,14 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       let seal: string | null = null;
       try {
         const response = await nativeFetch(ctx.origin + WS_PREP_PATH, {
+          __proto__: null,
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ url: real.href }),
-        });
-        if (response.ok) seal = ((await response.json()) as { seal?: string | null }).seal ?? null;
+          headers: { __proto__: null, "content-type": "application/json" } as unknown as HeadersInit,
+          body: `{"url":${quoteJson(hrefOf(real))}}`,
+        } as RequestInit);
+        const answer: unknown = response.ok ? await response.json() : null;
+        const given = typeof answer === "object" && answer !== null ? ownValue(answer, "seal") : null;
+        seal = typeof given === "string" ? given : null;
       } catch {
         // Fall back to no cookie; the handshake may still succeed for an unauthenticated socket.
       }
@@ -79,7 +103,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       const inner = new Native(relayUrl, [SUBPROTOCOL]);
       inner.binaryType = "arraybuffer";
       this.#inner = inner;
-      inner.onopen = () => inner.send(JSON.stringify({ u: real.href, p: protocols, s: seal }));
+      inner.onopen = () => inner.send(openingFrame(hrefOf(real), protocols, seal));
       inner.onmessage = (event: MessageEvent) => this.#fromRelay(event.data);
       inner.onclose = (event: CloseEvent) => this.#closed(event.code, event.reason, event.wasClean);
       inner.onerror = () => {
@@ -89,14 +113,16 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
 
     #fromRelay(data: unknown): void {
       if (!this.#opened) {
-        let control: { t?: string; p?: string } | null = null;
+        let control: unknown = null;
         try {
-          control = typeof data === "string" ? (JSON.parse(data) as { t?: string; p?: string }) : null;
+          control = typeof data === "string" ? parseJson(data) : null;
         } catch {
           control = null;
         }
-        if (control?.t === "open") this.#open(control.p);
-        else this.#inner?.close();
+        if (typeof control === "object" && control !== null && ownValue(control, "t") === "open") {
+          const protocol = ownValue(control, "p");
+          this.#open(typeof protocol === "string" ? protocol : undefined);
+        } else this.#inner?.close();
         return;
       }
       if (isArrayBuffer(data) && this.binaryType === "blob")
@@ -119,7 +145,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
 
     send(data: string | ArrayBuffer | Blob | ArrayBufferView): void {
       if (this.readyState === 0) {
-        this.#queue.push(data);
+        append(this.#queue, data);
         this.#bufferedBeforeOpen += sizeOf(data);
         return;
       }

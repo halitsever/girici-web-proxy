@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFakeLocation, type LocationEnv } from "../src/client/location.ts";
+import { DESCRIPTOR_ADDITIONS, withPrototypeAdditions } from "./replaced-builtins.ts";
 
 function setup(href = "https://site.test/dir/page?x=1#h") {
   let current = new URL(href);
@@ -83,6 +84,20 @@ describe("createFakeLocation", () => {
       `assign javascript:__g$.J("'<p>x</p>'","https://site.test")`,
       'replace javascript:__g$.J("void 0","https://site.test")',
     ]);
+  });
+
+  it("takes no env member and no descriptor field from the page's Object.prototype", () => {
+    const additions = {
+      ...DESCRIPTOR_ADDITIONS,
+      owner: { value: () => "https://evil.test", writable: true },
+    };
+    const calls = withPrototypeAdditions(additions, () => {
+      const { location, calls } = setup();
+      location.href = "javascript:void 0";
+      location.href = "https://b.test/";
+      return calls;
+    });
+    expect(calls).toEqual(['assign javascript:__g$.J("void 0","https://site.test")', "assign /~/https/b.test/"]);
   });
 
   it("reads a URL object once, so a later conversion cannot turn it into javascript:", () => {

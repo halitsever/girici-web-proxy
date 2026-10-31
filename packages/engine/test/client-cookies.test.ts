@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { installCookies } from "../src/client/cookies.ts";
 import { encodeHeaderValue, PROTOCOL_VERSION, type CookieSnapshot } from "../src/shared/protocol.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
-import { withReplaced } from "./replaced-builtins.ts";
+import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 type Handler = (event: { data: unknown }) => void;
 
@@ -117,6 +117,58 @@ describe("installCookies", () => {
     send({ type: "girici:cookies", v: 1, changes: [fromOtherTab] });
     send({ type: "cookies", v: PROTOCOL_VERSION, changes: [fromOtherTab] });
     expect(document.cookie).toBe("");
+  });
+
+  it("reads worker messages and sync headers with natives taken at load and own fields only", () => {
+    const { win, ctx, document, container, send } = makeRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    withReplaced(Array, "isArray", { value: () => false }, () =>
+      send({ type: "girici:cookies", v: PROTOCOL_VERSION, changes: [fromOtherTab] }),
+    );
+    expect(document.cookie).toBe("t=1");
+    withPrototypeAdditions(
+      {
+        type: { value: "girici:cookies", writable: true },
+        v: { value: PROTOCOL_VERSION, writable: true },
+        changes: { value: [cookie("forged", "1")], writable: true },
+      },
+      () => send({}),
+    );
+    send({ type: "girici:cookies", v: PROTOCOL_VERSION, changes: [{ name: "half", value: "1" }] });
+    expect(document.cookie).toBe("t=1");
+    const header = encodeHeaderValue(JSON.stringify([cookie("synced", "1")]));
+    withReplaced(JSON, "parse", { value: () => [cookie("forged", "1")] }, () => bridge.applySync(header));
+    expect(document.cookie).toBe("t=1; synced=1");
+  });
+
+  it("writes its RPC body without the page's JSON.stringify or toJSON", () => {
+    const bodies: unknown[] = [];
+    const { win, ctx, document, container } = makeRealm();
+    (win as unknown as { fetch: unknown }).fetch = (_url: unknown, init: { body: unknown }) => {
+      bodies.push(init.body);
+      return Promise.resolve({ status: 200, json: () => Promise.resolve({ cookies: [] }) });
+    };
+    installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    const seen: unknown[] = [];
+    withReplaced(JSON, "stringify", { value: (value: unknown) => (seen.push(value), "{}") }, () =>
+      withPrototypeAdditions({ toJSON: { value: () => "forged", writable: true } }, () => {
+        document.cookie = 'k="1"';
+      }),
+    );
+    expect(seen).toEqual([]);
+    expect(JSON.parse(bodies[0] as string)).toEqual({ v: PROTOCOL_VERSION, seq: 1, cookie: 'k="1"' });
   });
 
   it("constructs no BroadcastChannel", () => {
