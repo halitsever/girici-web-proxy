@@ -16,11 +16,11 @@ stops the server with a message naming the variable.
 | `GIRICI_RATE_LIMIT` | `3000` | Proxy requests per client per minute, with bursts up to the same number. The signed-in admin is never limited. `0` turns it off. |
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, comma or space separated. Each entry also blocks its subdomains. The admin can add more in Settings. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all upstream traffic through this proxy: `http://`, `https://`, `socks5://` or `socks5h://`, with optional `user:password@`. |
-| `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret. Set the same value on every replica so sessions validate across them. |
-| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters) instead of the random one printed at startup. |
+| `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica so sessions validate across them. |
+| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
 
-Booleans accept `true`/`1`/`yes`/`on` and their negatives.
+Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
 
 ## Trust proxy
 
@@ -28,7 +28,8 @@ The client address is the key the login and proxy rate limits use. Behind a reve
 `X-Forwarded-For` only when `GIRICI_TRUST_PROXY` is set.
 
 Set it to the **number of proxies** in front of Girici (for example `1` behind a single reverse proxy),
-not `true`. The value `true` trusts a header the client can spoof, which lets an attacker rotate it to
+not `true`. It also takes a comma-separated list of proxy addresses and subnets, or the names `loopback`,
+`linklocal` and `uniquelocal`; a value Girici cannot read stops startup. The value `true` trusts a header the client can spoof, which lets an attacker rotate it to
 defeat the login rate limit. Leaving it unset behind a real proxy has the opposite problem: every client
 collapses to one bucket.
 
@@ -50,8 +51,9 @@ proxy as the video traffic.
 
 ## Data directory
 
-The admin account and settings live in `${GIRICI_DATA_DIR}/girici.db`. Back up that file to keep the
-account and settings. In Docker, mount a volume at the data directory so it survives restarts; see
+The admin account and settings live in `${GIRICI_DATA_DIR}/girici.db`. SQLite runs in WAL mode, so
+recent changes can sit in `girici.db-wal` next to it while Girici runs. Back up the whole directory with
+Girici stopped, or use `sqlite3 girici.db ".backup backup.db"` while it runs. In Docker, mount a volume at the data directory so it survives restarts; see
 [Running with Docker](/guide/docker).
 
 ## Source link and AGPL

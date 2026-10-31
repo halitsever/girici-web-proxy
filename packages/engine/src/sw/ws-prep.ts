@@ -1,3 +1,4 @@
+import { parseUrl } from "../shared/primordials.ts";
 import type { CookieService } from "./cookies/jar.ts";
 
 export interface WsPrep {
@@ -17,7 +18,7 @@ export async function buildWsPrep(
   pageUrl: URL | null,
   allowCookies: (target: URL) => boolean | Promise<boolean> = () => true,
 ): Promise<WsPrep | null> {
-  const ws = URL.parse(rawUrl);
+  const ws = parseUrl(rawUrl);
   if (!ws || (ws.protocol !== "ws:" && ws.protocol !== "wss:")) return null;
   const target = new URL(ws.href);
   target.protocol = ws.protocol === "wss:" ? "https:" : "http:";
