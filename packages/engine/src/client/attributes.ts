@@ -373,7 +373,7 @@ export function installAttributes(
     try {
       if (!isRefresh(target)) return;
       const content = apply(getAttribute, target, ["content"]) as string | null;
-      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin, blobs.swap, owner());
+      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin);
       if (next !== content) apply(setAttribute, target, ["content", next]);
     } catch {
       // Not an element of this realm.
@@ -383,7 +383,7 @@ export function installAttributes(
   function rewrite(target: Element, name: string, value: string): string {
     const attribute = lowerTrim(name);
     if (attribute === "content" && isRefresh(target)) {
-      return rewriteRefresh(value, ctx.realBase(), ctx.origin, blobs.swap, owner());
+      return rewriteRefresh(value, ctx.realBase(), ctx.origin);
     }
     const kind = attributeKind(tagOf(target), name);
     if (kind === "html") {

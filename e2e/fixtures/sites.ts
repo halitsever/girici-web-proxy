@@ -1355,6 +1355,8 @@ const DOORS_BLOB_SINKS = page(
 <iframe name="t-svg"></iframe><iframe name="t-xlink"></iframe><iframe name="t-form"></iframe><iframe name="t-request"></iframe>
 <iframe id="nav"></iframe><iframe id="writer"></iframe><iframe name="t-docopen"></iframe>
 <iframe id="meta-attr"></iframe><iframe id="meta-property"></iframe><iframe id="meta-markup"></iframe>
+<iframe id="meta-space"></iframe><iframe id="meta-fraction"></iframe><iframe id="meta-quoted"></iframe>
+<iframe id="meta-web"></iframe>
 <div id="box"></div>
 <script>
   const ran = [];
@@ -1482,6 +1484,17 @@ const DOORS_BLOB_SINKS = page(
     byProperty.httpEquiv = "refresh";
     refresh("meta-property").head.appendChild(byProperty);
     refresh("meta-markup").body.innerHTML = '<meta http-equiv="refresh" content="0;url=' + svg("meta-markup") + '">';
+    // Spellings the browser's refresh parser accepts.
+    refresh("meta-space").body.innerHTML = '<meta http-equiv="refresh" content="0 url=' + svg("meta-space") + '">';
+    const fraction = refresh("meta-fraction").createElement("meta");
+    fraction.setAttribute("http-equiv", "refresh");
+    fraction.setAttribute("content", ".5;url=" + svg("meta-fraction"));
+    refresh("meta-fraction").head.appendChild(fraction);
+    const quoted = refresh("meta-quoted").createElement("meta");
+    quoted.httpEquiv = "refresh";
+    quoted.content = "0;url='" + svg("meta-quoted") + "' x";
+    refresh("meta-quoted").head.appendChild(quoted);
+    refresh("meta-web").body.innerHTML = '<meta http-equiv="refresh" content="0 url=https://site-b.test/">';
 
     setTimeout(() => (byId("results").textContent = JSON.stringify({ ran: ran.sort(), readBack })), 4000);
   };

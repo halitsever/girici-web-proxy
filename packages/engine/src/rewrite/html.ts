@@ -237,7 +237,7 @@ class HtmlRewriter {
       });
     }
     if (tag === "meta" && name === "content" && keyword(attribs["http-equiv"]) === "refresh") {
-      return rewriteRefresh(value, this.#base, origin, this.#options.swapBlob, this.#owner);
+      return rewriteRefresh(value, this.#base, origin);
     }
     return value;
   }

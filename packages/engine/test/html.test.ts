@@ -239,14 +239,12 @@ describe("blob swaps", () => {
   const rewrite = (html: string) =>
     rewriteHtml(html, { url: new URL("https://site.test/p"), origin: "http://proxy.test", swapBlob: swap });
 
-  it("swaps blob URLs that load frames and refreshes, and leaves links for click time", () => {
+  it("swaps blob URLs that load frames, drops blob refreshes and leaves links for click time", () => {
     expect(rewrite('<iframe src="blob:http://proxy.test/1"></iframe>')).toContain('src="blob:http://proxy.test/boot(');
     expect(rewrite('<frame src="blob:http://proxy.test/1">')).toContain("boot(");
     expect(rewrite('<object data="blob:http://proxy.test/1"></object>')).toContain("boot(");
     expect(rewrite('<embed src="blob:http://proxy.test/1">')).toContain("boot(");
-    expect(rewrite('<meta http-equiv="refresh" content="0;url=blob:http://proxy.test/1">')).toContain(
-      'content="0; url=blob:http://proxy.test/boot(',
-    );
+    expect(rewrite('<meta http-equiv="refresh" content="0;url=blob:http://proxy.test/1">')).toContain('content=""');
     expect(rewrite('<a href="blob:http://proxy.test/1">x</a>')).toBe('<a href="blob:http://proxy.test/1">x</a>');
     expect(rewrite('<img src="blob:http://proxy.test/1">')).toBe('<img src="blob:http://proxy.test/1">');
   });
