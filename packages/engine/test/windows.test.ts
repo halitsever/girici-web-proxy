@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { createWindowGuard, realOriginOf } from "../src/client/windows.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const proxy = "http://proxy.test";
 const direct: Invoke = (fn, self, args) => Reflect.apply(fn, self, args);
@@ -46,6 +47,15 @@ function guardFor(realOrigin: string, invoke: Invoke = direct, navigated: string
 }
 
 describe("realOriginOf", () => {
+  for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
+    it(`reads real origins when ${name} is replaced`, () => {
+      const framed = fakeWindow(`${proxy}/~/https/b.test/x?y`);
+      const blank = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" } });
+      const read = () => [realOriginOf(framed, proxy), realOriginOf(blank, proxy)];
+      expect(withReplaced(target, key, replacement, read)).toEqual(["https://b.test", "https://a.test"]);
+    });
+  }
+
   it("reads the proxy address first, then the window's own runtime", () => {
     expect(realOriginOf(fakeWindow(`${proxy}/~/https/b.test/x?y`), proxy)).toBe("https://b.test");
     const blank = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" } });

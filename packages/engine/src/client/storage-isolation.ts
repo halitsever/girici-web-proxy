@@ -1,18 +1,13 @@
+import { apply, sliceOf, startsWith, toText } from "../shared/primordials.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
-
-// Taken at load, so a replaced Function.prototype.call or String never receives a native or the name.
-const apply = Reflect.apply;
-const toText = String;
-// Names of other partitions pass through these, and a third-party name tells which site embedded which.
-const startsWith = String.prototype.startsWith;
-const slice = String.prototype.slice;
 
 /** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
 export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
   const strip = (name: string): string | null => {
     const prefix = partition();
-    return apply(startsWith, name, [prefix]) ? (apply(slice, name, [prefix.length]) as string) : null;
+    // Names of other partitions pass through here, and a third-party name tells which site embedded which.
+    return startsWith(name, prefix) ? sliceOf(name, prefix.length) : null;
   };
 
   prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], partition);

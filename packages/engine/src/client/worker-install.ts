@@ -6,6 +6,7 @@ import {
   isWebUrl,
   mapOf,
   newUrl,
+  originOf,
   parseUrl,
   startsWith,
   toText,
@@ -134,7 +135,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     // A worker cannot reach a window, so its ports and clients keep their own postMessage.
     messageTarget: (value) => value,
     wrapWindow: (value) => value,
-    realOrigin: () => ctx.realBase().origin,
+    realOrigin: () => originOf(ctx.realBase()),
     // A worker never loads a second document.
     renew: () => false,
   });

@@ -1,7 +1,7 @@
 import type { Invoke } from "./invoke.ts";
 import { post } from "./messaging.ts";
 import { maskNative } from "./native-mask.ts";
-import { hrefOf, originOf, parseUrl } from "../shared/primordials.ts";
+import { apply, hrefOf, NativeWeakMap, NativeWeakSet, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import { realOriginOf, realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
 export { realOriginOf };
@@ -16,7 +16,6 @@ export interface WindowGuard {
 }
 
 // Taken at load: wrappers run inside page calls, after page code may have replaced any of these.
-const apply = Reflect.apply;
 const reflectGet = Reflect.get;
 const reflectSet = Reflect.set;
 const reflectHas = Reflect.has;
@@ -28,13 +27,10 @@ const ownDescriptor = Object.getOwnPropertyDescriptor;
 const defineProperty = Object.defineProperty;
 const create = Object.create;
 const NativeProxy = Proxy;
-const NativeWeakMap = WeakMap;
-const NativeWeakSet = WeakSet;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
 const setHas = WeakSet.prototype.has;
 const setAdd = WeakSet.prototype.add;
-const toText = String;
 
 /** The cross-origin members browsers expose. A null prototype keeps page additions to Object.prototype out of `in`. */
 const CROSS_ORIGIN_KEYS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {

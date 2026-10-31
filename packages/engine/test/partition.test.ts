@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { partitionOrigin, partitionTop, prefixFor, sameSite } from "../src/shared/partition.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+
+describe("partitions with built-ins the page replaced", () => {
+  const sub = new URL("https://sub.a.test/x");
+  const other = new URL("https://b.test/");
+  const cases = () => [
+    sameSite(sub, "https://a.test"),
+    sameSite(other, "https://a.test"),
+    partitionOrigin("__g|https://a.test|db"),
+    partitionTop("__g^|https://t.test|https://a.test|db"),
+    partitionOrigin("__g|x:y|db"),
+  ];
+  const expected = cases();
+  const replaced: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+    ...REPLACED_BUILTINS,
+    ["String.prototype.endsWith", String.prototype, "endsWith", { value: () => true }],
+    ["URL.prototype.hostname", URL.prototype, "hostname", { get: () => "a.test" }],
+  ];
+  for (const [name, target, key, replacement] of replaced) {
+    it(`keeps partitions apart when ${name} is replaced`, () => {
+      expect(withReplaced(target, key, replacement, cases)).toEqual(expected);
+    });
+  }
+});
 
 describe("partition names", () => {
   it("keeps first-party names and marks third-party ones with their top", () => {

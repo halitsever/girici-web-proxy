@@ -1,3 +1,4 @@
+import { apply, isWebUrl, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import type { Invoke } from "./invoke.ts";
 import { realOriginOf, type Realm, type UrlContext } from "./url-context.ts";
 import type { WindowGuard } from "./windows.ts";
@@ -5,17 +6,15 @@ import type { WindowGuard } from "./windows.ts";
 export type Send = (...args: unknown[]) => void;
 
 // Taken at load: the event getters run on page calls, after page code may have replaced these.
-const apply = Reflect.apply;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 const defineProperty = Object.defineProperty;
-const toText = String;
 
 /** Every proxied page runs on our origin, so postMessage targets and the origin reported to receivers are translated. */
 export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, guard: WindowGuard): void {
   const native = win.postMessage;
   const send: Send = (...args) => invoke(native, win, args);
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
-    post(send, ctx.realUrl().origin, ctx.origin, message, targetOrigin, rest);
+    post(send, originOf(ctx.realUrl()), ctx.origin, message, targetOrigin, rest);
   } as typeof win.postMessage;
 
   const proto = win.MessageEvent.prototype;
@@ -63,7 +62,7 @@ export function createMessageSender(
     try {
       // A restricted window's own postMessage already translates.
       if (!isWindow(value) || isWrapper(value)) return value;
-      realOrigin = String(value.origin);
+      realOrigin = toText(value.origin);
     } catch {
       // A cross-origin window hides its origin, and its own postMessage needs no translation.
       return value;
@@ -107,14 +106,9 @@ function resolveTarget(
   if (typeof targetOrigin !== "string" || targetOrigin === "*" || targetOrigin === "/") {
     return { deliver: true, target: targetOrigin };
   }
-  let url: URL;
-  try {
-    url = new URL(targetOrigin);
-  } catch {
-    return { deliver: true, target: targetOrigin };
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return { deliver: true, target: targetOrigin };
-  return url.origin === realOrigin ? { deliver: true, target: proxyOrigin } : { deliver: false };
+  const url = parseUrl(targetOrigin);
+  if (!url || !isWebUrl(url)) return { deliver: true, target: targetOrigin };
+  return originOf(url) === realOrigin ? { deliver: true, target: proxyOrigin } : { deliver: false };
 }
 
 function isWindow(value: unknown): value is Window {

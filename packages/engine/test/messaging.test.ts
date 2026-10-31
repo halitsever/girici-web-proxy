@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
-import { createMessageSender, installMessaging } from "../src/client/messaging.ts";
+import { createMessageSender, installMessaging, post } from "../src/client/messaging.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+
+describe("post with built-ins the page replaced", () => {
+  const cases = () => {
+    const sent: unknown[][] = [];
+    const send = (...args: unknown[]) => sent.push(args);
+    post(send, "https://a.test", "http://proxy.test", "to a", "https://a.test", []);
+    post(send, "https://b.test", "http://proxy.test", "to b", "https://a.test", []);
+    return sent;
+  };
+  const expected = cases();
+  for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
+    it(`addresses messages by real origin when ${name} is replaced`, () => {
+      expect(withReplaced(target, key, replacement, cases)).toEqual(expected);
+    });
+  }
+});
 
 const direct: Invoke = (fn, self, args) => Reflect.apply(fn, self, args);
 

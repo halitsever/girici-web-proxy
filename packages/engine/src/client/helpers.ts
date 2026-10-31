@@ -37,6 +37,9 @@ export interface GiriciHelpers {
   renew(): boolean;
 }
 
+// Taken at load: the destructuring proxy reads through it on page calls.
+const reflectGet = Reflect.get;
+
 /** Window links that can lead to another origin's window. A null prototype keeps page additions out of `in`. */
 const WINDOW_LINKS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
   top: true,
@@ -79,7 +82,7 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
         {
           __proto__: null,
           get: (target, property) => {
-            const value: unknown = Reflect.get(target, property, target);
+            const value: unknown = reflectGet(target, property, target);
             if (property === "location") return L(value);
             return typeof property === "string" && property in WINDOW_LINKS ? env.wrapWindow(value) : value;
           },
@@ -89,9 +92,9 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     // eval returns non-string arguments untouched, so only code strings are rewritten.
     E: (code) => (typeof code === "string" ? env.rewrite.js(code) : code),
     ev: (code) => env.indirectEval(typeof code === "string" ? env.rewrite.js(code) : code),
-    I: (spec) => env.rewrite.importSpecifier(String(spec)),
-    H: (html) => env.rewrite.html(String(html)),
-    M: (url) => env.rewrite.metaUrl(String(url)),
+    I: (spec) => env.rewrite.importSpecifier(toText(spec)),
+    H: (html) => env.rewrite.html(toText(html)),
+    M: (url) => env.rewrite.metaUrl(toText(url)),
     P: (value) => env.messageTarget(value),
     J: (code) => {
       const result = env.indirectEval(env.rewrite.js(toText(code)));

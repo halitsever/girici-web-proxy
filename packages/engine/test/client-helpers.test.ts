@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createHelpers } from "../src/client/helpers.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 function setup() {
   const nativeLocation = { href: "http://proxy.test/~/https/site.test/" };
@@ -79,6 +80,14 @@ describe("createHelpers", () => {
     expect(helpers.W(win)).toBe(win);
     expect(helpers.W(5)).toBe(5);
     expect(helpers.realOrigin()).toBe("https://site.test");
+  });
+
+  it("wraps window links read through destructuring when Reflect.get is replaced", () => {
+    const { helpers, win, frame } = setup();
+    const withLinks = Object.assign(win, { parent: frame });
+    const view = helpers.D(withLinks) as Record<string, unknown>;
+    const read = withReplaced(Reflect, "get", { value: () => "page" }, () => [view.parent, view.location]);
+    expect(read).toEqual([{ wrapped: frame }, { href: "https://site.test/" }]);
   });
 
   it("wraps window links read through destructuring", () => {

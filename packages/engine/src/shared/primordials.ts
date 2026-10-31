@@ -51,8 +51,8 @@ export function sliceOf(text: string, start: number, end?: number): string {
   return apply(nativeSlice, text, [start, end]);
 }
 
-export function indexOf(text: string, search: string): number {
-  return apply(nativeIndexOf, text, [search]);
+export function indexOf(text: string, search: string, from?: number): number {
+  return apply(nativeIndexOf, text, [search, from]);
 }
 
 export function includes(text: string, search: string): boolean {
