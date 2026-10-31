@@ -18,6 +18,7 @@ const nativeToLowerCase = strings.toLowerCase;
 const nativeTrim = strings.trim;
 const nativeCodePointAt = strings.codePointAt;
 const nativeArrayIncludes = Array.prototype.includes;
+const nativeIsArray = Array.isArray;
 const nativeParseInt = parseInt;
 const NativeJson = JSON;
 const jsonStringify = JSON.stringify;
@@ -110,6 +111,13 @@ export function mapOf<T, U>(items: ArrayLike<T>, map: (item: T) => U): U[] {
     } as PropertyDescriptor);
   }
   return result;
+}
+
+export const isArray = nativeIsArray as (value: unknown) => value is unknown[];
+
+/** An own property's value, or undefined; never one a page put on a prototype. */
+export function ownValue(object: object, key: PropertyKey): unknown {
+  return apply(hasOwn, object, [key]) ? (object as Record<PropertyKey, unknown>)[key] : undefined;
 }
 
 export function listIncludes<T>(list: readonly T[], value: T): boolean {

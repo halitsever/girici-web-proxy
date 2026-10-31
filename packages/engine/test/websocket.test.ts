@@ -2,6 +2,7 @@ import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { installWebSocket } from "../src/client/websocket.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -113,6 +114,73 @@ describe("installWebSocket", () => {
     inner.onmessage!({ data: new ArrayBuffer(3) });
     expect(messages[0]).toBe("hello");
     expect(messages[1]).toBeInstanceOf(Blob);
+  });
+
+  it("reads the control frame with natives taken at load and its own fields only", async () => {
+    const win = makeWin();
+    installWebSocket(win, ctx);
+    MockWs.instances.length = 0;
+    const states: number[] = [];
+    for (const [frame, run] of [
+      ['{"x":1}', (go: () => void) => withPrototypeAdditions({ t: { value: "open", writable: true } }, go)],
+      ['{"t":"open"}', (go: () => void) => withReplaced(JSON, "parse", { value: () => ({ t: "closed" }) }, go)],
+    ] as const) {
+      const ws = new win.WebSocket("wss://gateway.discord.gg/");
+      await flush();
+      const inner = MockWs.instances[MockWs.instances.length - 1]!;
+      inner.onopen!();
+      run(() => inner.onmessage!({ data: frame }));
+      states.push(ws.readyState);
+    }
+    expect(states).toEqual([0, 1]);
+  });
+
+  it("builds its relay messages with natives taken at load, so the page never sees the seal", async () => {
+    const win = makeWin({ seal: "S" });
+    const seen: unknown[] = [];
+    const nativeStringify = JSON.stringify;
+    withReplaced(String.prototype, "replace", { value: () => "ws://evil.test" }, () => installWebSocket(win, ctx));
+    MockWs.instances.length = 0;
+    const record = {
+      value: (...args: unknown[]) => {
+        seen.push(args[0]);
+        return Reflect.apply(nativeStringify, JSON, args);
+      },
+    };
+    const proto = Object.prototype as Record<string, unknown>;
+    // Kept across the awaits, which a synchronous helper would end early.
+    Object.defineProperty(JSON, "stringify", { ...record, configurable: true, writable: true });
+    proto.toJSON = () => "forged";
+    let inner: MockWs;
+    try {
+      new win.WebSocket("wss://gateway.discord.gg/", ["a", "b"]);
+      await flush();
+      inner = MockWs.instances[0]!;
+      inner.onopen!();
+    } finally {
+      JSON.stringify = nativeStringify;
+      delete proto.toJSON;
+    }
+    expect(seen).toEqual([]);
+    expect(inner.url).toBe("ws://localhost:3000/_g/ws");
+    expect(JSON.parse(inner.sent[0] as string)).toEqual({ u: "wss://gateway.discord.gg/", p: ["a", "b"], s: "S" });
+  });
+
+  it("takes the seal only from the answer's own field", async () => {
+    const win = makeWin({});
+    installWebSocket(win, ctx);
+    MockWs.instances.length = 0;
+    const proto = Object.prototype as Record<string, unknown>;
+    proto.seal = "forged";
+    try {
+      new win.WebSocket("wss://gateway.discord.gg/");
+      await flush();
+    } finally {
+      delete proto.seal;
+    }
+    const inner = MockWs.instances[0]!;
+    inner.onopen!();
+    expect(JSON.parse(inner.sent[0] as string)).toMatchObject({ s: null });
   });
 
   it("delivers binary data from another realm as a Blob, as an adopted frame's socket does", async () => {

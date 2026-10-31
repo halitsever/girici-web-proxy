@@ -8,7 +8,7 @@ import {
 } from "../src/client/renewal.ts";
 import { install } from "../src/client/runtime.ts";
 import type { Realm } from "../src/client/url-context.ts";
-import { withReplaced } from "./replaced-builtins.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../src/shared/protocol.ts";
 
 const origin = "http://p.test";
@@ -34,6 +34,21 @@ describe("engineScriptConfig", () => {
     expect(engineScriptConfig({ src: engineSrc, config: '{"v":1,"cookies":[]}' }, origin)).toBeNull();
     expect(engineScriptConfig(null, origin)).toBeNull();
   });
+
+  for (const [name, target, key, replacement] of [
+    ...REPLACED_BUILTINS,
+    ["RegExp.prototype.test", RegExp.prototype, "test", { value: () => true }],
+    ["JSON.parse", JSON, "parse", { value: () => ({ v: PROTOCOL_VERSION, cookies: [], site: "https://evil.test" }) }],
+  ] as Array<[string, object, PropertyKey, PropertyDescriptor]>) {
+    it(`tells the engine's script apart when ${name} is replaced`, () => {
+      const pageSrc = `${origin}/~/https/a.test/_g/client.AB12CD34.js`;
+      const read = () => [
+        engineScriptConfig({ src: engineSrc, config }, origin),
+        engineScriptConfig({ src: pageSrc, config }, origin),
+      ];
+      expect(withReplaced(target, key, replacement, read)).toEqual([{ v: PROTOCOL_VERSION, cookies: [] }, null]);
+    });
+  }
 
   it("refuses a missing or broken config instead of starting from an empty one", () => {
     for (const broken of [null, "", "junk", "{}", '{"v":2}', "null"])
