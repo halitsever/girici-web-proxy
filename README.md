@@ -58,8 +58,11 @@ Girici listens on http://localhost:3000.
 ## Run with Docker
 
 ```
-docker run -d -p 3000:3000 halitsever/girici-web-proxy:latest
+docker run -d -p 3000:3000 -v girici_data:/data halitsever/girici-web-proxy:latest
 ```
+
+The `girici_data` volume keeps the admin account and settings across updates. The setup code is in
+`docker logs <container>`.
 
 `latest` runs v2 (v2.0.0 and newer). The last v1 image stays available as `halitsever/girici-web-proxy:v1`. To
 build and run from source instead:
@@ -68,15 +71,17 @@ build and run from source instead:
 docker compose up --build
 ```
 
-Service workers need HTTPS outside localhost. To get automatic certificates, point a domain at your server, remove
-the `ports` mapping of the `girici` service and run:
+The compose file runs the container read-only with every capability dropped, and publishes Girici on
+`127.0.0.1:3000` only. Copy `.env.example` to `.env` to set a domain, the trust-proxy count or a fixed setup code.
+
+Service workers need HTTPS outside localhost. To get automatic certificates, point a domain at your server and run:
 
 ```
 GIRICI_DOMAIN=proxy.example.com GIRICI_TRUST_PROXY=1 docker compose --profile https up -d --build
 ```
 
-`GIRICI_TRUST_PROXY=1` lets the rate limits tell visitors apart behind Caddy. It is safe once the `girici` service
-no longer publishes its own port.
+`GIRICI_TRUST_PROXY=1` means one proxy (Caddy) sits in front of Girici, so the rate limits tell visitors apart. It
+is safe because the `girici` service publishes its own port on `127.0.0.1` only.
 
 ## Configuration
 
