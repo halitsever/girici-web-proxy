@@ -21,7 +21,9 @@ COPY packages/web/package.json packages/web/
 RUN npm ci --omit=dev --ignore-scripts --workspace @girici/server && npm cache clean --force && mkdir /empty
 
 FROM node:24-alpine AS runtime
-ENV NODE_ENV=production
+ARG GIRICI_VERSION=dev
+ENV NODE_ENV=production GIRICI_VERSION=$GIRICI_VERSION
+LABEL org.opencontainers.image.version=$GIRICI_VERSION
 WORKDIR /app
 COPY --from=deps /app ./
 COPY LICENSE ./
