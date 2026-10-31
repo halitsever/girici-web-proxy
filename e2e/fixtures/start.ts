@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer } from "ws";
 import { AuthStore } from "../../packages/server/src/auth/store.ts";
+import { BrandStore } from "../../packages/server/src/brand/store.ts";
 import { openDb } from "../../packages/server/src/db/open.ts";
 import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
@@ -13,12 +14,25 @@ import { handleFixture } from "./sites.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
+const SEEDED_BRAND_NAME = "Kütüphane Ağı";
+// The script proves the logo is served inert: it must never run, whatever opens it.
+const SEEDED_LOGO = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#2563eb"/>' +
+    '<script>document.title="ran"</script></svg>',
+);
+
 /** An admin and public access, so the auth gate does not block the proxy tests. */
-function seedDataDir(): string {
+function seedDataDir(withBrand = false): string {
   const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
   const seed = new AuthStore(openDb(join(dir, "girici.db")));
   seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
   seed.setPublicAccess(true);
+  if (withBrand) {
+    new BrandStore(join(dir, "brand"), seed).update({
+      name: SEEDED_BRAND_NAME,
+      logo: { bytes: SEEDED_LOGO, type: "image/svg+xml" },
+    });
+  }
   seed.close();
   return dir;
 }
@@ -76,7 +90,7 @@ async function waitHealthy(port: number): Promise<void> {
 }
 
 // Instance-wide writes (brand, sealing) go to this one, so the main server keeps its settings.
-const instance = spawnGirici(41002, seedDataDir());
+const instance = spawnGirici(41002, seedDataDir(true));
 await waitHealthy(41002);
 const girici = spawnGirici(41000, seedDataDir());
 for (const child of [instance, girici]) {
