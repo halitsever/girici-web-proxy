@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createSecureServer } from "node:https";
@@ -13,12 +13,15 @@ import { handleFixture } from "./sites.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
-// Seed an admin and open public access so the auth gate does not block the proxy tests.
-const DATA_DIR = mkdtempSync(join(tmpdir(), "girici-e2e-"));
-const seed = new AuthStore(openDb(join(DATA_DIR, "girici.db")));
-seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
-seed.setPublicAccess(true);
-seed.close();
+/** An admin and public access, so the auth gate does not block the proxy tests. */
+function seedDataDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
+  const seed = new AuthStore(openDb(join(dir, "girici.db")));
+  seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
+  seed.setPublicAccess(true);
+  seed.close();
+  return dir;
+}
 
 function listen(server: Server, port: number): Promise<void> {
   return new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
@@ -43,20 +46,45 @@ const upstreams = Object.fromEntries([
   ...HTTPS_HOSTS.map((host) => [host, "127.0.0.1:41443"]),
   ["site-c.test", "127.0.0.1:41080"],
 ]);
-const girici = spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    NODE_ENV: "test",
-    PORT: "41000",
-    HOST: "127.0.0.1",
-    LOG_LEVEL: "warn",
-    GIRICI_TEST_CA: CERT_PATH,
-    GIRICI_TEST_UPSTREAMS: JSON.stringify(upstreams),
-    GIRICI_DATA_DIR: DATA_DIR,
-  },
-});
-girici.on("exit", (code) => process.exit(code ?? 1));
+function spawnGirici(port: number, dataDir: string): ChildProcess {
+  return spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      NODE_ENV: "test",
+      PORT: String(port),
+      HOST: "127.0.0.1",
+      LOG_LEVEL: "warn",
+      GIRICI_TEST_CA: CERT_PATH,
+      GIRICI_TEST_UPSTREAMS: JSON.stringify(upstreams),
+      GIRICI_DATA_DIR: dataDir,
+    },
+  });
+}
+
+async function waitHealthy(port: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`)).status === 200) return;
+    } catch {
+      // Not listening yet.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Server on port ${port} did not become healthy`);
+}
+
+// Instance-wide writes (brand, sealing) go to this one, so the main server keeps its settings.
+const instance = spawnGirici(41002, seedDataDir());
+await waitHealthy(41002);
+const girici = spawnGirici(41000, seedDataDir());
+for (const child of [instance, girici]) {
+  child.on("exit", (code) => process.exit(code ?? 1));
+}
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.on(signal, () => girici.kill(signal));
+  process.on(signal, () => {
+    instance.kill(signal);
+    girici.kill(signal);
+  });
 }
