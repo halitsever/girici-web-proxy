@@ -112,6 +112,29 @@ describe("rewriteSrcset", () => {
 });
 
 describe("with built-ins the page replaced", () => {
+  const smuggled = `javascript:__g$.J("1"),'<script>x</script>'`;
+  const javascriptCases = () => [
+    rewriteUrl(" Java\nScript:'%E2%9C%93 %ZZ \u{1F600}' ", base, origin),
+    rewriteJavascriptUrl(smuggled),
+    unrewriteUrl(`javascript:__g$.J("'50%2525'")`, base, origin),
+  ];
+  const javascriptExpected = javascriptCases();
+  const JAVASCRIPT_BUILTINS: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+    ...REPLACED_BUILTINS,
+    ["JSON.stringify", JSON, "stringify", { value: () => '"");alert(1' }],
+    ["JSON.parse", JSON, "parse", { value: () => "x" }],
+    ["String.prototype.endsWith", String.prototype, "endsWith", { value: () => true }],
+    ["String.prototype.includes", String.prototype, "includes", { value: () => false }],
+    ["String.prototype.codePointAt", String.prototype, "codePointAt", { value: () => 0x41 }],
+    ["TextDecoder.prototype.decode", TextDecoder.prototype, "decode", { value: () => '"x"' }],
+    ["globalThis.parseInt", globalThis, "parseInt", { value: () => 0 }],
+  ];
+  for (const [name, target, key, replacement] of JAVASCRIPT_BUILTINS) {
+    it(`wraps javascript: URLs when ${name} is replaced`, () => {
+      expect(withReplaced(target, key, replacement, javascriptCases)).toEqual(javascriptExpected);
+    });
+  }
+
   for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
     it(`keeps proxying URLs when ${name} is replaced`, () => {
       const results = withReplaced(target, key, replacement, () => [

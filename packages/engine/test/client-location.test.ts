@@ -81,4 +81,12 @@ describe("createFakeLocation", () => {
     location.replace("javascript:void 0");
     expect(calls).toEqual([`assign javascript:__g$.J("'<p>x</p>'")`, 'replace javascript:__g$.J("void 0")']);
   });
+
+  it("reads a URL object once, so a later conversion cannot turn it into javascript:", () => {
+    const { location, calls } = setup();
+    let reads = 0;
+    location.assign({ toString: () => (reads++ === 0 ? "javascript:void 0" : "https://b.test/") } as never);
+    location.assign({ toString: () => (reads++ === 1 ? "https://b.test/" : "javascript:alert(1)") } as never);
+    expect(calls).toEqual(['assign javascript:__g$.J("void 0")', "assign /~/https/b.test/"]);
+  });
 });

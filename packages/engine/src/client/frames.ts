@@ -1,3 +1,4 @@
+import { hrefOf, NativeWeakSet } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
@@ -107,7 +108,7 @@ export function createChildConfig(
     const child: ClientConfig = {
       v: PROTOCOL_VERSION,
       cookies: cookies(),
-      inherit: { origin: ctx.origin, base: ctx.realUrl().href },
+      inherit: { origin: ctx.origin, base: hrefOf(ctx.realUrl()) },
     };
     if (current.cookiesBlocked !== undefined) child.cookiesBlocked = current.cookiesBlocked;
     if (current.site !== undefined) child.site = current.site;
@@ -130,7 +131,7 @@ export function installFrames(
   const startContainer = win.Range ? ownDescriptor(win.Range.prototype, "startContainer")?.get : undefined;
   const addListener = win.EventTarget.prototype.addEventListener;
   // Cross-origin windows throw on every check, so walks skip them until the next frame load may have changed that.
-  let crossOrigin = new WeakSet<object>();
+  let crossOrigin = new NativeWeakSet<object>();
 
   /** Through the getter taken here, since a page can replace `length`; indexed access on a window cannot be. */
   const countOf = (view: object): number => {
@@ -316,11 +317,12 @@ export function installFrames(
   };
   const observer = new win.MutationObserver(() => {
     walker.walk();
-    for (const collection of plugins)
-      if (collectionLength && apply(collectionLength, collection, []) !== 0) walkLater();
+    // Indexed, since a page can replace the array iterator.
+    for (let index = 0; index < plugins.length; index++)
+      if (collectionLength && apply(collectionLength, plugins[index], []) !== 0) walkLater();
   });
   const onLoad = () => {
-    crossOrigin = new WeakSet();
+    crossOrigin = new NativeWeakSet();
     walker.walk();
   };
   steps.add("frames observer", () => {

@@ -1,21 +1,28 @@
 import { decodeUrl, encodeUrl, isReservedPath } from "./codec.ts";
 import {
+  codePointAt,
   endsWith,
   exec,
   hashOf,
   hrefOf,
+  includes,
   isWebUrl as isWeb,
   lowerCase,
+  newBytes,
   newUrl,
   originOf,
+  parseHex,
+  parseJson,
   parseUrl as parse,
   pathnameOf,
+  quoteJson,
   replaceAll,
   searchOf,
   setUrlPart,
   sliceOf,
   startsWith,
   trim,
+  utf8Text,
 } from "./primordials.ts";
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i;
@@ -29,6 +36,8 @@ const TRAILING_COMMAS = /,+$/g;
 const INNER_WHITESPACE = /[\t\n\f\r ]+/g;
 const none = () => "";
 const space = () => " ";
+const PERCENT = /%/g;
+const escapedPercent = () => "%25";
 
 /** Rewrites a URL found in a page so that requests and navigations stay on the proxy. */
 export function rewriteUrl(raw: string, base: URL, origin: string): string {
@@ -88,20 +97,20 @@ export function unrewriteUrl(value: string, base: URL, origin: string): string {
  * window without the runtime has no helper, so its navigation fails. Null for any other URL.
  */
 export function rewriteJavascriptUrl(raw: string): string | null {
-  const value = raw.replace(URL_EDGES, "").replace(TAB_OR_NEWLINE, "");
-  if (!JAVASCRIPT.test(value)) return null;
+  const value = replaceAll(replaceAll(raw, URL_EDGES, none), TAB_OR_NEWLINE, none);
+  if (!exec(JAVASCRIPT, value)) return null;
   // Only an exact call with one string literal is left alone; anything after it would run unwrapped.
   if (wrappedJavascript(value) !== null) return value;
-  const code = percentDecode(value.slice("javascript:".length));
+  const code = percentDecode(sliceOf(value, "javascript:".length));
   // The browser percent-decodes the URL before running it, so a % in the literal is escaped once more.
-  return `${HELPER_CALL}${JSON.stringify(code).replace(/%/g, "%25")})`;
+  return `${HELPER_CALL}${replaceAll(quoteJson(code), PERCENT, escapedPercent)})`;
 }
 
 /** The page's code inside a URL this module wrapped, or null. */
 function wrappedJavascript(value: string): string | null {
-  if (!value.startsWith(HELPER_CALL) || !value.endsWith(")")) return null;
+  if (!startsWith(value, HELPER_CALL) || !endsWith(value, ")")) return null;
   try {
-    const code: unknown = JSON.parse(percentDecode(value.slice(HELPER_CALL.length, -1)));
+    const code = parseJson(percentDecode(sliceOf(value, HELPER_CALL.length, -1)));
     return typeof code === "string" ? code : null;
   } catch {
     return null;
@@ -110,20 +119,46 @@ function wrappedJavascript(value: string): string | null {
 
 /** The URL standard's percent-decode: valid escapes become UTF-8 bytes, anything else stays as written. */
 function percentDecode(text: string): string {
-  if (!text.includes("%")) return text;
-  const encoder = new TextEncoder();
-  const bytes: number[] = [];
+  if (!includes(text, "%")) return text;
+  // A UTF-16 unit never takes more than three UTF-8 bytes.
+  const bytes = newBytes(text.length * 3);
+  let length = 0;
   for (let index = 0; index < text.length;) {
-    if (PERCENT_BYTE.test(text.slice(index, index + 3))) {
-      bytes.push(parseInt(text.slice(index + 1, index + 3), 16));
+    if (exec(PERCENT_BYTE, sliceOf(text, index, index + 3))) {
+      bytes[length++] = parseHex(sliceOf(text, index + 1, index + 3));
       index += 3;
       continue;
     }
-    const char = String.fromCodePoint(text.codePointAt(index) ?? 0);
-    for (const byte of encoder.encode(char)) bytes.push(byte);
-    index += char.length;
+    let point = codePointAt(text, index) ?? 0;
+    index += point > 0xffff ? 2 : 1;
+    // A lone surrogate encodes as U+FFFD, as TextEncoder does.
+    if (point >= 0xd800 && point <= 0xdfff) point = 0xfffd;
+    length = putUtf8(bytes, length, point);
   }
-  return new TextDecoder().decode(new Uint8Array(bytes));
+  return utf8Text(bytes, length);
+}
+
+function putUtf8(bytes: Uint8Array, at: number, point: number): number {
+  if (point < 0x80) {
+    bytes[at] = point;
+    return at + 1;
+  }
+  if (point < 0x800) {
+    bytes[at] = 0xc0 | (point >> 6);
+    bytes[at + 1] = 0x80 | (point & 0x3f);
+    return at + 2;
+  }
+  if (point < 0x10000) {
+    bytes[at] = 0xe0 | (point >> 12);
+    bytes[at + 1] = 0x80 | ((point >> 6) & 0x3f);
+    bytes[at + 2] = 0x80 | (point & 0x3f);
+    return at + 3;
+  }
+  bytes[at] = 0xf0 | (point >> 18);
+  bytes[at + 1] = 0x80 | ((point >> 12) & 0x3f);
+  bytes[at + 2] = 0x80 | ((point >> 6) & 0x3f);
+  bytes[at + 3] = 0x80 | (point & 0x3f);
+  return at + 4;
 }
 
 /** Follows the HTML srcset parsing rules, so URLs that contain commas survive. */

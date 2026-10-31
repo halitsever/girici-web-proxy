@@ -8,6 +8,7 @@ import {
 } from "../src/client/renewal.ts";
 import { install } from "../src/client/runtime.ts";
 import type { Realm } from "../src/client/url-context.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../src/shared/protocol.ts";
 
 const origin = "http://p.test";
@@ -52,6 +53,18 @@ describe("DocumentSteps", () => {
     steps.run({ v: 2, cookies: [], site: "https://a.test" });
     steps.run({ v: 2, cookies: [], site: "https://b.test" });
     expect(seen).toEqual(["https://a.test", "https://b.test"]);
+  });
+
+  it("runs the named steps again when the page replaced the array iterator and includes", () => {
+    const seen: string[] = [];
+    const steps = new DocumentSteps();
+    steps.add("listeners", () => seen.push("listeners"));
+    steps.add("cookies", () => seen.push("cookies"));
+    steps.run({ v: 2, cookies: [] });
+    withReplaced(Array.prototype, Symbol.iterator, { value: [][Symbol.iterator].bind([]) }, () =>
+      withReplaced(Array.prototype, "includes", { value: () => false }, () => steps.again(["listeners"])),
+    );
+    expect(seen).toEqual(["listeners", "cookies", "listeners"]);
   });
 });
 

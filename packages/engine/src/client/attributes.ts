@@ -1,4 +1,14 @@
-import { apply, hrefOf, indexOf, parseUrl, setUrlPart, sliceOf, toText, urlPart } from "../shared/primordials.ts";
+import {
+  apply,
+  hrefOf,
+  indexOf,
+  NativeWeakMap,
+  parseUrl,
+  setUrlPart,
+  sliceOf,
+  toText,
+  urlPart,
+} from "../shared/primordials.ts";
 import { attributeKind, restoreAttribute, rewriteAttribute } from "./attribute-values.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
@@ -58,8 +68,8 @@ export interface SrcdocBridge {
 
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
 export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBridge): void {
-  const written = new WeakMap<object, SrcdocRecord>();
-  const carried = new WeakMap<object, SrcdocRecord>();
+  const written = new NativeWeakMap<object, SrcdocRecord>();
+  const carried = new NativeWeakMap<object, SrcdocRecord>();
   const original = (node: object, value: string): string => {
     const record = apply(mapGet, carried, [node]) as SrcdocRecord | undefined;
     return record && record.native === value ? record.original : value;
@@ -164,7 +174,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   }
 
   // A NamedNodeMap does not name its element, so the attributes getter records it.
-  const owners = new WeakMap<object, Element>();
+  const owners = new NativeWeakMap<object, Element>();
   const attributes = ownDescriptor(element, "attributes");
   if (attributes?.get) {
     const read = attributes.get;

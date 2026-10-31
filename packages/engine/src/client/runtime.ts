@@ -1,7 +1,17 @@
 import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
-import { brandOf, hashOf, hrefOf, newUrl, originOf, pathnameOf, searchOf, setUrlPart } from "../shared/primordials.ts";
+import {
+  brandOf,
+  hashOf,
+  hrefOf,
+  isWebUrl,
+  newUrl,
+  originOf,
+  pathnameOf,
+  searchOf,
+  setUrlPart,
+} from "../shared/primordials.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
@@ -133,7 +143,7 @@ export function install(
   };
   const rewrite = createRewriteBridge(ctx, (base) => {
     const child = childConfig();
-    return clientTag(clientUrl, { ...child, inherit: { origin: ctx.origin, base: base.href } });
+    return clientTag(clientUrl, { ...child, inherit: { origin: ctx.origin, base: hrefOf(base) } });
   });
   const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
@@ -265,8 +275,7 @@ function headedElsewhere(win: Realm, origin: string): boolean {
     const getAttribute = win.Element.prototype.getAttribute;
     const src = apply(getAttribute, element, ["src"]) as string | null;
     if (!src || apply(getAttribute, element, ["srcdoc"]) !== null) return false;
-    const { protocol } = new URL(src, origin);
-    return protocol === "http:" || protocol === "https:";
+    return isWebUrl(newUrl(src, origin));
   } catch {
     return false;
   }

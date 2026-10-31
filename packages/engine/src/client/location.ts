@@ -44,13 +44,15 @@ const NAVIGATING_PARTS: NavigatingPart[] = ["protocol", "host", "hostname", "por
 /** The real Location object cannot be replaced, so rewritten scripts get this stand-in that speaks in real URLs. */
 export function createFakeLocation(env: LocationEnv, proto: object = Object.prototype): FakeLocation {
   const go = (value: unknown, mode: "assign" | "replace") => {
-    const script = rewriteJavascriptUrl(String(value));
+    // Converted once, so a value cannot read as a web URL to the check and as javascript: to the parser.
+    const text = toText(value);
+    const script = rewriteJavascriptUrl(text);
     if (script !== null) {
       env.navigate(script, mode);
       return;
     }
     const current = env.real();
-    const target = newUrl(toText(value), current);
+    const target = newUrl(text, current);
     if (isFragmentNavigation(target, current)) {
       env.setHash(hashOf(target));
       return;

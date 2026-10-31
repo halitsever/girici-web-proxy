@@ -16,9 +16,25 @@ const nativeIndexOf = strings.indexOf;
 const nativeIncludes = strings.includes;
 const nativeToLowerCase = strings.toLowerCase;
 const nativeTrim = strings.trim;
+const nativeCodePointAt = strings.codePointAt;
+const nativeArrayIncludes = Array.prototype.includes;
+const nativeParseInt = parseInt;
+const NativeJson = JSON;
+const jsonStringify = JSON.stringify;
+const jsonParse = JSON.parse;
+const NativeArrayBuffer = ArrayBuffer;
+const NativeUint8Array = Uint8Array;
+const bufferOf = ownDescriptor(Reflect.getPrototypeOf(Uint8Array.prototype) as object, "buffer")
+  ?.get as () => ArrayBuffer;
+const nativeDecode = TextDecoder.prototype.decode;
+const utf8Decoder = new TextDecoder();
 const nativeExec = RegExp.prototype.exec;
 const nativeSetHas = Set.prototype.has;
 const objectToString = Object.prototype.toString;
+
+/** For tables made inside page calls, where a page's own WeakMap or WeakSet would break the captured methods. */
+export const NativeWeakMap = WeakMap;
+export const NativeWeakSet = WeakSet;
 
 /** String(value), which runs the value's own conversion once and gives a primitive the checks can trust. */
 export const toText = NativeString as (value: unknown) => string;
@@ -49,6 +65,14 @@ export function lowerCase(text: string): string {
 
 export function trim(text: string): string {
   return apply(nativeTrim, text, []);
+}
+
+export function codePointAt(text: string, index: number): number | undefined {
+  return apply(nativeCodePointAt, text, [index]);
+}
+
+export function parseHex(text: string): number {
+  return nativeParseInt(text, 16);
 }
 
 export function exec(pattern: RegExp, text: string): RegExpExecArray | null {
@@ -82,6 +106,29 @@ export function mapOf<T, U>(items: ArrayLike<T>, map: (item: T) => U): U[] {
     } as PropertyDescriptor);
   }
   return result;
+}
+
+export function listIncludes<T>(list: readonly T[], value: T): boolean {
+  return apply(nativeArrayIncludes, list, [value]);
+}
+
+/** JSON.stringify of a string, which reads nothing from the page. */
+export function quoteJson(text: string): string {
+  return apply(jsonStringify, NativeJson, [text]);
+}
+
+export function parseJson(text: string): unknown {
+  return apply(jsonParse, NativeJson, [text]);
+}
+
+/** A zeroed byte view whose indexed writes never reach a prototype. */
+export function newBytes(size: number): Uint8Array {
+  return new NativeUint8Array(new NativeArrayBuffer(size));
+}
+
+/** The first `length` bytes as UTF-8, with U+FFFD for invalid sequences. */
+export function utf8Text(bytes: Uint8Array, length: number): string {
+  return apply(nativeDecode, utf8Decoder, [new NativeUint8Array(apply(bufferOf, bytes, []), 0, length)]);
 }
 
 export function setHas<T>(set: Set<T>, value: T): boolean {

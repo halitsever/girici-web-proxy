@@ -1,3 +1,4 @@
+import { listIncludes } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { parseConfig } from "./config.ts";
 import type { Realm } from "./url-context.ts";
@@ -88,14 +89,23 @@ export class DocumentSteps {
 
   run(config: ClientConfig): void {
     this.#config = config;
-    for (const [name, step] of this.#steps) this.#runStep(name, step, config);
+    this.#runWhere(config, () => true);
   }
 
   /** Runs the named steps again with the current config, for a document that document.open cleared. */
   again(names: readonly string[]): void {
     const config = this.#config;
     if (!config) return;
-    for (const [name, step] of this.#steps) if (names.includes(name)) this.#runStep(name, step, config);
+    this.#runWhere(config, (name) => listIncludes(names, name));
+  }
+
+  /** Indexed without destructuring, since a page can replace the array iterator. */
+  #runWhere(config: ClientConfig, wanted: (name: string) => boolean): void {
+    const steps = this.#steps;
+    for (let index = 0; index < steps.length; index++) {
+      const entry = steps[index] as [string, (config: ClientConfig) => void];
+      if (wanted(entry[0])) this.#runStep(entry[0], entry[1], config);
+    }
   }
 
   #runStep(name: string, step: (config: ClientConfig) => void, config: ClientConfig): void {
