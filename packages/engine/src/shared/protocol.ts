@@ -72,6 +72,13 @@ export interface InheritedContext {
   blob?: string;
 }
 
+/** A sealed document's own origin and its key, base64url; it seals and opens that origin's addresses only. */
+export interface OriginSeal {
+  origin: string;
+  label: string;
+  key: string;
+}
+
 export interface ClientConfig {
   v: number;
   cookies: CookieSnapshot[];
@@ -81,6 +88,8 @@ export interface ClientConfig {
   site?: string;
   /** Set for a third-party frame while blocking is on: its document.cookie stays empty whatever other tabs do. */
   cookiesBlocked?: boolean;
+  /** Set for a top-level document on a sealed address. */
+  seal?: OriginSeal;
 }
 
 export type RelayErrorCode =
