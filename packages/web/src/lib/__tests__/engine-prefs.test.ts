@@ -21,22 +21,38 @@ afterEach(() => vi.useRealTimers());
 describe("syncEnginePrefs", () => {
   it("sends the switch to the active worker and waits for its answer", async () => {
     const { container, received } = fakeContainer({ answer: true });
-    await syncEnginePrefs({ blockCookies: false }, container);
-    expect(received).toEqual([{ type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: false }]);
+    await syncEnginePrefs({ blockCookies: false, sealAddresses: true }, container);
+    expect(received).toEqual([
+      { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: false, sealAddresses: true },
+    ]);
+  });
+
+  it("passes the instance switch on when it is known", async () => {
+    const { container, received } = fakeContainer({ answer: true });
+    await syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container, true);
+    expect(received).toEqual([
+      {
+        type: "girici:prefs",
+        v: PROTOCOL_VERSION,
+        blockThirdPartyCookies: true,
+        sealAddresses: false,
+        instanceSeal: true,
+      },
+    ]);
   });
 
   it("gives up after a second when the worker never answers", async () => {
     vi.useFakeTimers();
     const { container } = fakeContainer({ answer: false });
-    const done = syncEnginePrefs({ blockCookies: true }, container);
+    const done = syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container);
     await vi.advanceTimersByTimeAsync(1000);
     await expect(done).resolves.toBeUndefined();
   });
 
   it("does nothing without a registration or service worker support", async () => {
     await expect(
-      syncEnginePrefs({ blockCookies: true }, fakeContainer({ registered: false }).container),
+      syncEnginePrefs({ blockCookies: true, sealAddresses: false }, fakeContainer({ registered: false }).container),
     ).resolves.toBeUndefined();
-    await expect(syncEnginePrefs({ blockCookies: true }, undefined)).resolves.toBeUndefined();
+    await expect(syncEnginePrefs({ blockCookies: true, sealAddresses: false }, undefined)).resolves.toBeUndefined();
   });
 });

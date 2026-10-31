@@ -74,7 +74,7 @@ export function parseRefresh(input: string): Refresh | null {
  * proxied. Anything the parser cannot read, and blob:, javascript: or other targets, comes back empty, which the
  * browser ignores; a blob document would run without the runtime.
  */
-export function rewriteRefresh(value: string, base: URL, origin: string): string {
+export function rewriteRefresh(value: string, base: URL, origin: string, opaque = false): string {
   const refresh = parseRefresh(value);
   if (!refresh) return "";
   if (refresh.url === null) return value;
@@ -83,7 +83,7 @@ export function rewriteRefresh(value: string, base: URL, origin: string): string
   // Written as an absolute proxy URL, never as the page's text: text that starts with a quote would be read again
   // by the browser's parser as a different target.
   const proxyBase = isWebUrl(base) ? parseUrl(encodeUrl(base), origin) : parseUrl(origin);
-  const written = proxyBase ? parseUrl(rewriteUrl(refresh.url, base, origin), proxyBase) : null;
+  const written = proxyBase ? parseUrl(rewriteUrl(refresh.url, base, origin, undefined, opaque), proxyBase) : null;
   if (!written || originOf(written) !== origin || !decodeUrl(pathnameOf(written) + searchOf(written))) return "";
   return `${refresh.time}; url=${hrefOf(written)}`;
 }

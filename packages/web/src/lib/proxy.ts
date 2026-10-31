@@ -1,4 +1,6 @@
+import { getAuthState } from "./auth";
 import { syncEnginePrefs } from "./engine-prefs";
+import { sealPath } from "./seal";
 import { loadSettings } from "./settings";
 
 export type ServiceWorkerSupport = "ok" | "insecure" | "unsupported";
@@ -16,12 +18,25 @@ export function serviceWorkerSupport(env: {
 export async function startEngine(): Promise<void> {
   await navigator.serviceWorker.register("/_g/sw.js", { scope: "/", updateViaCache: "none" });
   await navigator.serviceWorker.ready;
-  await syncEnginePrefs(loadSettings());
+  // A worker that just installed may not have read the admin's switch yet.
+  const state = await getAuthState().catch(() => null);
+  await syncEnginePrefs(loadSettings(), undefined, state?.sealAddresses);
 }
 
-export async function openProxied(path: string): Promise<void> {
-  await startEngine();
-  window.location.assign(path);
+export interface OpenEnv {
+  start(): Promise<void>;
+  seal(path: string): Promise<string>;
+  assign(url: string): void;
+}
+
+/** The worker answers with the sealed address while sealing is on, so the plain one never reaches history. */
+export async function openProxied(path: string, env: OpenEnv = browserOpenEnv()): Promise<void> {
+  await env.start();
+  env.assign(await env.seal(path));
+}
+
+function browserOpenEnv(): OpenEnv {
+  return { start: startEngine, seal: (path) => sealPath(path), assign: (url) => window.location.assign(url) };
 }
 
 const RELOAD_KEY = "girici:engine-reload";

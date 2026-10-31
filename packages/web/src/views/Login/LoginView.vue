@@ -8,7 +8,7 @@ import SourceLink from "@/components/layout/SourceLink.vue";
 import { Input } from "@/components/ui/input";
 import { getAuthState, login } from "@/lib/auth";
 import { brand } from "@/lib/brand";
-import { toProxyPath } from "@/lib/target";
+import { resolveNext } from "@/lib/next";
 
 const route = useRoute();
 const router = useRouter();
@@ -34,20 +34,10 @@ async function onSubmit() {
   }
 }
 
-/**
- * ?next is either a Girici page the router guard sent here, such as /account, or the real target of a proxied
- * navigation the SW sent here, which reopens through the proxy.
- */
 function goNext() {
-  const next = typeof route.query.next === "string" ? route.query.next : "";
-  // "//host" and "/\host" would leave Girici, so only a single leading slash counts as one of our pages.
-  if (/^\/(?![/\\])/.test(next)) {
-    void router.replace(next);
-    return;
-  }
-  const proxied = next ? toProxyPath(next) : null;
-  if (proxied) window.location.assign(proxied);
-  else void router.replace("/");
+  const next = resolveNext(typeof route.query.next === "string" ? route.query.next : "");
+  if (next.kind === "proxy") window.location.assign(next.path);
+  else void router.replace(next.kind === "route" ? next.path : "/");
 }
 </script>
 

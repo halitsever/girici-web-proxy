@@ -7,6 +7,7 @@ export interface Settings {
   rememberHistory: boolean;
   blockCookies: boolean;
   toolbar: boolean;
+  sealAddresses: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -15,6 +16,7 @@ const DEFAULTS: Settings = {
   rememberHistory: true,
   blockCookies: true,
   toolbar: true,
+  sealAddresses: false,
 };
 
 export function loadSettings(): Settings {

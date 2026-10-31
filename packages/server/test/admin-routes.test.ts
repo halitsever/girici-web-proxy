@@ -112,11 +112,40 @@ describe("adminRouter settings", () => {
     expect(store.publicAccess()).toBe(true);
   });
 
+  it("turns address encryption on for everyone only with the current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    expect((await post(base, "/_g/admin/settings", { sealAddresses: true }, cookie)).status).toBe(403);
+    expect(store.sealAddresses()).toBe(false);
+    const bad = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: "yes", currentPassword: setup.password },
+      cookie,
+    );
+    expect(bad.status).toBe(400);
+    const res = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: true, currentPassword: setup.password },
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sealAddresses: true });
+    expect(store.sealAddresses()).toBe(true);
+    const read = await fetch(`${base}/_g/admin/settings`, { headers: { cookie } });
+    expect(await read.json()).toMatchObject({ sealAddresses: true });
+  });
+
   it("returns the settings with the stored and env blocklists", async () => {
     const { base, cookie } = await withAdmin({ envBlocked: ["env.example"] });
     const res = await fetch(`${base}/_g/admin/settings`, { headers: { cookie } });
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ public: false, blockedHosts: [], envBlockedHosts: ["env.example"] });
+    expect(await res.json()).toEqual({
+      public: false,
+      blockedHosts: [],
+      envBlockedHosts: ["env.example"],
+      sealAddresses: false,
+    });
   });
 
   it("refuses the settings to anyone but the admin", async () => {

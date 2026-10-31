@@ -1,7 +1,7 @@
 import type { RelayErrorCode } from "../shared/protocol.ts";
 
-/** A runtime that failed verification is not a relay error, so it has its own code. */
-export type ErrorPageCode = RelayErrorCode | "runtime";
+/** A runtime that failed verification, or an address this browser cannot open, is not a relay error. */
+export type ErrorPageCode = RelayErrorCode | "runtime" | "sealed";
 
 export const SANDBOX_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
@@ -25,6 +25,8 @@ const MESSAGES: Record<ErrorPageCode, string> = {
   proxy: "Girici's upstream proxy could not reach {host}.",
   runtime:
     "Girici could not verify its page script. If a CDN or proxy in front of this server rewrites or minifies JavaScript, turn that off for /_g/.",
+  sealed:
+    "This address was sealed in another browser, or this browser's address key was reset. Open the site again from Girici.",
 };
 
 export function errorPage(code: ErrorPageCode, target: URL | null): string {

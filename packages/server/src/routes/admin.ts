@@ -16,6 +16,7 @@ export interface AdminSettings {
   public: boolean;
   blockedHosts: string[];
   envBlockedHosts: string[];
+  sealAddresses: boolean;
 }
 
 /** Account and operator settings for the signed-in admin; changes need same origin, a session and the password. */
@@ -60,10 +61,15 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: B
   });
 
   router.post("/_g/admin/settings", sameOrigin, requireSession(store), settingsJson, confirm, (req, res) => {
-    const body = req.body as { publicAccess?: unknown; blockedHosts?: unknown };
+    const body = req.body as { publicAccess?: unknown; blockedHosts?: unknown; sealAddresses?: unknown };
     const hasPublic = body?.publicAccess !== undefined;
     const hasHosts = body?.blockedHosts !== undefined;
-    if ((!hasPublic && !hasHosts) || (hasPublic && typeof body.publicAccess !== "boolean")) {
+    const hasSeal = body?.sealAddresses !== undefined;
+    if (
+      (!hasPublic && !hasHosts && !hasSeal) ||
+      (hasPublic && typeof body.publicAccess !== "boolean") ||
+      (hasSeal && typeof body.sealAddresses !== "boolean")
+    ) {
       res.status(400).end();
       return;
     }
@@ -77,6 +83,7 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: B
       hosts = result.hosts;
     }
     if (hasPublic) store.setPublicAccess(body.publicAccess === true);
+    if (hasSeal) store.setSealAddresses(body.sealAddresses === true);
     if (hosts) {
       store.setBlockedHosts(hosts);
       blocklist.update(hosts);
@@ -122,7 +129,12 @@ function readHostList(value: unknown): { hosts: string[] } | { invalid: string[]
 }
 
 function settingsOf(store: AuthStore, blocklist: HostBlocklist): AdminSettings {
-  return { public: store.publicAccess(), blockedHosts: blocklist.stored(), envBlockedHosts: blocklist.env() };
+  return {
+    public: store.publicAccess(),
+    blockedHosts: blocklist.stored(),
+    envBlockedHosts: blocklist.env(),
+    sealAddresses: store.sealAddresses(),
+  };
 }
 
 function sameOrigin(req: Request, res: Response, next: NextFunction): void {

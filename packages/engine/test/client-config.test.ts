@@ -14,4 +14,10 @@ describe("readConfig", () => {
     expect(readConfig(JSON.stringify({ v: 2, cookies: [], inherit: { origin: 1 } })).inherit).toBeUndefined();
     expect(readConfig("junk")).toEqual({ v: PROTOCOL_VERSION, cookies: [] });
   });
+
+  it("keeps a well-formed seal and drops a broken one", () => {
+    const seal = { origin: "https://a.test", label: "L", key: "K" };
+    expect(readConfig(JSON.stringify({ v: 2, cookies: [], seal })).seal).toEqual(seal);
+    expect(readConfig(JSON.stringify({ v: 2, cookies: [], seal: { origin: 1 } })).seal).toBeUndefined();
+  });
 });

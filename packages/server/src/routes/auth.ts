@@ -92,6 +92,7 @@ interface AuthState {
   setup: boolean;
   authed: boolean;
   public: boolean;
+  sealAddresses: boolean;
   admin?: { username: string; name: string; email: string };
 }
 
@@ -105,6 +106,7 @@ function state(store: AuthStore, authed: boolean): AuthState {
     setup: admin === null,
     authed,
     public: store.publicAccess(),
+    sealAddresses: store.sealAddresses(),
     admin: authed && admin ? { username: admin.username, name: admin.name, email: admin.email } : undefined,
   };
 }

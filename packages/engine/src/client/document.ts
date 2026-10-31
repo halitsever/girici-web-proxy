@@ -1,7 +1,6 @@
-import { decodeUrl } from "../shared/codec.ts";
-import { apply, define as defineOwn, originOf, parseUrl, pathnameOf, searchOf, toText } from "../shared/primordials.ts";
+import { apply, define as defineOwn, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import { refererFor } from "../shared/referrer.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
 /** Returns the reset a renewed document needs: the domain one document set must not carry over to the next. */
 export function installDocument(win: Realm, ctx: UrlContext): () => void {
@@ -30,7 +29,8 @@ export function installDocument(win: Realm, ctx: UrlContext): () => void {
       const url = parseUrl(value);
       if (!url) return "";
       if (originOf(url) !== ctx.origin) return value;
-      const previous = decodeUrl(pathnameOf(url) + searchOf(url));
+      // Only this origin's sealed addresses open here, so another site's sealed page leaves no referrer.
+      const previous = realUrlOf(value, ctx.origin, ctx.openSealed);
       // The browser saw every proxied page as same-origin, so the real policy default is applied to real URLs.
       return previous ? (refererFor(previous, ctx.realUrl(), "") ?? "") : "";
     },

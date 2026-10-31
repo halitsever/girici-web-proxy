@@ -3,7 +3,7 @@ import { rewriteUrl } from "../shared/url-rewrite.ts";
 const IMAGE_SET_FUNCTIONS = ["-webkit-image-set(", "image-set("];
 
 /** Rewrites url(), @import and image-set() targets; everything else, comments included, keeps its exact text. */
-export function rewriteCss(css: string, base: URL, origin: string): string {
+export function rewriteCss(css: string, base: URL, origin: string, opaque = false): string {
   let output = "";
   let copied = 0;
   let index = 0;
@@ -32,7 +32,7 @@ export function rewriteCss(css: string, base: URL, origin: string): string {
       const closed = end - 1 > index && css[end - 1] === char;
       if (closed && (expectImport || imageSets.length > 0)) {
         const value = unescape(css.slice(index + 1, end - 1));
-        const rewritten = rewriteUrl(value, base, origin);
+        const rewritten = rewriteUrl(value, base, origin, undefined, opaque);
         if (rewritten !== value) replace(index, end, quote(rewritten));
       }
       expectImport = false;
@@ -42,7 +42,7 @@ export function rewriteCss(css: string, base: URL, origin: string): string {
     if (startsFunction(css, index, "url(")) {
       const token = readUrl(css, index + 4);
       if (token) {
-        const rewritten = rewriteUrl(token.value, base, origin);
+        const rewritten = rewriteUrl(token.value, base, origin, undefined, opaque);
         if (rewritten !== token.value) replace(index, token.end, `url(${quote(rewritten)})`);
         index = token.end;
       } else {

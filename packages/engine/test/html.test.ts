@@ -270,3 +270,33 @@ describe("meta refresh with built-ins the page replaced", () => {
     expect(out).toBe('<iframe src="blob:boot"></iframe>');
   });
 });
+
+describe("documents with a sealed address", () => {
+  const sealedPage = (html: string) =>
+    rewriteHtml(html, { url: new URL("https://a.test/dir/page"), origin: "http://proxy.test", opaque: true });
+
+  it("writes a sealed document's relative URLs absolute, except hash and query links", () => {
+    const out = sealedPage(
+      '<img src="a.png"><a href="#t">t</a><a href="?p=2">p</a><style>b{background:url(b.png)}</style>',
+    );
+    expect(out).toContain('src="/~/https/a.test/dir/a.png"');
+    expect(out).toContain('href="#t"');
+    expect(out).toContain('href="?p=2"');
+    expect(out).toContain('url("/~/https/a.test/dir/b.png")');
+    expect(sealedPage('<base href="https://cdn.a.test/"><img src="a.png">')).toContain(
+      'src="/~/https/cdn.a.test/a.png"',
+    );
+  });
+
+  it("reaches srcset, style attributes, import maps and srcdoc markup", () => {
+    const out = sealedPage(
+      '<img srcset="s.png 2x"><div style="background:url(d.png)"></div>' +
+        '<script type="importmap">{"imports":{"m":"./m.js"}}</script>' +
+        '<iframe srcdoc="<img src=&quot;f.png&quot;>"></iframe>',
+    );
+    expect(out).toContain('srcset="/~/https/a.test/dir/s.png 2x"');
+    expect(out).toContain("/~/https/a.test/dir/d.png");
+    expect(out).toContain('"m":"/~/https/a.test/dir/m.js"');
+    expect(out).toContain("src=&quot;/~/https/a.test/dir/f.png&quot;");
+  });
+});

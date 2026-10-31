@@ -1,3 +1,4 @@
+import type { OpenSealed } from "../shared/sealed-address.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { realUrlOf } from "./route.ts";
 import type { WorkerIdentity } from "./worker-identity.ts";
@@ -40,6 +41,8 @@ export interface TopSiteDeps {
   askTop(clientId: string): Promise<string | null>;
   /** The page that started a worker, as it announced itself. */
   workers(clientId: string): Promise<WorkerIdentity | null>;
+  /** Reads sealed page addresses. */
+  open?: OpenSealed;
 }
 
 export interface TopSiteRequest {
@@ -76,7 +79,7 @@ export async function topSiteFor(
 
 /** The top site of a window client, top-level or nested. */
 export async function windowTop(client: ClientInfo, deps: TopSiteDeps): Promise<string | null> {
-  return TOP_FRAMES.has(client.frameType) ? siteOfProxied(client.url, deps.origin) : nestedTop(client, deps);
+  return TOP_FRAMES.has(client.frameType) ? siteOfProxied(client.url, deps) : nestedTop(client, deps);
 }
 
 /** An unknown top counts as third-party: with blocking on, privacy wins. */
@@ -90,8 +93,8 @@ async function parentTop(referrer: string | null, deps: TopSiteDeps): Promise<{ 
   const wanted = withoutFragment(referrer);
   const parent = (await deps.windowClients()).find((client) => withoutFragment(client.url) === wanted);
   // The referrer alone is a guess, right for a top page and wrong for a nested one, so it is never remembered.
-  if (!parent) return { top: siteOfProxied(referrer, deps.origin), known: false };
-  const top = TOP_FRAMES.has(parent.frameType) ? siteOfProxied(parent.url, deps.origin) : await nestedTop(parent, deps);
+  if (!parent) return { top: siteOfProxied(referrer, deps), known: false };
+  const top = TOP_FRAMES.has(parent.frameType) ? siteOfProxied(parent.url, deps) : await nestedTop(parent, deps);
   return { top, known: top !== null };
 }
 
@@ -115,7 +118,7 @@ async function nestedTop(client: ClientInfo, deps: TopSiteDeps): Promise<string 
   return top;
 }
 
-function siteOfProxied(url: string | null, origin: string): string | null {
-  const real = realUrlOf(url, origin);
+function siteOfProxied(url: string | null, deps: Pick<TopSiteDeps, "origin" | "open">): string | null {
+  const real = realUrlOf(url, deps.origin, deps.open);
   return real ? schemefulSite(real) : null;
 }

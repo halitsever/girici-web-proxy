@@ -1,11 +1,13 @@
-import { decodeUrl, encodeUrl, isReservedPath } from "../shared/codec.ts";
+import { decodeUrl, encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import { LOGIN_PATH, POT_PATH, SETUP_PATH, WS_SEAL_PATH } from "../shared/protocol.ts";
+import { isSealedPath, SEALED_PREFIX, type OpenSealed } from "../shared/sealed-address.ts";
 
 export type Route =
   | { kind: "passthrough" }
-  | { kind: "proxy"; target: URL; navigation: boolean }
+  | { kind: "proxy"; target: URL; navigation: boolean; sealed: boolean }
   | { kind: "redirect"; location: string }
-  | { kind: "invalid" };
+  | { kind: "invalid" }
+  | { kind: "unsealable" };
 
 export interface RouteInput {
   url: string;
@@ -13,6 +15,11 @@ export interface RouteInput {
   navigation: boolean;
   clientUrl: string | null;
   referrer: string | null;
+  /** A navigation of a top-level document by GET, the only load that gets a sealed address. */
+  topLevelGet?: boolean;
+  open?: OpenSealed;
+  /** Given while sealing is on, or for a sealed request while this browser has the key. */
+  seal?: (url: URL) => string;
 }
 
 export function classifyRequest(input: RouteInput): Route {
@@ -21,26 +28,77 @@ export function classifyRequest(input: RouteInput): Route {
 
   if (url.origin !== input.origin) {
     // Absolute URLs that escaped rewriting still reach the worker as cross-origin subresources.
-    if (realUrlOf(input.clientUrl, input.origin)) return { kind: "proxy", target: url, navigation: false };
+    if (realUrlOf(input.clientUrl, input.origin, input.open) || isSealedClient(input.clientUrl, input.origin)) {
+      return { kind: "proxy", target: url, navigation: false, sealed: false };
+    }
     // The Girici UI may reach out on its own; a blank or srcdoc frame must not touch the real site directly.
     if (input.clientUrl && isOwnOrigin(input.clientUrl, input.origin)) return { kind: "passthrough" };
-    return { kind: "proxy", target: url, navigation: false };
+    return { kind: "proxy", target: url, navigation: false, sealed: false };
   }
   if (isReservedPath(url.pathname)) return { kind: "passthrough" };
 
   const pathAndQuery = url.pathname + url.search;
-  if (url.pathname === "/~" || url.pathname.startsWith("/~/")) {
+  const sealOnLoad = input.topLevelGet ? input.seal : undefined;
+  if (isSealedPath(url.pathname)) {
+    const target = input.open?.(pathAndQuery) ?? null;
+    if (target) {
+      const address = sealOnLoad?.(target);
+      // A query written after the token is sealed in, so the address bar never shows it.
+      if (address !== undefined && address !== pathAndQuery) return { kind: "redirect", location: address };
+      return { kind: "proxy", target, navigation: input.navigation, sealed: true };
+    }
+    // A relative URL resolved against a sealed address lands under /~/x/, which mirrors the page's directory.
+    return relativeToSealed(sliceAfter(pathAndQuery, SEALED_PREFIX), input);
+  }
+  if (url.pathname === "/~" || url.pathname.startsWith(PROXY_PREFIX)) {
     const target = decodeUrl(pathAndQuery);
-    if (!target) return { kind: "invalid" };
+    if (!target) {
+      // One "../" too many from a sealed page climbs out of /~/x/ into /~/.
+      const base = sealedBase(input);
+      return base ? relativeToSealed(`../${sliceAfter(pathAndQuery, PROXY_PREFIX)}`, input) : { kind: "invalid" };
+    }
     const canonical = encodeUrl(target);
-    return canonical === pathAndQuery
-      ? { kind: "proxy", target, navigation: input.navigation }
-      : { kind: "redirect", location: canonical };
+    if (canonical !== pathAndQuery) return { kind: "redirect", location: canonical };
+    if (sealOnLoad) return { kind: "redirect", location: sealOnLoad(target) };
+    return { kind: "proxy", target, navigation: input.navigation, sealed: false };
   }
 
   // A root-relative URL the page resolved against our origin belongs to the page's real origin.
-  const base = realUrlOf(input.navigation ? input.referrer : input.clientUrl, input.origin);
-  return base ? { kind: "redirect", location: encodeUrl(new URL(pathAndQuery, base.origin)) } : { kind: "passthrough" };
+  const base = realUrlOf(input.navigation ? input.referrer : input.clientUrl, input.origin, input.open);
+  if (!base) return { kind: "passthrough" };
+  const real = new URL(pathAndQuery, base.origin);
+  return { kind: "redirect", location: sealOnLoad ? sealOnLoad(real) : encodeUrl(real) };
+}
+
+/** Resolves a path the browser placed under a sealed page against that page's real address. */
+function relativeToSealed(relative: string, input: RouteInput): Route {
+  const base = sealedBase(input);
+  if (!base) return { kind: "unsealable" };
+  const real = new URL(relative, base);
+  if (input.navigation) {
+    return { kind: "redirect", location: (input.topLevelGet ? input.seal?.(real) : undefined) ?? encodeUrl(real) };
+  }
+  return { kind: "proxy", target: real, navigation: false, sealed: false };
+}
+
+/** The real address of the sealed page a request came from: its client, or for a navigation, its referrer. */
+function sealedBase(input: RouteInput): URL | null {
+  const value = input.navigation ? input.referrer : input.clientUrl;
+  return isSealedClient(value, input.origin) ? realUrlOf(value, input.origin, input.open) : null;
+}
+
+function isSealedClient(value: string | null, origin: string): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return url.origin === origin && isSealedPath(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function sliceAfter(text: string, prefix: string): string {
+  return text.startsWith(prefix) ? text.slice(prefix.length) : "";
 }
 
 /** True when the value is a URL on our own origin, such as the Girici UI (but not necessarily a proxied page). */
@@ -53,7 +111,7 @@ function isOwnOrigin(value: string, origin: string): boolean {
 }
 
 /** The real URL behind one of our proxy URLs, or null for the Girici UI and foreign URLs. */
-export function realUrlOf(value: string | null, origin: string): URL | null {
+export function realUrlOf(value: string | null, origin: string, open?: OpenSealed): URL | null {
   if (!value) return null;
   let url: URL;
   try {
@@ -61,7 +119,9 @@ export function realUrlOf(value: string | null, origin: string): URL | null {
   } catch {
     return null;
   }
-  return url.origin === origin ? decodeUrl(url.pathname + url.search) : null;
+  if (url.origin !== origin) return null;
+  const pathAndQuery = url.pathname + url.search;
+  return isSealedPath(url.pathname) ? (open?.(pathAndQuery) ?? null) : decodeUrl(pathAndQuery);
 }
 
 /** The parts of a Client the authority checks read. */

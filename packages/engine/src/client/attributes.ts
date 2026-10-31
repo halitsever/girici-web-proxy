@@ -127,8 +127,9 @@ export function installAttributes(
       win,
       entry[0],
       entry[1],
-      (value) => restoreAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
-      (value) => rewriteAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
+      (value) => restoreAttribute("img", "srcset", value, ctx.realBase(), ctx.origin, undefined, ctx.openSealed),
+      (value) =>
+        rewriteAttribute("img", "srcset", value, ctx.realBase(), ctx.origin, undefined, undefined, ctx.opaque()),
     );
   }
   for (let index = 0; index < INTEGRITY_PROPERTIES.length; index++) {
@@ -382,7 +383,7 @@ export function installAttributes(
     try {
       if (!isRefresh(target)) return;
       const content = apply(getAttribute, target, ["content"]) as string | null;
-      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin);
+      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin, ctx.opaque());
       if (next !== content) apply(setAttribute, target, ["content", next]);
     } catch {
       // Not an element of this realm.
@@ -392,7 +393,7 @@ export function installAttributes(
   function rewrite(target: Element, name: string, value: string): string {
     const attribute = lowerTrim(name);
     if (attribute === "content" && isRefresh(target)) {
-      return rewriteRefresh(value, ctx.realBase(), ctx.origin);
+      return rewriteRefresh(value, ctx.realBase(), ctx.origin, ctx.opaque());
     }
     const kind = attributeKind(tagOf(target), name);
     if (kind === "html") {
@@ -403,14 +404,17 @@ export function installAttributes(
       return next;
     }
     if (!kind) return value;
-    const rewritten = rewriteAttribute(tagOf(target), name, value, ctx.realBase(), ctx.origin, undefined, owner());
+    const base = ctx.realBase();
+    const rewritten = rewriteAttribute(tagOf(target), name, value, base, ctx.origin, undefined, owner(), ctx.opaque());
     return setHas(DOCUMENT_ATTRIBUTES, `${tagOf(target)}.${attribute}`) ? blobs.swap(rewritten) : rewritten;
   }
 
   function restore(target: Element, name: string, value: string): string {
     const base = ctx.realBase();
     if (lowerTrim(name) === "content" && isRefresh(target)) {
-      return mapRefresh(value, (url) => blobs.original(restoreAttribute("a", "href", url, base, ctx.origin)));
+      return mapRefresh(value, (url) =>
+        blobs.original(restoreAttribute("a", "href", url, base, ctx.origin, undefined, ctx.openSealed)),
+      );
     }
     const kind = attributeKind(tagOf(target), name);
     if (kind === "html") {
@@ -418,7 +422,7 @@ export function installAttributes(
       if (record && record.native === value) return record.original;
     }
     return kind
-      ? blobs.original(restoreAttribute(tagOf(target), name, value, base, ctx.origin, markup.unsrcdoc))
+      ? blobs.original(restoreAttribute(tagOf(target), name, value, base, ctx.origin, markup.unsrcdoc, ctx.openSealed))
       : value;
   }
 
