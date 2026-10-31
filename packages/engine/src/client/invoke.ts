@@ -3,6 +3,9 @@ type AnyFunction = (...args: never[]) => unknown;
 
 export type Invoke = (fn: AnyFunction, self: unknown, args: readonly unknown[]) => unknown;
 
+// Taken at load, so a page that replaced Reflect.apply never receives the natives passed through here.
+const apply = Reflect.apply;
+
 /**
  * postMessage and Location calls take their sender from the calling realm. A function compiled by the window's own
  * realm makes that realm the caller, even when another window's runtime installed the hooks.
@@ -12,9 +15,9 @@ export function createInvoker(win: { Function: FunctionConstructor }): Invoke {
     const compile = new win.Function("apply", "return function (f, t, a) { return apply(f, t, a); }") as (
       apply: typeof Reflect.apply,
     ) => Invoke;
-    return compile(Reflect.apply);
+    return compile(apply);
   } catch {
     // A realm that refuses to compile code keeps the direct call; only the reported sender can then be wrong.
-    return (fn, self, args) => Reflect.apply(fn, self, args);
+    return (fn, self, args) => apply(fn, self, args);
   }
 }

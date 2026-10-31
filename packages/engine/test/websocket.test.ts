@@ -1,3 +1,4 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { installWebSocket } from "../src/client/websocket.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
@@ -112,6 +113,21 @@ describe("installWebSocket", () => {
     inner.onmessage!({ data: new ArrayBuffer(3) });
     expect(messages[0]).toBe("hello");
     expect(messages[1]).toBeInstanceOf(Blob);
+  });
+
+  it("delivers binary data from another realm as a Blob, as an adopted frame's socket does", async () => {
+    const win = makeWin();
+    installWebSocket(win, ctx);
+    MockWs.instances.length = 0;
+    const ws = new win.WebSocket("wss://gateway.discord.gg/");
+    const messages: unknown[] = [];
+    ws.onmessage = (event: MessageEvent) => messages.push(event.data);
+    await flush();
+    const inner = MockWs.instances[0]!;
+    inner.onopen!();
+    inner.onmessage!({ data: JSON.stringify({ t: "open", p: "" }) });
+    inner.onmessage!({ data: runInNewContext("new ArrayBuffer(3)") as ArrayBuffer });
+    expect(messages[0]).toBeInstanceOf(Blob);
   });
 
   it("maps a forbidden upstream close code and never throws on close()", async () => {

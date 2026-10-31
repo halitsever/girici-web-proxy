@@ -1,5 +1,8 @@
-import { prefixFor } from "../shared/partition.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { prefixFor, sameSite } from "../shared/partition.ts";
+import { append, define, originOf, parseUrl } from "../shared/primordials.ts";
+import { maskNative } from "./native-mask.ts";
+import type { DocumentListeners } from "./renewal.ts";
+import type { Realm } from "./url-context.ts";
 
 export { prefixFor };
 
@@ -11,6 +14,34 @@ const protoOf = Object.getPrototypeOf;
 const describe = Object.getOwnPropertyDescriptor;
 const startsWith = String.prototype.startsWith;
 const slice = String.prototype.slice;
+const NativeMap = Map;
+const mapGet = Map.prototype.get;
+const mapSet = Map.prototype.set;
+
+/**
+ * Where a window's storage lives: its own origin's, or for a frame of another site, a copy kept per top origin. The
+ * site comes from a renewable config, so it counts only when the frame's own host belongs to it and the top's
+ * runtime, when it can be asked, holds the same site.
+ */
+export function partitionFor(input: {
+  origin: string;
+  isTop: boolean;
+  topUrl: URL | null;
+  site: string | undefined;
+  topSite?: string | undefined;
+}): string {
+  const { origin, isTop, topUrl, site, topSite } = input;
+  if (isTop) return prefixFor(origin);
+  const own = parseUrl(origin);
+  const firstParty =
+    topUrl !== null &&
+    own !== null &&
+    site !== undefined &&
+    sameSite(topUrl, site) &&
+    sameSite(own, site) &&
+    (topSite === undefined || topSite === site);
+  return firstParty ? prefixFor(origin) : prefixFor(origin, topUrl ? originOf(topUrl) : "null");
+}
 
 export interface StorageMethods {
   length: (this: Storage) => number;
@@ -35,10 +66,9 @@ export function storageMethods(proto: object): StorageMethods {
 /** Every proxied site shares our origin's storage, so each real origin gets its own key prefix. */
 export function createPartitionedStorage(
   native: Storage,
-  origin: string,
+  prefix: string,
   calls: StorageMethods = storageMethods(protoOf(native) as object),
 ): Storage {
-  const prefix = prefixFor(origin);
   const length = () => apply(calls.length, native, []);
   const nativeKey = (index: number) => apply(calls.key, native, [index]);
   const getItem = (key: string) => apply(calls.getItem, native, [key]);
@@ -57,7 +87,8 @@ export function createPartitionedStorage(
     setItem: (key: unknown, value: unknown) => setItem(prefix + toText(key), toText(value)),
     removeItem: (key: unknown) => removeItem(prefix + toText(key)),
     clear: () => {
-      for (const key of keys()) removeItem(prefix + key);
+      const own = keys();
+      for (let index = 0; index < own.length; index++) removeItem(prefix + own[index]);
     },
     key: (index: number) => keys()[index] ?? null,
   };
@@ -100,28 +131,86 @@ export function createPartitionedStorage(
   } as ProxyHandler<Storage>);
 }
 
-export function installStorage(win: Realm, ctx: UrlContext): void {
+/** Returns the storage event filter, whose listener a document step adds again after document.open drops it. */
+export function installStorage(win: Realm, partition: () => string): DocumentListeners {
   const storageProto = (win as unknown as { Storage?: { prototype: object } }).Storage?.prototype;
   const calls = storageProto ? storageMethods(storageProto) : undefined;
-  for (const name of ["localStorage", "sessionStorage"] as const) {
+  const areas: Array<[() => unknown, () => Storage]> = [];
+  const names = ["localStorage", "sessionStorage"] as const;
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index] as (typeof names)[number];
     const getNative = findGetter(win, name);
     if (!getNative) continue;
-    // One object per origin keeps `localStorage === localStorage` true.
-    const byOrigin = new Map<string, Storage>();
-    Object.defineProperty(win, name, {
-      configurable: true,
-      enumerable: true,
-      get: () => {
-        const origin = ctx.realUrl().origin;
-        let storage = byOrigin.get(origin);
-        if (!storage) {
-          storage = createPartitionedStorage(apply(getNative, win, []) as Storage, origin, calls);
-          byOrigin.set(origin, storage);
-        }
-        return storage;
-      },
-    });
+    // One object per partition keeps `localStorage === localStorage` true.
+    const byPartition = new NativeMap<string, Storage>();
+    const get = () => {
+      const prefix = partition();
+      let storage = apply(mapGet, byPartition, [prefix]) as Storage | undefined;
+      if (!storage) {
+        storage = createPartitionedStorage(apply(getNative, win, []) as Storage, prefix, calls);
+        apply(mapSet, byPartition, [prefix, storage]);
+      }
+      return storage;
+    };
+    append(areas, [() => apply(getNative, win, []), get]);
+    define(win, name, { configurable: true, enumerable: true, get });
   }
+  const partitioned = (native: unknown): unknown => {
+    for (let index = 0; index < areas.length; index++) {
+      const area = areas[index] as [() => unknown, () => Storage];
+      if (area[0]() === native) return area[1]();
+    }
+    return null;
+  };
+  return installStorageEvents(win, partition, partitioned);
+}
+
+/** Storage events reach every window of our origin, so a window sees only its own partition's changes, unprefixed. */
+function installStorageEvents(
+  win: Realm,
+  partition: () => string,
+  partitioned: (native: unknown) => unknown,
+): DocumentListeners {
+  const proto = (win as unknown as { StorageEvent?: { prototype: object } }).StorageEvent?.prototype;
+  const getters = proto && {
+    key: describe(proto, "key")?.get,
+    oldValue: describe(proto, "oldValue")?.get,
+    newValue: describe(proto, "newValue")?.get,
+    storageArea: describe(proto, "storageArea")?.get,
+  };
+  const stop = win.Event.prototype.stopImmediatePropagation;
+  const addListener = win.addEventListener;
+  if (!proto || !getters?.key) return { listen: () => {} };
+  const nativeKey = getters.key;
+  // isTrusted is an own, unforgeable property of each event; one a page made itself is left as it made it.
+  const trusted = (event: unknown) => (event as Event).isTrusted === true;
+  const ownKey = (event: unknown): string | null => {
+    const key: unknown = apply(nativeKey, event, []);
+    if (typeof key !== "string") return null;
+    const prefix = partition();
+    return apply(startsWith, key, [prefix]) ? (apply(slice, key, [prefix.length]) as string) : null;
+  };
+  const hook = (name: keyof typeof getters, read: (event: unknown, native: () => unknown) => unknown) => {
+    const get = getters[name];
+    const descriptor = describe(proto, name);
+    if (!get || !descriptor) return;
+    define(proto, name, {
+      ...descriptor,
+      get: maskNative(function (this: unknown) {
+        const native = () => apply(get, this, []);
+        return trusted(this) ? read(this, native) : native();
+      }, get),
+    });
+  };
+  hook("key", (event) => ownKey(event));
+  hook("oldValue", (event, native) => (ownKey(event) === null ? null : native()));
+  hook("newValue", (event, native) => (ownKey(event) === null ? null : native()));
+  hook("storageArea", (_event, native) => partitioned(native()));
+  const drop = (event: unknown) => {
+    if (trusted(event) && ownKey(event) === null) apply(stop, event, []);
+  };
+  // Capture on the window, added before any page listener, so it runs first.
+  return { listen: () => apply(addListener, win, ["storage", drop, true]) };
 }
 
 function findGetter(object: object, name: string): ((this: unknown) => unknown) | undefined {

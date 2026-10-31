@@ -40,8 +40,20 @@ test("renews a frame window the page touched before setting its src", async ({ p
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
     cookie: "",
     href: "https://site-b.test/reuse-child",
+    reused: true,
     fromChild: true,
   });
+});
+
+test("keeps cookie writes and top-site answers working in renewed same-site frames", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/reuse-same");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const out = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  for (const key of ["told", "asked"]) {
+    expect(out[key], key).toMatchObject({ key, reused: true, fromChild: true });
+    // The write right before the fetch must already be in the jar, and so must the parent's.
+    expect(out[key].echo.split("; "), key).toEqual(expect.arrayContaining(["a=1", `${key}=1`]));
+  }
 });
 
 test("denies notifications", async ({ page }) => {
@@ -79,4 +91,21 @@ test("renders an untyped page as HTML and keeps a text document's charset", asyn
   await expect(page.locator("#where")).toHaveText("https://site-a.test/untyped-page");
   await page.goto("/~/https/site-a.test/cyrillic.txt");
   await expect(page.locator("body")).toHaveText("Привет");
+});
+
+test("rewrites URLs set through Attr nodes", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/attr-node");
+  await expect(page.frameLocator("#by-node").locator("h1")).toHaveText("Site B");
+  await expect(page.frameLocator("#by-map").locator("h1")).toHaveText("Site B");
+});
+
+test("reads a srcdoc Attr node back as written and runs it once", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/attr-node");
+  await expect(page.frameLocator("#moved-srcdoc").locator("#doc")).toHaveText("site-a.test");
+  expect(JSON.parse((await page.locator("#readback").textContent()) ?? "{}")).toEqual({
+    node: true,
+    attribute: true,
+    property: true,
+    markup: true,
+  });
 });

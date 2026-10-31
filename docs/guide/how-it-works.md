@@ -56,6 +56,12 @@ subresources. Turning on public access opens the data path to everyone and skips
 
 - **Single origin.** Every proxied site shares one browser origin, so isolation between sites is
   limited. `HttpOnly` is not a boundary here.
+- **Computed access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other
+  windows. A key built at run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)`,
+  `Object.assign(window, { location: url })`, or a window reached as `frames[i]`, `window[i]` or by name, gets the
+  browser's own object. Such a page can navigate outside the proxy or open a document without Girici's script.
+- **Blob URLs and the origin private file system are shared.** Every site runs on Girici's origin, so a site that
+  learns another site's `blob:` URL can read it, and `navigator.storage.getDirectory()` gives all sites one folder.
 - **The operator sees traffic.** The relay terminates TLS at the server.
 - **Bot protection still applies.** A correct proxy can still be blocked by a site's bot checks or by
   blocks on datacenter IP ranges.
@@ -75,7 +81,7 @@ All proxied sites share Girici's origin in your browser, so Girici keeps each si
 jar and prefixes each site's storage. **Settings → Site data** lists the sites that stored something and
 clears one of them, or all of them, without touching the others. Clearing a site removes its cookies,
 including HttpOnly ones, and its local storage, session storage, IndexedDB databases and caches, for the
-site and its subdomains.
+site and its subdomains. A site embedded in another keeps separate storage for each site that embeds it.
 
 ## Third-party cookies
 

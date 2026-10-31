@@ -1,3 +1,4 @@
+import { apply } from "../shared/primordials.ts";
 import { WS_PREP_PATH } from "../shared/protocol.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -98,8 +99,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
         else this.#inner?.close();
         return;
       }
-      if (data instanceof ArrayBuffer && this.binaryType === "blob")
-        this.#emit(new win.MessageEvent("message", { data: new win.Blob([data]) }));
+      if (isArrayBuffer(data) && this.binaryType === "blob")
+        this.#emit(new win.MessageEvent("message", { data: new win.Blob([data as ArrayBuffer]) }));
       else this.#emit(new win.MessageEvent("message", { data }));
     }
 
@@ -107,7 +108,10 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       this.#opened = true;
       this.readyState = 1;
       this.protocol = protocol ?? "";
-      for (const item of this.#queue) this.#inner?.send(item as Parameters<WebSocket["send"]>[0]);
+      const queue = this.#queue;
+      for (let index = 0; index < queue.length; index++) {
+        this.#inner?.send(queue[index] as Parameters<WebSocket["send"]>[0]);
+      }
       this.#queue = [];
       this.#bufferedBeforeOpen = 0;
       this.#emit(new win.Event("open"));
@@ -152,4 +156,17 @@ function sizeOf(data: string | ArrayBuffer | Blob | ArrayBufferView): number {
   if ("byteLength" in data) return data.byteLength;
   if ("size" in data) return data.size;
   return 0;
+}
+
+const arrayBufferLength = Object.getOwnPropertyDescriptor(ArrayBuffer.prototype, "byteLength")?.get;
+
+/** By the native getter, which works across realms: an adopted frame's socket hands out its own ArrayBuffers. */
+function isArrayBuffer(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || !arrayBufferLength) return false;
+  try {
+    apply(arrayBufferLength, value, []);
+    return true;
+  } catch {
+    return false;
+  }
 }

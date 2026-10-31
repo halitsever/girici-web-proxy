@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { contentTypeOf, decodeText, mimeOf, rewriteKind, sandboxesDocument, sniffsHtml } from "../src/sw/body.ts";
+import { decodeText } from "../src/shared/charset.ts";
+import { contentTypeOf, mimeOf, rewriteKind, sandboxesDocument, sniffsHtml } from "../src/sw/body.ts";
 
 describe("rewriteKind", () => {
   it("rewrites HTML that object and embed elements load", () => {

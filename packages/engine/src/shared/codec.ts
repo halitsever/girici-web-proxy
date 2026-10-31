@@ -1,14 +1,27 @@
+import {
+  hashOf,
+  hostOf,
+  indexOf,
+  parseUrl,
+  pathnameOf,
+  protocolOf,
+  searchOf,
+  sliceOf,
+  startsWith,
+  urlPart,
+} from "./primordials.ts";
+
 export const PROXY_PREFIX = "/~/";
 export const RELAY_PREFIX = "/_g/r/";
 
 /** The UI and the engine own these paths; any other path on our origin belongs to a proxied site. */
 export function isReservedPath(pathname: string): boolean {
-  return pathname === "/" || pathname === "/robots.txt" || pathname.startsWith("/_g/");
+  return pathname === "/" || pathname === "/robots.txt" || startsWith(pathname, "/_g/");
 }
 
 /** The path stays structured instead of encoded, so the browser's own relative URL resolution keeps working. */
 export function encodeUrl(url: URL): string {
-  return `${PROXY_PREFIX}${schemeOf(url)}/${url.host}${url.pathname}${url.search}${url.hash}`;
+  return `${PROXY_PREFIX}${schemeOf(url)}/${hostOf(url)}${pathnameOf(url)}${searchOf(url)}${hashOf(url)}`;
 }
 
 export function decodeUrl(pathAndQuery: string): URL | null {
@@ -16,7 +29,7 @@ export function decodeUrl(pathAndQuery: string): URL | null {
 }
 
 export function relayPathFor(url: URL): string {
-  return `${RELAY_PREFIX}${schemeOf(url)}/${url.host}${url.pathname}${url.search}`;
+  return `${RELAY_PREFIX}${schemeOf(url)}/${hostOf(url)}${pathnameOf(url)}${searchOf(url)}`;
 }
 
 export function targetFromRelayPath(pathAndQuery: string): URL | null {
@@ -24,28 +37,23 @@ export function targetFromRelayPath(pathAndQuery: string): URL | null {
 }
 
 function schemeOf(url: URL): "http" | "https" {
-  if (url.protocol === "http:") return "http";
-  if (url.protocol === "https:") return "https";
-  throw new TypeError(`Only http and https URLs can be proxied, got ${url.protocol}`);
+  const protocol = protocolOf(url);
+  if (protocol === "http:") return "http";
+  if (protocol === "https:") return "https";
+  throw new TypeError(`Only http and https URLs can be proxied, got ${protocol}`);
 }
 
 function parseTail(pathAndQuery: string, prefix: string): URL | null {
-  if (!pathAndQuery.startsWith(prefix)) return null;
-  const rest = pathAndQuery.slice(prefix.length);
-  const slash = rest.indexOf("/");
+  if (!startsWith(pathAndQuery, prefix)) return null;
+  const rest = sliceOf(pathAndQuery, prefix.length);
+  const slash = indexOf(rest, "/");
   if (slash <= 0) return null;
-  const scheme = rest.slice(0, slash);
+  const scheme = sliceOf(rest, 0, slash);
   if (scheme !== "http" && scheme !== "https") return null;
-  const remainder = rest.slice(slash + 1);
-  if (!remainder || remainder.startsWith("/")) return null;
+  const remainder = sliceOf(rest, slash + 1);
+  if (!remainder || startsWith(remainder, "/")) return null;
 
-  let url: URL;
-  try {
-    // Safari 17.4, which the UI supports, has no URL.parse.
-    url = new URL(`${scheme}://${remainder}`);
-  } catch {
-    return null;
-  }
-  if (url.username || url.password || !url.hostname) return null;
+  const url = parseUrl(`${scheme}://${remainder}`);
+  if (!url || urlPart(url, "username") || urlPart(url, "password") || !urlPart(url, "hostname")) return null;
   return url;
 }
