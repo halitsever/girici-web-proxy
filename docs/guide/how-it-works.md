@@ -56,6 +56,10 @@ subresources. Turning on public access opens the data path to everyone and skips
 
 - **Single origin.** Every proxied site shares one browser origin, so isolation between sites is
   limited. `HttpOnly` is not a boundary here.
+- **Computed access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other
+  windows. A key built at run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)`,
+  `Object.assign(window, { location: url })`, or a window reached as `frames[i]`, `window[i]` or by name, gets the
+  browser's own object. Such a page can navigate outside the proxy or open a document without Girici's script.
 - **The operator sees traffic.** The relay terminates TLS at the server.
 - **Bot protection still applies.** A correct proxy can still be blocked by a site's bot checks or by
   blocks on datacenter IP ranges.

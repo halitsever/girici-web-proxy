@@ -399,6 +399,7 @@ function isImportMetaUrl(node: ESTree.MemberExpression): boolean {
   );
 }
 
+/** Only literal keys are known here; a key built at run time reaches the native Location, a documented limit. */
 function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
   if (node.type !== "MemberExpression") return false;
   const { property } = node;
