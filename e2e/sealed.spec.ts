@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { enableSealing, expect, openThroughUi, test } from "./support/test.ts";
+import { enableSealing, expect, INSTANCE, openThroughUi, signIn, test } from "./support/test.ts";
 
 const SEALED = /\/~\/x\/[\w-]+\.[\w-]+$/;
 const label = (url: string) => new URL(url).pathname.split("/")[3]!.split(".")[0];
@@ -140,23 +140,21 @@ test("the Settings switch turns sealing on and off", async ({ page }) => {
   expect(page.url()).toMatch(/\/~\/https\/site-a\.test\//);
 });
 
-// The seeded instance server on 41002 comes with Task 0 on the other track; this test runs once the tracks merge.
-const INSTANCE = "http://127.0.0.1:41002";
-
 test("an admin turns sealing on for every visitor", async ({ page, browser, browserName }) => {
   test.skip(browserName !== "chromium", "shared admin write limit");
-  test.fixme(true, "needs the seeded instance server on 41002 from Task 0, enabled when the tracks merge");
-  await page.goto(`${INSTANCE}/_g/login`);
-  await page.getByLabel("Username").fill("e2e");
-  await page.getByLabel("Password").fill("e2e-password");
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL(`${INSTANCE}/`);
+  await signIn(page, INSTANCE);
   try {
     await page.goto(`${INSTANCE}/settings`);
+    const name = await page.getByLabel("Instance name").inputValue();
+    expect(name).not.toBe("");
     await page.getByLabel("Current password").fill("e2e-password");
     const everyone = page.getByRole("switch", { name: "Encrypt page addresses for everyone" });
     await everyone.click();
     await expect(everyone).toBeChecked();
+    // Both instance settings live in one store, so a write to one must leave the other as it was.
+    await page.reload();
+    await expect(everyone).toBeChecked();
+    await expect(page.getByLabel("Instance name")).toHaveValue(name);
 
     const visitor = await browser.newContext({ baseURL: INSTANCE });
     try {
@@ -168,6 +166,7 @@ test("an admin turns sealing on for every visitor", async ({ page, browser, brow
       await expect(own).toBeChecked();
       await expect(own).toBeDisabled();
       await expect(other.getByText("Turned on for everyone by the admin.")).toBeVisible();
+      await expect(other.locator("header")).toContainText(name);
     } finally {
       await visitor.close();
     }

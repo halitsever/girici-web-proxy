@@ -136,6 +136,26 @@ describe("adminRouter settings", () => {
     expect(await read.json()).toMatchObject({ sealAddresses: true });
   });
 
+  it("keeps the instance name and the instance switches apart in the settings store", async () => {
+    const { base, store, cookie } = await withAdmin();
+    const brand = await post(base, "/_g/admin/brand", { name: "Kurulum", currentPassword: setup.password }, cookie);
+    expect(brand.status).toBe(200);
+    const settings = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: true, publicAccess: true, currentPassword: setup.password },
+      cookie,
+    );
+    expect(settings.status).toBe(200);
+    expect(store.brandName()).toBe("Kurulum");
+    expect((await post(base, "/_g/admin/brand", { name: null, currentPassword: setup.password }, cookie)).status).toBe(
+      200,
+    );
+    expect(store.brandName()).toBeNull();
+    expect(store.sealAddresses()).toBe(true);
+    expect(store.publicAccess()).toBe(true);
+  });
+
   it("returns the settings with the stored and env blocklists", async () => {
     const { base, cookie } = await withAdmin({ envBlocked: ["env.example"] });
     const res = await fetch(`${base}/_g/admin/settings`, { headers: { cookie } });
