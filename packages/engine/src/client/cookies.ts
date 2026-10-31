@@ -1,4 +1,4 @@
-import { define } from "../shared/primordials.ts";
+import { append, define } from "../shared/primordials.ts";
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
   COOKIE_MESSAGE,
@@ -32,7 +32,7 @@ export function installCookies(
   container: () => ServiceWorkerContainer | null,
   reload: () => void,
 ): CookieBridge {
-  let mirror = [...config.cookies];
+  let mirror = copyCookies(config.cookies);
   let blocked = config.cookiesBlocked === true;
   let seq = 0;
   // Answers to the previous document's writes must not land in the renewed document's mirror.
@@ -121,11 +121,31 @@ export function installCookies(
       }
     },
     reset: (next) => {
-      mirror = [...next.cookies];
+      mirror = copyCookies(next.cookies);
       blocked = next.cookiesBlocked === true;
       seq = 0;
       generation++;
     },
-    snapshot: () => [...mirror],
+    snapshot: () => copyCookies(mirror),
   };
+}
+
+/** Indexed copies with null prototypes: snapshots go into frames' configs, which page code must not steer. */
+function copyCookies(cookies: readonly CookieSnapshot[]): CookieSnapshot[] {
+  const copy: CookieSnapshot[] = [];
+  for (let index = 0; index < cookies.length; index++) {
+    const cookie = cookies[index] as CookieSnapshot;
+    append(copy, {
+      __proto__: null,
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      hostOnly: cookie.hostOnly,
+      secure: cookie.secure,
+      expires: cookie.expires,
+      creation: cookie.creation,
+    } as CookieSnapshot);
+  }
+  return copy;
 }

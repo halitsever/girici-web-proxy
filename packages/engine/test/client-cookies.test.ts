@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { installCookies } from "../src/client/cookies.ts";
 import { encodeHeaderValue, PROTOCOL_VERSION, type CookieSnapshot } from "../src/shared/protocol.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 type Handler = (event: { data: unknown }) => void;
 
@@ -195,6 +196,30 @@ describe("installCookies", () => {
     win.document.cookie = "own=1";
     expect(win.document.cookie).toBe("b=2; own=1");
     expect(bridge.snapshot().map((c) => c.name)).toEqual(["b", "own"]);
+  });
+
+  it("hands frames a cookie snapshot built without the page's array iterator or prototypes", () => {
+    const { win, ctx, container } = makeRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [cookie("a", "1")] },
+      () => container,
+      () => {},
+    );
+    const snapshot = withReplaced(
+      Array.prototype,
+      Symbol.iterator,
+      {
+        value: function* () {
+          yield cookie("forged", "1");
+        },
+      },
+      () => bridge.snapshot(),
+    );
+    expect(snapshot.length).toBe(1);
+    expect(snapshot[0]?.name).toBe("a");
+    expect(Object.getPrototypeOf(snapshot[0])).toBeNull();
   });
 
   it("reloads through the location call it was given when the worker has moved on", async () => {
