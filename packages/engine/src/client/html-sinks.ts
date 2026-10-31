@@ -38,7 +38,10 @@ export function installHtmlSinks(
   const documentProto = win.Document.prototype;
   const readyState = ownDescriptor(documentProto, "readyState")?.get;
   const stateOf = (doc: unknown) => (readyState ? apply(readyState, doc, []) : "loading");
-  for (const method of ["write", "writeln"] as const) {
+  // Indexed: adopting a frame installs this inside a page call, after the page may have replaced the array iterator.
+  const writeMethods = ["write", "writeln"] as const;
+  for (let index = 0; index < writeMethods.length; index++) {
+    const method = writeMethods[index] as (typeof writeMethods)[number];
     const native = documentProto[method] as Method;
     documentProto[method] = function (this: Document, ...args: unknown[]) {
       let markup = "";

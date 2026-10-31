@@ -298,7 +298,9 @@ export function createWindowGuard(
 /** Window links a page reads from its own window: `parent` and `opener` are wrapped, `frameElement` hidden. */
 export function installWindowLinks(win: Realm, ctx: UrlContext, guard: WindowGuard): void {
   const parentOf = ownDescriptor(win, "parent")?.get;
-  for (const name of ["parent", "opener"]) {
+  const links = ["parent", "opener"];
+  for (let index = 0; index < links.length; index++) {
+    const name = links[index] as string;
     const descriptor = ownDescriptor(win, name);
     const get = descriptor?.get;
     if (!descriptor?.configurable || !get) continue;

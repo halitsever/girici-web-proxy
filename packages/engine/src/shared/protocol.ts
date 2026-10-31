@@ -100,7 +100,8 @@ export type RelayErrorCode =
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {
   let binary = "";
-  for (const byte of new TextEncoder().encode(value)) binary += String.fromCharCode(byte);
+  const bytes = new TextEncoder().encode(value);
+  for (let index = 0; index < bytes.length; index++) binary += String.fromCharCode(bytes[index] as number);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 

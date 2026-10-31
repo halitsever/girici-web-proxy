@@ -87,7 +87,8 @@ export function createPartitionedStorage(
     setItem: (key: unknown, value: unknown) => setItem(prefix + toText(key), toText(value)),
     removeItem: (key: unknown) => removeItem(prefix + toText(key)),
     clear: () => {
-      for (const key of keys()) removeItem(prefix + key);
+      const own = keys();
+      for (let index = 0; index < own.length; index++) removeItem(prefix + own[index]);
     },
     key: (index: number) => keys()[index] ?? null,
   };
@@ -135,7 +136,9 @@ export function installStorage(win: Realm, partition: () => string): DocumentLis
   const storageProto = (win as unknown as { Storage?: { prototype: object } }).Storage?.prototype;
   const calls = storageProto ? storageMethods(storageProto) : undefined;
   const areas: Array<[() => unknown, () => Storage]> = [];
-  for (const name of ["localStorage", "sessionStorage"] as const) {
+  const names = ["localStorage", "sessionStorage"] as const;
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index] as (typeof names)[number];
     const getNative = findGetter(win, name);
     if (!getNative) continue;
     // One object per partition keeps `localStorage === localStorage` true.

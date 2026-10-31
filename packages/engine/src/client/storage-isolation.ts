@@ -1,4 +1,4 @@
-import { apply, sliceOf, startsWith, toText } from "../shared/primordials.ts";
+import { apply, joined, sliceOf, startsWith, toText } from "../shared/primordials.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -48,7 +48,9 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
           return apply(native, this, [request, { ...options, cacheName: partition() + options.cacheName }]);
         }
         return (async () => {
-          for (const name of await caches.keys()) {
+          const names = await caches.keys();
+          for (let index = 0; index < names.length; index++) {
+            const name = names[index] as string;
             const hit = await (await caches.open(name)).match(request as RequestInfo, options);
             if (hit) return hit;
           }
@@ -70,10 +72,9 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
   );
 
   if (win.BroadcastChannel) {
-    win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) => [
-      partition() + toText(input[0]),
-      ...input.slice(1),
-    ]);
+    win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) =>
+      joined([partition() + toText(input[0])], input, 1),
+    );
   }
 
   installCookieStore(win, ctx);
@@ -97,14 +98,15 @@ function stripLocks(locks: NamedLock[] | undefined, strip: (name: string) => str
 
 type Method = (this: unknown, ...args: unknown[]) => unknown;
 
+/** Indexed, without spreads: adopting a frame runs this inside a page call, after the page may have replaced them. */
 function prefixFirstArg(proto: object | undefined, methods: string[], prefix: () => string): void {
-  for (const method of methods) {
+  for (let index = 0; index < methods.length; index++) {
     wrap(
       proto,
-      method,
+      methods[index] as string,
       (native) =>
         function (this: unknown, name: unknown, ...rest: unknown[]) {
-          return apply(native, this, [prefix() + toText(name), ...rest]);
+          return apply(native, this, joined([prefix() + toText(name)], rest));
         },
     );
   }

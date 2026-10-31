@@ -53,8 +53,10 @@ export function captureToolbarNatives(win: Realm): ToolbarNatives {
   return {
     isTop,
     storage,
-    attachShadow: (host) => attachShadow.call(host, { mode: "open" }),
-    setShadowHtml: (root, html) => setInnerHtml?.call(root, html),
+    attachShadow: (host) => apply(attachShadow, host, [{ mode: "open" }]) as ShadowRoot,
+    setShadowHtml: (root, html) => {
+      if (setInnerHtml) apply(setInnerHtml, root, [html]);
+    },
     fetch: win.fetch.bind(win),
     siteData: captureSiteDataEnv(win),
   };
@@ -70,7 +72,7 @@ export function createToolbarKeys(win: Realm): ToolbarKeys {
       current = handler;
     },
     listen: () => {
-      for (const type of KEY_EVENTS) apply(addListener, win, [type, onKey, true]);
+      for (let index = 0; index < KEY_EVENTS.length; index++) apply(addListener, win, [KEY_EVENTS[index], onKey, true]);
     },
   };
 }

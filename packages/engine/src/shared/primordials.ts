@@ -145,6 +145,14 @@ export function define<T>(target: T, key: PropertyKey, descriptor: PropertyDescr
   return objectDefine(target, key, own as PropertyDescriptor);
 }
 
+/** `[...head, ...rest.slice(from)]` without the array iterator, which a page can replace. */
+export function joined(head: readonly unknown[], rest: ArrayLike<unknown>, from = 0): unknown[] {
+  const out: unknown[] = [];
+  for (let index = 0; index < head.length; index++) append(out, head[index]);
+  for (let index = from; index < rest.length; index++) append(out, rest[index]);
+  return out;
+}
+
 /** Adds to the end of `list` without Array.prototype.push or an index setter a page put on Array.prototype. */
 export function append<T>(list: T[], item: T): void {
   defineProperty(list, list.length, {

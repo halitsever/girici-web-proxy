@@ -1,5 +1,5 @@
 import { decodeUrl } from "../shared/codec.ts";
-import { define as defineOwn } from "../shared/primordials.ts";
+import { apply, define as defineOwn, originOf, parseUrl, pathnameOf, searchOf, toText } from "../shared/primordials.ts";
 import { refererFor } from "../shared/referrer.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -26,22 +26,18 @@ export function installDocument(win: Realm, ctx: UrlContext): () => void {
   });
   define(documentProto, "referrer", {
     get(this: Document) {
-      const value = String(nativeReferrer.call(this));
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        return "";
-      }
-      if (url.origin !== ctx.origin) return value;
-      const previous = decodeUrl(url.pathname + url.search);
+      const value = toText(apply(nativeReferrer, this, []));
+      const url = parseUrl(value);
+      if (!url) return "";
+      if (originOf(url) !== ctx.origin) return value;
+      const previous = decodeUrl(pathnameOf(url) + searchOf(url));
       // The browser saw every proxied page as same-origin, so the real policy default is applied to real URLs.
       return previous ? (refererFor(previous, ctx.realUrl(), "") ?? "") : "";
     },
   });
   define(win.Node.prototype, "baseURI", {
     get(this: Node) {
-      return ctx.fromProxy(String(nativeBaseUri.call(this)));
+      return ctx.fromProxy(toText(apply(nativeBaseUri, this, [])));
     },
   });
   defineOwn(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });

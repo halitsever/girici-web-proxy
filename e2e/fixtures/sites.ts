@@ -685,6 +685,42 @@ const servedBlob =
     res.end(page("Served blob", body));
   };
 
+// A page that breaks the array iterator before its frames are adopted, to reach the jar or navigate unhooked.
+const ITERATOR_ADOPTION = page(
+  "Iterator adoption",
+  `<pre id="results"></pre>
+<script>
+  const results = {};
+  const iterate = Array.prototype[Symbol.iterator];
+  Array.prototype[Symbol.iterator] = function* () {};
+  const first = document.createElement("iframe");
+  document.body.appendChild(first);
+  Array.prototype[Symbol.iterator] = iterate;
+  const request = first.contentWindow.indexedDB.open("__girici");
+  request.onsuccess = () => {
+    results.stores = request.result.objectStoreNames.length;
+    request.result.close();
+    document.getElementById("results").textContent = JSON.stringify(results);
+  };
+  request.onerror = () => {
+    results.stores = "error";
+    document.getElementById("results").textContent = JSON.stringify(results);
+  };
+  Array.prototype[Symbol.iterator] = function () {
+    throw new Error("page");
+  };
+  const second = document.createElement("iframe");
+  second.name = "second";
+  try {
+    document.body.appendChild(second);
+  } catch {
+    // The insertion may fail; the frame must still not navigate around the proxy.
+  }
+  Array.prototype[Symbol.iterator] = iterate;
+  second.contentWindow.open("https://site-b.test/", "_self");
+</script>`,
+);
+
 const SERVED_BLOBS = page(
   "Served blobs",
   `<pre id="results"></pre>
@@ -1725,6 +1761,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-opener": html(XS_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
+    "/iterator-adoption": html(ITERATOR_ADOPTION),
     "/ws-binary": html(WS_BINARY),
     "/ws-frame": html(WS_FRAME),
     "/served-blob-frame": servedBlob("frame"),

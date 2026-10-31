@@ -174,3 +174,9 @@ test("loads no blob document a served page or header names", async ({ page }) =>
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ ran: [] });
 });
+
+test("adopts frames with every hook when the page broke the array iterator", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/iterator-adoption");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ stores: 0 });
+});

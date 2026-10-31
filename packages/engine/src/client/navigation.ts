@@ -47,7 +47,11 @@ export function installNavigation(
 ): NavigationHooks {
   const history = win.History.prototype;
   const historyOf = ownDescriptor(win, "history")?.get;
-  for (const method of ["pushState", "replaceState"] as const) {
+  // Every loop here is indexed: adopting a frame installs this inside a page call, after the page may have replaced
+  // the array iterator.
+  const historyMethods = ["pushState", "replaceState"] as const;
+  for (let index = 0; index < historyMethods.length; index++) {
+    const method = historyMethods[index] as (typeof historyMethods)[number];
     const native = history[method];
     history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
       // Another window's History would let a frame rename a page it cannot otherwise touch.
@@ -151,8 +155,11 @@ export function installNavigation(
       return;
     }
   };
-  for (const type of LINK_EVENTS) append(listeners, [type, fixLink, true]);
-  for (const type of INTERACTIONS) append(listeners, [type, () => blobs.restoreLinks(), true]);
+  for (let index = 0; index < LINK_EVENTS.length; index++)
+    append(listeners, [LINK_EVENTS[index] as string, fixLink, true]);
+  for (let index = 0; index < INTERACTIONS.length; index++) {
+    append(listeners, [INTERACTIONS[index] as string, () => blobs.restoreLinks(), true]);
+  }
   append(listeners, [
     "submit",
     (event) => {

@@ -3,6 +3,7 @@ import { installStorageIsolation } from "../src/client/storage-isolation.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { recordingCalls } from "./recording-calls.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 function ctxFor(origin: string): UrlContext {
   return { realUrl: () => new URL(`${origin}/`) } as unknown as UrlContext;
@@ -176,5 +177,18 @@ describe("installStorageIsolation", () => {
       "cache-match:__g|https://a.test|c",
       "lock:__g|https://a.test|l",
     ]);
+  });
+});
+
+describe("installStorageIsolation inside an adoption", () => {
+  it("prefixes every name when the page replaced the array iterator before the frame was adopted", () => {
+    const opened: string[] = [];
+    const win = fakeStorageWin(opened, [], []);
+    const partition = () => prefixFor("https://a.test");
+    withReplaced(Array.prototype, Symbol.iterator, { value: function* () {} }, () =>
+      installStorageIsolation(win, ctxFor("https://a.test"), partition),
+    );
+    win.indexedDB.open("__girici");
+    expect(opened).toEqual([`idb:${prefixFor("https://a.test")}__girici`]);
   });
 });

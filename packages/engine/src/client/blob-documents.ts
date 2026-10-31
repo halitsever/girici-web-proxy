@@ -54,7 +54,10 @@ const nativeConsole = console;
 /** Lookup tables, so type parsing and escaping use only string indexing. */
 const table = (pairs: string[][]): Record<string, string> => {
   const map = Object.create(null) as Record<string, string>;
-  for (const [key, value] of pairs) map[key!] = value!;
+  for (let index = 0; index < pairs.length; index++) {
+    const pair = pairs[index] as string[];
+    map[pair[0] as string] = pair[1] as string;
+  }
   return map;
 };
 const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";

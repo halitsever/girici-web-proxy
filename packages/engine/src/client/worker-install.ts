@@ -5,6 +5,7 @@ import {
   define,
   hrefOf,
   isWebUrl,
+  joined,
   mapOf,
   newUrl,
   originOf,
@@ -82,7 +83,8 @@ export function installWorker(scope: WorkerScope): void {
 /** The bootstrap leaves these on the global; they are removed so the worker's own script never sees them. */
 function takeBoot(scope: WorkerScope): { base?: string; runtimeUrl?: string; partition?: string } {
   const boot = { base: scope.__giriciBase, runtimeUrl: scope.__giriciRuntime, partition: scope.__giriciPartition };
-  for (const name of ["__giriciBase", "__giriciRuntime", "__giriciPartition"]) Reflect.deleteProperty(scope, name);
+  const handed = ["__giriciBase", "__giriciRuntime", "__giriciPartition"];
+  for (let index = 0; index < handed.length; index++) Reflect.deleteProperty(scope, handed[index] as string);
   return boot;
 }
 
@@ -155,10 +157,9 @@ function maskOrigin(scope: WorkerScope, ctx: UrlContext): void {
 /** Other network sinks a worker can reach, so none of them leaves the proxy or the cookie jar. */
 function hookSubresources(scope: WorkerScope, ctx: UrlContext): void {
   if (scope.EventSource) {
-    scope.EventSource = hookConstructor(scope.EventSource, (input) => [
-      ctx.toProxy(toText(input[0])),
-      ...input.slice(1),
-    ]);
+    scope.EventSource = hookConstructor(scope.EventSource, (input) =>
+      joined([ctx.toProxy(toText(input[0]))], input, 1),
+    );
   }
   const navigator = scope.navigator;
   const sendBeacon = navigator?.sendBeacon;
@@ -200,13 +201,14 @@ function hookXhr(scope: WorkerScope, ctx: UrlContext): void {
   if (!proto) return;
   const open = proto.open;
   proto.open = function (this: unknown, method: unknown, url: unknown, ...rest: unknown[]) {
-    apply(open, this, [method, ctx.toProxy(toText(url)), ...rest]);
+    apply(open, this, joined([method, ctx.toProxy(toText(url))], rest));
   };
 }
 
 /** WebRTC leaks the real address and the socket relays are not here yet, so neither connects from a worker. */
 function blockRealtime(scope: WorkerScope): void {
-  for (const name of ["WebSocketStream", "WebTransport", "RTCPeerConnection"]) Reflect.deleteProperty(scope, name);
+  const removed = ["WebSocketStream", "WebTransport", "RTCPeerConnection"];
+  for (let index = 0; index < removed.length; index++) Reflect.deleteProperty(scope, removed[index] as string);
   if (scope.WebSocket) scope.WebSocket = blockedWebSocket();
 }
 

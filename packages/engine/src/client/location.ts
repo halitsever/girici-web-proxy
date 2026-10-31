@@ -81,7 +81,9 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
     toString: { value: () => hrefOf(env.real()) },
     [Symbol.toStringTag]: { value: "Location" },
   };
-  for (const part of NAVIGATING_PARTS) {
+  // Indexed: stand-ins are made inside page calls, after the page may have replaced the array iterator.
+  for (let index = 0; index < NAVIGATING_PARTS.length; index++) {
+    const part = NAVIGATING_PARTS[index] as NavigatingPart;
     properties[part] = {
       get: () => urlPart(env.real(), part),
       set: (value: unknown) => {

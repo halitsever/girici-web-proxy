@@ -281,3 +281,29 @@ describe("link fix-ups", () => {
     expect(replaced).toBe("/~/https/b.test/link");
   });
 });
+
+describe("installNavigation inside an adoption", () => {
+  it("installs every hook when the page made the array iterator throw", () => {
+    const fake = fakeWindow();
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    const throwing = {
+      value: () => {
+        throw new Error("page");
+      },
+    };
+    withReplaced(Array.prototype, Symbol.iterator, throwing, () =>
+      installNavigation(
+        fake.win as unknown as Realm,
+        ctx,
+        noCookies,
+        (fn, self, args) => Reflect.apply(fn, self, args),
+        asIs,
+        noBlobs,
+      ),
+    );
+    fake.win.open("https://b.test/x");
+    new fake.win.History().pushState({}, "", "/y");
+    expect(fake.loads).toEqual(["open /~/https/b.test/x", "push /~/https/a.test/y"]);
+    expect(fake.listeners.length).toBeGreaterThan(0);
+  });
+});

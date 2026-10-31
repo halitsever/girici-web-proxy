@@ -108,7 +108,10 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       this.#opened = true;
       this.readyState = 1;
       this.protocol = protocol ?? "";
-      for (const item of this.#queue) this.#inner?.send(item as Parameters<WebSocket["send"]>[0]);
+      const queue = this.#queue;
+      for (let index = 0; index < queue.length; index++) {
+        this.#inner?.send(queue[index] as Parameters<WebSocket["send"]>[0]);
+      }
       this.#queue = [];
       this.#bufferedBeforeOpen = 0;
       this.#emit(new win.Event("open"));

@@ -1,4 +1,4 @@
-import { define } from "../shared/primordials.ts";
+import { apply, define } from "../shared/primordials.ts";
 import { PROXY_PREFIX } from "../shared/codec.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -30,7 +30,7 @@ function wrapGetter(proto: object | undefined, name: string, map: (value: string
   define(proto, name, {
     ...descriptor,
     get(this: unknown) {
-      const value = get.call(this);
+      const value: unknown = apply(get, this, []);
       return typeof value === "string" ? map(value) : value;
     },
   });

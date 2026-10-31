@@ -1,4 +1,4 @@
-import { define } from "../shared/primordials.ts";
+import { define, joined } from "../shared/primordials.ts";
 import { HEADER } from "../shared/protocol.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { CookieBridge } from "./cookies.ts";
@@ -50,7 +50,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   const xhr = win.XMLHttpRequest.prototype;
   const nativeOpen = xhr.open as (this: XMLHttpRequest, method: string, url: string, ...rest: unknown[]) => void;
   xhr.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    apply(nativeOpen, this, [method, ctx.toProxy(toText(url)), ...rest]);
+    apply(nativeOpen, this, joined([method, ctx.toProxy(toText(url))], rest));
   } as typeof xhr.open;
   maskNative(xhr.open, nativeOpen);
   const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
@@ -76,7 +76,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   };
   maskNative(navigatorProto.sendBeacon, nativeBeacon);
 
-  win.EventSource = hookConstructor(win.EventSource, (input) => [ctx.toProxy(toText(input[0])), ...input.slice(1)]);
+  win.EventSource = hookConstructor(win.EventSource, (input) => joined([ctx.toProxy(toText(input[0]))], input, 1));
 }
 
 function wrapGetter(proto: object, name: string, read: (value: string) => string): void {

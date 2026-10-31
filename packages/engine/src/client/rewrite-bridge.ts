@@ -99,7 +99,8 @@ function unrewriteHtmlAttributes(
         attributes = [];
         if (implied) return;
         const refresh = name === "meta" && keyword(attribs["http-equiv"]) === "refresh";
-        for (const attribute of pending) {
+        for (let index = 0; index < pending.length; index++) {
+          const attribute = pending[index] as PendingAttribute;
           let restored: string;
           if (refresh && attribute.name === "content") restored = mapRefresh(attribute.value, restoreUrl);
           else if (attributeKind(name, attribute.name)) {
