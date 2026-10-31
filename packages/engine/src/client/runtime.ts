@@ -218,7 +218,13 @@ export function install(
           guard,
         )),
     ],
-    ["attributes", () => installAttributes(win, ctx, rewrite, blobs)],
+    [
+      "attributes",
+      () => {
+        const attributes = installAttributes(win, ctx, rewrite, blobs);
+        frames?.useBackstop(attributes.normalize);
+      },
+    ],
     [
       "html sinks",
       () =>

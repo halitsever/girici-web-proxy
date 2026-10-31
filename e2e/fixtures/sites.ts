@@ -1434,6 +1434,18 @@ const DOORS_BLOB_SINKS = page(
     document.open(svg("document-open"), "t-docopen", "");
     frameRun("if (window.navigation) Object.getPrototypeOf(navigation).navigate.call(navigation, parent.svgBlob('navigation-proto'))");
 
+    // Parsers the HTML sinks do not see; their nodes meet the insertion backstop.
+    const XHTML = "http://www.w3.org/1999/xhtml";
+    const xml = (markup) => new DOMParser().parseFromString(markup, "application/xml").documentElement;
+    box.appendChild(document.importNode(xml('<iframe xmlns="' + XHTML + '" src="' + svg("xml-parser") + '"/>'), true));
+    const xmlSrcdoc = "&lt;script&gt;location = parent.svgBlob('xml-srcdoc')&lt;/script&gt;";
+    box.appendChild(document.importNode(xml('<iframe xmlns="' + XHTML + '" srcdoc="' + xmlSrcdoc + '"/>'), true));
+    const request = new XMLHttpRequest();
+    request.open("GET", "data:text/html," + encodeURIComponent('<iframe src="' + svg("xhr-document") + '"></iframe>'));
+    request.responseType = "document";
+    request.onload = () => box.appendChild(document.importNode(request.response.body.firstChild, true));
+    request.send();
+
     const refresh = (id) => byId(id).contentDocument;
     const byAttribute = refresh("meta-attr").createElement("meta");
     byAttribute.setAttribute("http-equiv", "refresh");

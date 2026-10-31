@@ -181,6 +181,23 @@ describe("installFrames", () => {
     expect(installed).toHaveLength(count);
   });
 
+  it("hands every inserted node to the backstop before the native insertion", () => {
+    const { ctors, top, node, adopter } = setup();
+    const target = node(top);
+    const seen: unknown[] = [];
+    adopter.useBackstop((value) => typeof value === "object" && seen.push(value));
+    const inserted = { inserted: true };
+    for (const [name, methods] of MUTATION_HOOKS) {
+      for (const method of methods) {
+        const self = name === "Range" ? { container: target } : target;
+        (ctors[name]!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(self, inserted, "text");
+      }
+    }
+    Reflect.set(ctors.Document!.prototype, "body", inserted, target);
+    const count = MUTATION_HOOKS.reduce((sum, [, methods]) => sum + methods.length, 0) + 1;
+    expect(seen).toEqual(Array.from({ length: count }, () => inserted));
+  });
+
   it("adopts the children a mutation adds to another frame's document", () => {
     const { ctors, make, node, installed, adopter } = setup();
     const other = make();

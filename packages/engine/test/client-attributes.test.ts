@@ -80,7 +80,10 @@ describe("srcdoc through the DOM hooks", () => {
       }
     }
     class FakeElement {
-      localName = "iframe";
+      // An accessor on the prototype, as in the DOM.
+      get localName() {
+        return "iframe";
+      }
       map = new Map<string, FakeAttr>();
       put(name: string, value: string): void {
         const node = new FakeAttr(name, value);
@@ -154,14 +157,33 @@ describe("srcdoc through the DOM hooks", () => {
     const ctx = {
       origin,
       realBase: () => base,
+      realUrl: () => base,
       toProxy: (raw: string) => `/~/https/site.test/${raw}`,
       fromProxy: (value: string) => value,
     };
     const bridge = createRewriteBridge(ctx, (b) => `<script src="/_g/c.js" data-girici="${b.href}"></script>`);
-    installAttributes(win, ctx as never, bridge, { swap: (url) => url, original: (url) => url });
-    return { iframe: new FakeIframe(), FakeAttr, FakeIframe };
+    const swaps = (url: string) => (url.startsWith("blob:page") ? "blob:boot" : url);
+    const hooks = installAttributes(win, ctx as never, bridge, {
+      swap: swaps,
+      original: (url) => (url === "blob:boot" ? "blob:page" : url),
+    });
+    return { iframe: new FakeIframe(), FakeAttr, FakeIframe, hooks };
   }
   const code = "<script>go(location)</script>";
+
+  it("rewrites the values of a frame a parser outside the hooks made, once", () => {
+    const { iframe, hooks } = setup();
+    iframe.put("srcdoc", code);
+    iframe.put("src", "blob:page2");
+    hooks.normalize(iframe);
+    const rewritten = iframe.map.get("srcdoc")?.raw;
+    expect(rewritten).toContain("data-girici");
+    expect(iframe.srcdoc).toBe(code);
+    expect(iframe.map.get("src")?.raw).toBe("blob:boot");
+    hooks.normalize(iframe);
+    expect(iframe.map.get("srcdoc")?.raw).toBe(rewritten);
+    expect(iframe.map.get("src")?.raw).toBe("blob:boot");
+  });
 
   it("reads the page's own string back through the property and getAttribute", () => {
     const { iframe } = setup();

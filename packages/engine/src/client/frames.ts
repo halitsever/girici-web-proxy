@@ -16,6 +16,8 @@ export interface FrameAdopter {
   reopened(doc: unknown): void;
   /** The window.open that three-argument document.open calls, so one function proxies, swaps and wraps. */
   useOpen(open: (this: unknown, ...args: unknown[]) => unknown): void;
+  /** Called with each inserted node first, so frames another parser made get their values rewritten. */
+  useBackstop(check: (node: unknown) => void): void;
 }
 
 export interface FrameWalker {
@@ -205,6 +207,8 @@ export function installFrames(
   const protoOf = (name: string) =>
     (win as unknown as Record<string, { prototype?: object } | undefined>)[name]?.prototype;
 
+  // Markup from XML parsers and XHR documents never went through the HTML sinks; the attribute hooks check it here.
+  let backstop: (node: unknown) => void = () => {};
   for (const [name, methods] of MUTATION_HOOKS) {
     const proto = protoOf(name);
     if (!proto) continue;
@@ -214,6 +218,7 @@ export function installFrames(
       const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
       if (typeof native !== "function") continue;
       const hooked = function (this: unknown, ...args: unknown[]): unknown {
+        for (let index = 0; index < args.length; index++) backstop(args[index]);
         return mutateIn(targetView(this), () => apply(native, this, args));
       };
       define(proto, method, { ...descriptor, value: maskNative(hooked, native) });
@@ -227,6 +232,7 @@ export function installFrames(
       const set = descriptor?.set;
       if (!set) continue;
       const hooked = function (this: unknown, value: unknown): void {
+        backstop(value);
         mutateIn(viewOf(this), () => apply(set, this, [value]));
       };
       define(proto, property, { ...descriptor, set: maskNative(hooked, set) });
@@ -362,6 +368,9 @@ export function installFrames(
     reopened: reopenedFor,
     useOpen: (open) => {
       windowOpen = open;
+    },
+    useBackstop: (check) => {
+      backstop = check;
     },
     walk: walker.walk,
     walkFor: (target) => {

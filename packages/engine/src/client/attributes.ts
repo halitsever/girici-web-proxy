@@ -78,13 +78,28 @@ export interface SrcdocBridge {
   unsrcdoc(markup: string): string;
 }
 
+export interface AttributeHooks {
+  /** Rewrites the document-loading values of `node` and its descendants that the hooks never saw being written. */
+  normalize(node: unknown): void;
+}
+
+/** Elements whose values load a document or navigate, and those values. */
+const LOADING: Record<string, readonly string[]> = Object.assign(Object.create(null) as Record<string, string[]>, {
+  iframe: ["src", "srcdoc"],
+  frame: ["src"],
+  object: ["data"],
+  embed: ["src"],
+  meta: ["content"],
+});
+const LOADING_SELECTOR = "iframe,frame,object,embed,meta";
+
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
 export function installAttributes(
   win: Realm,
   ctx: UrlContext,
   markup: SrcdocBridge,
   blobs: Pick<BlobDocuments, "swap" | "original">,
-): void {
+): AttributeHooks {
   const written = new NativeWeakMap<object, SrcdocRecord>();
   const carried = new NativeWeakMap<object, SrcdocRecord>();
   const original = (node: object, value: string): string => {
@@ -270,6 +285,50 @@ export function installAttributes(
     });
   }
 
+  const localNameOf = ownDescriptor(win.Element.prototype, "localName")?.get;
+  const nodeListLength = win.NodeList ? ownDescriptor(win.NodeList.prototype, "length")?.get : undefined;
+  const queries = [
+    element.querySelectorAll,
+    win.DocumentFragment?.prototype.querySelectorAll,
+    win.Document?.prototype.querySelectorAll,
+  ];
+  const normalizeOne = (target: unknown): void => {
+    try {
+      const tag: unknown = localNameOf ? apply(localNameOf, target, []) : undefined;
+      const names = typeof tag === "string" ? LOADING[tag] : undefined;
+      if (!names) return;
+      for (let index = 0; index < names.length; index++) {
+        const name = names[index] as string;
+        const value = apply(getAttribute, target, [name]) as string | null;
+        if (value === null || (name === "content" && !isRefresh(target as Element))) continue;
+        if (name === "srcdoc") {
+          const record = apply(mapGet, written, [target]) as SrcdocRecord | undefined;
+          if (record && record.native === value) continue;
+        } else if (blobs.original(value) !== value) continue;
+        const next = rewrite(target as Element, name, restore(target as Element, name, value));
+        if (next !== value) apply(setAttribute, target, [name, next]);
+      }
+    } catch {
+      // Not an element of this realm.
+    }
+  };
+  const normalize = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return;
+    normalizeOne(node);
+    for (let index = 0; index < queries.length; index++) {
+      const query = queries[index];
+      if (!query || !nodeListLength) continue;
+      try {
+        const found = apply(query, node, [LOADING_SELECTOR]) as NodeListOf<Element>;
+        const length = apply(nodeListLength, found, []) as number;
+        for (let item = 0; item < length; item++) normalizeOne(found[item]);
+        return;
+      } catch {
+        // The query of another node type.
+      }
+    }
+  };
+
   /** The page's real origin, which its javascript: URLs carry. */
   function owner(): string {
     return originOf(ctx.realUrl());
@@ -325,6 +384,8 @@ export function installAttributes(
       ? blobs.original(restoreAttribute(target.localName, name, value, base, ctx.origin, markup.unsrcdoc))
       : value;
   }
+
+  return { normalize };
 }
 
 function wrap(

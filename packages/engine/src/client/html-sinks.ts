@@ -1,4 +1,4 @@
-import { define } from "../shared/primordials.ts";
+import { define, endsWith } from "../shared/primordials.ts";
 import type { Realm } from "./url-context.ts";
 
 // Taken at load, so a page that replaced them never receives a native or the markup on its way in.
@@ -66,11 +66,13 @@ export function installHtmlSinks(
   };
 
   const nativeParse = win.DOMParser.prototype.parseFromString as Method;
-  win.DOMParser.prototype.parseFromString = function (this: DOMParser, source: string, type: DOMParserSupportedType) {
-    // Only markup types run through the HTML rewriter; JSON and plain text are parsed as given.
-    const markup = type === "text/html" || type === "image/svg+xml" || type.endsWith("+xml");
+  win.DOMParser.prototype.parseFromString = function (this: DOMParser, source: string, type: unknown) {
+    // Converted once, so the native call sees the type that was checked. text/xml and application/xml stay as
+    // written; their nodes meet the insertion backstop instead.
+    const text = toText(type);
+    const markup = text === "text/html" || text === "image/svg+xml" || endsWith(text, "+xml");
     try {
-      return apply(nativeParse, this, [markup ? rewriteHtml(toText(source)) : source, type]) as Document;
+      return apply(nativeParse, this, [markup ? rewriteHtml(toText(source)) : source, text]) as Document;
     } finally {
       afterWrite(this);
     }
