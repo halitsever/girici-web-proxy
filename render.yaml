@@ -1,0 +1,20 @@
+# Render Blueprint for the "Deploy to Render" button. Render's free plan has no persistent disks, so this uses
+# Starter: without the disk at /data, every deploy or restart wipes the admin account and settings.
+services:
+  - type: web
+    name: girici
+    runtime: image
+    image:
+      url: docker.io/halitsever/girici-web-proxy:v2
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: GIRICI_DATA_DIR
+        value: /data
+      # Render's proxy sits in front of the service.
+      - key: GIRICI_TRUST_PROXY
+        value: "1"
+    disk:
+      name: girici-data
+      mountPath: /data
+      sizeGB: 1
