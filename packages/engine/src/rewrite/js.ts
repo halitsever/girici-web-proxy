@@ -305,14 +305,14 @@ class LocationRewriter {
         // Logical assignment converts only when it assigns, so its operator stays and only the value goes through N.
         if (node.operator === "=" || LOGICAL.has(node.operator)) this.#call("__g$.N(location, (", "))", right);
         else {
-          const operator = this.#source.indexOf(node.operator, end(left));
+          const operator = this.#tokenAfter(end(left));
           this.#output.overwrite(operator, operator + node.operator.length, "=");
           this.#call(`__g$.N(location, __g$.L(location) ${node.operator.slice(0, -1)} (`, "))", right);
         }
       }
     } else if (left.type === "MemberExpression" && node.operator === "=" && isLocationMember(left)) {
       // Only the text between the object and the value changes, so rewrites nested in either survive.
-      const operator = this.#source.lastIndexOf(left.computed ? "[" : ".", start(left.property));
+      const operator = this.#tokenAfter(end(left.object));
       this.#output.appendRight(start(node), "__g$.S(");
       this.#output.overwrite(operator, start(right), ', "location", (');
       this.#output.appendLeft(end(right), "))");
@@ -331,7 +331,7 @@ class LocationRewriter {
 
   /** `obj.location` as a target: the object is evaluated in place, and its `v` reads and writes through S. */
   #locationTarget(node: ESTree.MemberExpression): void {
-    const operator = this.#source.lastIndexOf(node.computed ? "[" : ".", start(node.property));
+    const operator = this.#tokenAfter(end(node.object));
     this.#output.appendRight(start(node), "__g$.A(");
     this.#output.overwrite(operator, end(node), ").v");
     this.visit(node.object, "read", false);
@@ -365,6 +365,16 @@ class LocationRewriter {
         this.visit(value, "read", false);
       }
     }
+  }
+
+  /**
+   * The parser gives no token positions, so this finds the next token after `index` past comments, whitespace and the
+   * closing parentheses of a wrapped object. Searching the text for "." or "=" could land inside a comment instead.
+   */
+  #tokenAfter(index: number): number {
+    let position = this.#nextToken(index);
+    while (this.#source[position] === ")") position = this.#nextToken(position + 1);
+    return position;
   }
 
   #nextToken(index: number): number {
@@ -417,7 +427,8 @@ function isImportMetaUrl(node: ESTree.MemberExpression): boolean {
 
 /** Only literal keys are known here; a key built at run time reaches the native Location, a documented limit. */
 function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
-  if (node.type !== "MemberExpression") return false;
+  // super.location is the page's own class member, never a window's.
+  if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
   const { property } = node;
   return node.computed
     ? property.type === "Literal" && property.value === "location"

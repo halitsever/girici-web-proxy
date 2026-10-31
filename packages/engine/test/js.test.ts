@@ -228,3 +228,62 @@ describe("rewriteJs", () => {
     );
   });
 });
+
+describe("location targets next to comments", () => {
+  const evil = `window.location.href='https://evil.test/'`;
+  it.each([
+    [`obj./*.*/location += 1; s = "*/x).v, ${evil}//";`],
+    [`obj./*.*/location = 1; s = "*/x, 1), ${evil}//";`],
+    [`obj[/*[*/'location'] = 1; s = "*/x, 1), ${evil}//";`],
+    [`obj/*[*/['location'] = 1; s = "*/x, 1), ${evil}//";`],
+    [`location /*+=*/ += u; s = "*/ ${evil}//";`],
+    [`[obj./*.*/location] = [1]; s = "*/x).v, ${evil}//";`],
+    [`(obj)/*.*/.location &&= 1; s = "*/x).v, ${evil}//";`],
+    [`obj /* . */ . /* [ */ location = 1; s = "*/ ${evil}//";`],
+  ])("rewrites %s without running anything the page hid in a string", (input) => {
+    const output = rewriteJs(input);
+    expect(() => parseScript(output, { next: true })).not.toThrow();
+    const raw: unknown[] = [];
+    const writes: unknown[] = [];
+    const window = {
+      location: {
+        set href(value: unknown) {
+          raw.push(value);
+        },
+      },
+    };
+    const helpers = {
+      S: (_object: unknown, _key: unknown, value: unknown) => writes.push(value),
+      A: () => ({
+        get v() {
+          return "current";
+        },
+        set v(value: unknown) {
+          writes.push(value);
+        },
+      }),
+      N: (_target: unknown, value: unknown) => value,
+      L: (value: unknown) => value,
+      D: (value: unknown) => value,
+      W: (value: unknown) => value,
+    };
+    const run = new Function("__g$", "window", "obj", "location", "u", `var s; ${output}`);
+    run(helpers, window, { location: "" }, "", "u");
+    expect(raw).toEqual([]);
+    expect(writes.length + (input.startsWith("location") ? 1 : 0)).toBeGreaterThan(0);
+  });
+
+  it("replaces the page's own operator, not one written in a comment", () => {
+    expect(rewriteJs("location /*+=*/ += u")).toBe("location /*+=*/ = __g$.N(location, __g$.L(location) + (u))");
+  });
+
+  it("leaves super.location targets as written", () => {
+    for (const input of [
+      "class A extends B { f() { super.location = u; } }",
+      "class A extends B { f() { [super.location] = [u]; } }",
+      "class A extends B { f() { super.location &&= u; } }",
+    ]) {
+      expect(rewriteJs(input)).toBe(input);
+    }
+  });
+});
