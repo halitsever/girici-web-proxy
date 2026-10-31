@@ -104,7 +104,7 @@ describe("URL attributes", () => {
 
   it("handles <meta http-equiv>", () => {
     expect(rw('<meta http-equiv="refresh" content="0; url=https://other.test/">')).toBe(
-      '<meta http-equiv="refresh" content="0; url=/~/https/other.test/">',
+      '<meta http-equiv="refresh" content="0; url=http://proxy.test/~/https/other.test/">',
     );
     expect(rw('<meta http-equiv="Content-Security-Policy" content="default-src \'self\'"><p>')).toBe("<p>");
     expect(rw('<meta property="og:url" content="https://site.test/x">')).toBe(
@@ -256,7 +256,7 @@ describe("meta refresh with built-ins the page replaced", () => {
     const out = withReplaced(String.prototype, "trim", { value: () => "" }, () =>
       rw('<meta http-equiv="Refresh" content="0; url=https://other.test/">'),
     );
-    expect(out).toBe('<meta http-equiv="Refresh" content="0; url=/~/https/other.test/">');
+    expect(out).toBe('<meta http-equiv="Refresh" content="0; url=http://proxy.test/~/https/other.test/">');
   });
 
   it("swaps a blob frame source when Set.prototype.has is replaced", () => {

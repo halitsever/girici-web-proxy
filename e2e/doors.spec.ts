@@ -180,3 +180,11 @@ test("adopts frames with every hook when the page broke the array iterator", asy
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ stores: 0 });
 });
+
+test("keeps a served refresh whose target starts with a quote inside the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/refresh-quote-host");
+  await expect(page.locator("#done")).toHaveText("done", { timeout: 15_000 });
+  // The escape guard fails the test if the frame went to site-b.test around the proxy.
+  const frame = page.frame({ url: /\/~\/https\/site-a\.test\// });
+  expect(frame).not.toBeNull();
+});

@@ -30,12 +30,47 @@ describe("parseRefresh", () => {
 
 describe("rewriteRefresh", () => {
   it("proxies web targets in every syntax the browser follows", () => {
-    expect(rewrite("5; url=https://x.test/a")).toBe("5; url=/~/https/x.test/a");
-    expect(rewrite("0;URL='/b'")).toBe("0; url=/~/https/site.test/b");
-    expect(rewrite("0; url=page2")).toBe("0; url=page2");
-    expect(rewrite("0 url=https://evil.test/")).toBe("0; url=/~/https/evil.test/");
-    expect(rewrite(".5;url=https://evil.test/")).toBe("0; url=/~/https/evil.test/");
-    expect(rewrite("0;url='https://evil.test/' x")).toBe("0; url=/~/https/evil.test/");
+    expect(rewrite("5; url=https://x.test/a")).toBe("5; url=http://proxy.test/~/https/x.test/a");
+    expect(rewrite("0;URL='/b'")).toBe("0; url=http://proxy.test/~/https/site.test/b");
+    expect(rewrite("0; url=page2")).toBe("0; url=http://proxy.test/~/https/site.test/dir/page2");
+    expect(rewrite("0 url=https://evil.test/")).toBe("0; url=http://proxy.test/~/https/evil.test/");
+    expect(rewrite(".5;url=https://evil.test/")).toBe("0; url=http://proxy.test/~/https/evil.test/");
+    expect(rewrite("0;url='https://evil.test/' x")).toBe("0; url=http://proxy.test/~/https/evil.test/");
+    expect(rewrite("0;url=/~/https/x.test/a")).toBe("0; url=http://proxy.test/~/https/x.test/a");
+  });
+
+  // Values that pass the parser with a target that itself starts with a quote, or with leading controls.
+  const tricky = [
+    `0; url="'//evil.test/"`,
+    `0; url=" '//evil.test/"`,
+    `0; url='"//evil.test/'`,
+    `0; url="' https://evil.test/"`,
+    `0;url="\\"//evil.test/"`,
+    "0; url=\u0001https://evil.test/",
+    "0; url=https://x.test/a b",
+    "0;url=page2",
+    "0;url=/~/https/x.test/a",
+    "5; url=https://x.test/a",
+  ];
+
+  it.each(tricky)("writes %j so the browser reads back the same target", (value) => {
+    const first = parseRefresh(value);
+    const rewritten = rewrite(value);
+    if (rewritten === "") return;
+    const again = parseRefresh(rewritten);
+    expect(again?.url).toBeTruthy();
+    const proxyBase = new URL("/~/https/site.test/dir/page.html", origin);
+    const written = new URL(again!.url as string, proxyBase);
+    // The written target is absolute on the proxy and names the same real page the original resolved to.
+    expect(written.origin).toBe(origin);
+    const real = new URL(first!.url as string, base);
+    const expected = real.origin === base.origin && real.pathname.startsWith("/~/") ? real.pathname : null;
+    if (expected === null)
+      expect(written.pathname).toBe(`/~/${real.protocol.slice(0, -1)}/${real.host}${real.pathname}`);
+  });
+
+  it("never writes a target that the browser would read from a quote", () => {
+    for (const value of tricky) expect(rewrite(value)).not.toMatch(/url=['"]/);
   });
 
   it("keeps a refresh of the page itself", () => {
@@ -66,7 +101,7 @@ describe("rewriteRefresh with built-ins the page replaced", () => {
   for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
     it(`keeps the target proxied when ${name} is replaced`, () => {
       const rewritten = withReplaced(target, key, replacement, () => rewrite("5; url=https://x.test/a"));
-      expect(rewritten).toBe("5; url=/~/https/x.test/a");
+      expect(rewritten).toBe("5; url=http://proxy.test/~/https/x.test/a");
     });
   }
 });

@@ -322,7 +322,7 @@ describe("buildPageResponse", () => {
       ]),
       context({ destination: "document", navigation: true }),
     );
-    expect(res.headers.get("refresh")).toBe("0; url=/~/https/site-b.test/x");
+    expect(res.headers.get("refresh")).toBe("0; url=http://127.0.0.1:41000/~/https/site-b.test/x");
   });
 
   it("drops a Refresh header that would load a blob document, which no bootstrap can cover here", async () => {

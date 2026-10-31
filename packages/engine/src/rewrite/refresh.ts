@@ -1,4 +1,5 @@
-import { indexOf, isWebUrl, parseUrl, sliceOf } from "../shared/primordials.ts";
+import { decodeUrl, encodeUrl } from "../shared/codec.ts";
+import { hrefOf, indexOf, isWebUrl, originOf, parseUrl, pathnameOf, searchOf, sliceOf } from "../shared/primordials.ts";
 import { rewriteUrl } from "../shared/url-rewrite.ts";
 
 const WHITESPACE: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
@@ -79,7 +80,12 @@ export function rewriteRefresh(value: string, base: URL, origin: string): string
   if (refresh.url === null) return value;
   const target = parseUrl(refresh.url, base);
   if (!target || !isWebUrl(target)) return "";
-  return `${refresh.time}; url=${rewriteUrl(refresh.url, base, origin)}`;
+  // Written as an absolute proxy URL, never as the page's text: text that starts with a quote would be read again
+  // by the browser's parser as a different target.
+  const proxyBase = isWebUrl(base) ? parseUrl(encodeUrl(base), origin) : parseUrl(origin);
+  const written = proxyBase ? parseUrl(rewriteUrl(refresh.url, base, origin), proxyBase) : null;
+  if (!written || originOf(written) !== origin || !decodeUrl(pathnameOf(written) + searchOf(written))) return "";
+  return `${refresh.time}; url=${hrefOf(written)}`;
 }
 
 /** Maps the URL of a refresh value; a value whose URL stays the same comes back exactly as written. */

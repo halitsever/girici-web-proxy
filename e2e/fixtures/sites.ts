@@ -721,6 +721,20 @@ const ITERATOR_ADOPTION = page(
 </script>`,
 );
 
+// A served refresh whose target starts with a quote; the rewritten value must keep it inside the proxy.
+const REFRESH_QUOTE = page(
+  "Refresh quote",
+  "<p>quote</p>",
+  `<meta http-equiv="refresh" content="0; url=&quot;'//site-b.test/&quot;">`,
+);
+const REFRESH_QUOTE_HOST = page(
+  "Refresh quote host",
+  `<pre id="done"></pre><iframe id="quoted" src="/refresh-quote"></iframe>
+<script>
+  setTimeout(() => (document.getElementById("done").textContent = "done"), 2500);
+</script>`,
+);
+
 const SERVED_BLOBS = page(
   "Served blobs",
   `<pre id="results"></pre>
@@ -1392,7 +1406,7 @@ const DOORS_BLOB_SINKS = page(
 <iframe id="nav"></iframe><iframe id="writer"></iframe><iframe name="t-docopen"></iframe>
 <iframe id="meta-attr"></iframe><iframe id="meta-property"></iframe><iframe id="meta-markup"></iframe>
 <iframe id="meta-space"></iframe><iframe id="meta-fraction"></iframe><iframe id="meta-quoted"></iframe>
-<iframe id="meta-web"></iframe>
+<iframe id="meta-web"></iframe><iframe id="meta-quote-web"></iframe>
 <div id="box"></div>
 <script>
   const ran = [];
@@ -1531,6 +1545,11 @@ const DOORS_BLOB_SINKS = page(
     quoted.content = "0;url='" + svg("meta-quoted") + "' x";
     refresh("meta-quoted").head.appendChild(quoted);
     refresh("meta-web").body.innerHTML = '<meta http-equiv="refresh" content="0 url=https://site-b.test/">';
+    // A target that itself starts with a quote, which a rewritten value must not hand back to the parser.
+    const quoteWeb = refresh("meta-quote-web").createElement("meta");
+    quoteWeb.setAttribute("http-equiv", "refresh");
+    quoteWeb.setAttribute("content", '0; url="' + "'//site-b.test/" + '"');
+    refresh("meta-quote-web").head.appendChild(quoteWeb);
 
     setTimeout(() => (byId("results").textContent = JSON.stringify({ ran: ran.sort(), readBack })), 4000);
   };
@@ -1761,6 +1780,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-opener": html(XS_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
+    "/refresh-quote": html(REFRESH_QUOTE),
+    "/refresh-quote-host": html(REFRESH_QUOTE_HOST),
     "/iterator-adoption": html(ITERATOR_ADOPTION),
     "/ws-binary": html(WS_BINARY),
     "/ws-frame": html(WS_FRAME),
