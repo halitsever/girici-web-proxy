@@ -100,7 +100,8 @@ export class Sealing {
       const key = await this.#keys.load();
       if (key && !this.#master) this.#master = new MasterSealer(key);
     } catch {
-      // The next seal tries the store again.
+      // The next request reads the store again, so sealed addresses open once it answers.
+      this.#loaded = null;
     }
   }
 

@@ -83,6 +83,23 @@ describe("Sealing", () => {
     expect(await sealing.addressFor("/~/https/a.test/p")).toBe("/~/https/a.test/p");
   });
 
+  it("reads the key again after a failed load while sealing is off", async () => {
+    let fail = true;
+    const flaky: KeyStore = {
+      load: async () => {
+        if (fail) throw new Error("busy");
+        return K;
+      },
+      loadOrCreate: async () => K,
+    };
+    const sealing = new Sealing(flaky, fakePrefs());
+    await sealing.ready();
+    expect(await sealing.sealerFor(true)).toBeNull();
+    fail = false;
+    await sealing.ready();
+    expect(sealing.open(new MasterSealer(K).seal(url))?.href).toBe(url.href);
+  });
+
   it("gives the UI a sealed address while on and its own path while off", async () => {
     const prefs = fakePrefs({ sealAddresses: true });
     const sealing = new Sealing(memoryKeys().store, prefs);
