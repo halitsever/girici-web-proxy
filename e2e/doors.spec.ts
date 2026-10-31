@@ -168,3 +168,9 @@ test("opens a blob link from the context menu under the runtime", async ({ page,
   await page.keyboard.press("Escape");
   await expect.poll(() => link.getAttribute("href")).toBe(original);
 });
+
+test("loads no blob document a served page or header names", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/served-blobs");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ ran: [] });
+});

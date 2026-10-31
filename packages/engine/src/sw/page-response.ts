@@ -103,7 +103,9 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      headers.append(name, name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value);
+      const next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value;
+      // An empty refresh is one that would have loaded a blob document.
+      if (next !== "" || value === "") headers.append(name, next);
     } catch {
       // A value the Headers API rejects would otherwise fail the whole response.
     }

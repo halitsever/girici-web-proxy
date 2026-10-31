@@ -1,7 +1,7 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { isWebUrl, lowerCase, originOf, setHas, trim } from "../shared/primordials.ts";
-import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
+import { isBlobUrl, rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
 import { rewriteCss } from "./css.ts";
 import { rewriteJs } from "./js.ts";
 import { rewriteRefresh } from "./refresh.ts";
@@ -206,8 +206,11 @@ class HtmlRewriter {
           // Browsers ignore a base URL they cannot parse, and so do we.
         }
       }
+      if (!setHas(DOCUMENT_URLS, `${tag} ${name}`)) return rewritten;
       const { swapBlob } = this.#options;
-      return swapBlob && setHas(DOCUMENT_URLS, `${tag} ${name}`) ? swapBlob(rewritten) : rewritten;
+      if (swapBlob) return swapBlob(rewritten);
+      // The service worker cannot make a bootstrap in the page's realm, so a blob document stays unloaded.
+      return isBlobUrl(rewritten) ? "about:blank" : rewritten;
     }
     if (setHas(SRCSET_ATTRIBUTES, name)) {
       let changed = false;

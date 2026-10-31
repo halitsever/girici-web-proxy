@@ -15,6 +15,7 @@ import {
   parseJson,
   parseUrl as parse,
   pathnameOf,
+  protocolOf,
   quoteJson,
   replaceAll,
   searchOf,
@@ -72,6 +73,12 @@ export function rewriteUrl(raw: string, base: URL, origin: string, owner?: strin
   if (!real || !isWeb(real)) return raw;
   if (!startsWith(value, "/") && resolvesInsideProxy(value, real, base, origin)) return raw;
   return encodeUrl(real);
+}
+
+/** Parsed as the browser would, so " BLOB:" and "bl\nob:" count too. */
+export function isBlobUrl(value: string): boolean {
+  const url = parse(value);
+  return url !== null && protocolOf(url) === "blob:";
 }
 
 /** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */

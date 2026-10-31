@@ -642,6 +642,42 @@ const search: Route = (req, res) => {
   res.end(page("Search", `<h1 id="query">${escapeHtml(query)}</h1>`));
 };
 
+/** Served markup and headers that name a blob URL the page made, the way a site's own server could echo one back. */
+const servedBlob =
+  (kind: "frame" | "meta" | "header"): Route =>
+  (req, res) => {
+    const url = new URL(req.url ?? "/", "http://fixture").searchParams.get("u") ?? "";
+    const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8" };
+    if (kind === "header") headers.refresh = `0;url=${url}`;
+    res.writeHead(200, headers);
+    const body =
+      kind === "frame"
+        ? `<iframe src="${escapeHtml(url)}"></iframe>`
+        : kind === "meta"
+          ? `<meta http-equiv="refresh" content="0;url=${escapeHtml(url)}">`
+          : "<p>header</p>";
+    res.end(page("Served blob", body));
+  };
+
+const SERVED_BLOBS = page(
+  "Served blobs",
+  `<pre id="results"></pre>
+<script>
+  const ran = [];
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("ran:")) ran.push(event.data.slice(4));
+  });
+  for (const kind of ["frame", "meta", "header"]) {
+    const code = '<svg xmlns="http://www.w3.org/2000/svg"><script>top.postMessage("ran:' + kind + '", "*")<\\/script></svg>';
+    const url = URL.createObjectURL(new Blob([code], { type: "image/svg+xml" }));
+    const frame = document.createElement("iframe");
+    frame.src = "/served-blob-" + kind + "?u=" + encodeURIComponent(url);
+    document.body.appendChild(frame);
+  }
+  setTimeout(() => (document.getElementById("results").textContent = JSON.stringify({ ran: ran.sort() })), 3000);
+</script>`,
+);
+
 const SINKS = page(
   "Sinks",
   `<div id="host"></div><pre id="results"></pre>
@@ -1637,6 +1673,10 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
+    "/served-blobs": html(SERVED_BLOBS),
+    "/served-blob-frame": servedBlob("frame"),
+    "/served-blob-meta": servedBlob("meta"),
+    "/served-blob-header": servedBlob("header"),
     "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
     "/reuse-same": html(REUSE_SAME),
