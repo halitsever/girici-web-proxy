@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createPartitionedStorage } from "../src/client/storage.ts";
+import { createPartitionedStorage, partitionFor } from "../src/client/storage.ts";
+import { prefixFor } from "../src/shared/partition.ts";
 
 class MemoryStorage implements Storage {
   #items = new Map<string, string>();
@@ -26,8 +27,8 @@ class MemoryStorage implements Storage {
 describe("createPartitionedStorage", () => {
   it("keeps each site's keys apart", () => {
     const native = new MemoryStorage();
-    const a = createPartitionedStorage(native, "https://a.test");
-    const b = createPartitionedStorage(native, "https://b.test");
+    const a = createPartitionedStorage(native, prefixFor("https://a.test"));
+    const b = createPartitionedStorage(native, prefixFor("https://b.test"));
     a.setItem("k", "1");
     b.setItem("k", "2");
     expect([a.getItem("k"), b.getItem("k")]).toEqual(["1", "2"]);
@@ -37,8 +38,8 @@ describe("createPartitionedStorage", () => {
 
   it("supports property access, enumeration and clear", () => {
     const native = new MemoryStorage();
-    const a = createPartitionedStorage(native, "https://a.test") as Storage & Record<string, string>;
-    const b = createPartitionedStorage(native, "https://b.test");
+    const a = createPartitionedStorage(native, prefixFor("https://a.test")) as Storage & Record<string, string>;
+    const b = createPartitionedStorage(native, prefixFor("https://b.test"));
     a.color = "red";
     b.setItem("other", "x");
     expect(a.color).toBe("red");
@@ -53,7 +54,7 @@ describe("createPartitionedStorage", () => {
   });
 
   it("stores values as strings", () => {
-    const a = createPartitionedStorage(new MemoryStorage(), "https://a.test");
+    const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
     a.setItem("n", 5 as unknown as string);
     expect(a.getItem("n")).toBe("5");
   });
@@ -61,7 +62,7 @@ describe("createPartitionedStorage", () => {
   it("never hands the raw store to a replaced Storage method", () => {
     const native = new MemoryStorage();
     native.setItem("__g|https://b.test|secret", "b");
-    const a = createPartitionedStorage(native, "https://a.test");
+    const a = createPartitionedStorage(native, prefixFor("https://a.test"));
     const proto = MemoryStorage.prototype as unknown as Record<string, unknown>;
     const original = proto.getItem;
     const seen: unknown[] = [];
@@ -90,7 +91,7 @@ describe("createPartitionedStorage", () => {
       return Reflect.apply(startsWith, this, [search]);
     };
     try {
-      const a = createPartitionedStorage(native, "https://a.test");
+      const a = createPartitionedStorage(native, prefixFor("https://a.test"));
       a.setItem("own", "1");
       expect(Object.keys(a)).toEqual(["own"]);
     } finally {
@@ -101,7 +102,7 @@ describe("createPartitionedStorage", () => {
   });
 
   it("ignores proxy traps a page adds to Object.prototype", () => {
-    const a = createPartitionedStorage(new MemoryStorage(), "https://a.test");
+    const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
     const proto = Object.prototype as Record<string, unknown>;
     let trapped = false;
     proto.getPrototypeOf = () => {
@@ -114,5 +115,29 @@ describe("createPartitionedStorage", () => {
       delete proto.getPrototypeOf;
     }
     expect(trapped).toBe(false);
+  });
+});
+
+describe("partitionFor", () => {
+  it("treats a same-site frame as first-party and partitions the rest by top", () => {
+    const frame = (topUrl: string, site: string, origin: string) =>
+      partitionFor({ origin, isTop: false, topUrl: new URL(topUrl), site });
+    expect(frame("https://www.a.test/", "https://a.test", "https://login.a.test")).toBe("__g|https://login.a.test|");
+    expect(frame("https://evil.test/", "https://a.test", "https://a.test")).toBe(
+      "__g^|https://evil.test|https://a.test|",
+    );
+    expect(frame("http://a.test/", "https://a.test", "https://a.test")).toBe("__g^|http://a.test|https://a.test|");
+    expect(partitionFor({ origin: "https://a.test", isTop: true, topUrl: null, site: undefined })).toBe(
+      "__g|https://a.test|",
+    );
+  });
+
+  it("partitions a frame whose top or site is unknown", () => {
+    expect(partitionFor({ origin: "https://a.test", isTop: false, topUrl: null, site: "https://a.test" })).toBe(
+      "__g^|null|https://a.test|",
+    );
+    expect(
+      partitionFor({ origin: "https://a.test", isTop: false, topUrl: new URL("https://a.test/"), site: undefined }),
+    ).toBe("__g^|https://a.test|https://a.test|");
   });
 });

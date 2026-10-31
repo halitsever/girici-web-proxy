@@ -71,7 +71,7 @@ test("loads iframes through the proxy", async ({ page }) => {
   const frame = page.frameLocator("#frame");
   await expect(frame.locator("h1")).toHaveText("Frame");
   const results = JSON.parse((await frame.locator("#frame-results").textContent()) ?? "{}");
-  expect(results).toEqual({ href: "https://site-b.test/frame", parent: "https://site-a.test/nav" });
+  expect(results).toEqual({ href: "https://site-b.test/frame", parent: "SecurityError" });
 });
 
 test("resolves URLs against <base>, srcset and stylesheets", async ({ page }) => {

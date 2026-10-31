@@ -6,7 +6,7 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
 // Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
@@ -16,8 +16,21 @@ export interface JsRewriteOptions {
 type Role = "read" | "target" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
-const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M", "P"]);
+const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M", "P", "W"]);
 const GLOBAL_NAMES = new Set(["window", "globalThis", "self"]);
+const WINDOW_REFS = new Set(["top", "parent", "opener", "frames"]);
+const WINDOW_LIKE = new Set([
+  "window",
+  "self",
+  "globalThis",
+  "top",
+  "parent",
+  "opener",
+  "frames",
+  "contentWindow",
+  "defaultView",
+]);
+const WRAPPED_NAME = /location|top|parent|opener|frames/;
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
@@ -26,7 +39,8 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
     !source.includes("location") &&
     !source.includes("eval") &&
     !source.includes("import") &&
-    !source.includes("postMessage")
+    !source.includes("postMessage") &&
+    !WRAPPED_NAME.test(source)
   ) {
     return source;
   }
@@ -84,6 +98,7 @@ class LocationRewriter {
     switch (node.type) {
       case "Identifier":
         if (role === "read" && node.name === "location") this.#wrap(node);
+        else if (role === "read" && WINDOW_REFS.has(node.name)) this.#call("__g$.W(", ")", node);
         // A bare `eval` read is indirect eval; the wrapper rewrites the code before running it.
         else if (role === "read" && node.name === "eval") this.#output.overwrite(start(node), end(node), "__g$.ev");
         return;
@@ -135,7 +150,7 @@ class LocationRewriter {
         return;
       case "NewExpression":
         // `new __g$.L(x).y()` would construct the helper, so a callee that gets wrapped is parenthesised first.
-        if (this.#source.slice(start(node.callee), end(node.callee)).includes("location")) {
+        if (this.#source.slice(start(node.callee), end(node.callee)).match(WRAPPED_NAME)) {
           this.#output.appendRight(start(node.callee), "(");
           this.#output.appendLeft(end(node.callee), ")");
         }
@@ -153,6 +168,10 @@ class LocationRewriter {
         this.visit(node.argument, "target", false);
         return;
       case "UnaryExpression":
+        // An undeclared name stays safe under typeof only while it is left bare.
+        if (node.operator === "typeof" && node.argument.type === "Identifier" && WINDOW_REFS.has(node.argument.name)) {
+          return;
+        }
         this.visit(node.argument, node.operator === "delete" ? "target" : "read", false);
         return;
       case "ForInStatement":
@@ -163,7 +182,7 @@ class LocationRewriter {
         return;
       case "VariableDeclarator":
         this.visit(node.id, "binding", false);
-        if (node.init && node.id.type === "ObjectPattern" && hasLocationKey(node.id) && !isHelperCall(node.init)) {
+        if (node.init && node.id.type === "ObjectPattern" && hasWrappedKey(node.id) && !isHelperCall(node.init)) {
           this.#call("__g$.D(", ")", node.init);
         }
         this.visit(node.init, "read", false);
@@ -172,6 +191,14 @@ class LocationRewriter {
         for (const property of node.properties) {
           if (property.type === "Property" && property.shorthand && isLocationIdentifier(property.value)) {
             this.#output.overwrite(start(property), end(property), "location: __g$.L(location)");
+          } else if (
+            property.type === "Property" &&
+            property.shorthand &&
+            property.value.type === "Identifier" &&
+            WINDOW_REFS.has(property.value.name)
+          ) {
+            const name = property.value.name;
+            this.#output.overwrite(start(property), end(property), `${name}: __g$.W(${name})`);
           } else {
             this.visit(property, "read", false);
           }
@@ -238,8 +265,14 @@ class LocationRewriter {
       return;
     }
     if (role === "read" && isLocationMember(node)) this.#wrap(node);
+    else if (role === "read" && isWindowRefMember(node)) this.#call("__g$.W(", ")", node);
     // A wrapped link would stop an optional chain from short-circuiting, so the next access becomes optional too.
-    if (inChain && !node.optional && isLocationMember(node.object) && hasOptionalLink(node.object)) {
+    if (
+      inChain &&
+      !node.optional &&
+      (isLocationMember(node.object) || isWindowRefMember(node.object)) &&
+      hasOptionalLink(node.object)
+    ) {
       this.#output.appendRight(this.#nextToken(end(node.object)), node.computed ? "?." : "?");
     }
     this.visit(node.object, "read", inChain);
@@ -260,7 +293,7 @@ class LocationRewriter {
       this.#output.appendLeft(end(right), "))");
       this.visit(left.object, "read", false);
     } else {
-      if (left.type === "ObjectPattern" && hasLocationKey(left) && !isHelperCall(right)) {
+      if (left.type === "ObjectPattern" && hasWrappedKey(left) && !isHelperCall(right)) {
         this.#call("__g$.D(", ")", right);
       }
       this.visit(left, "target", false);
@@ -354,6 +387,34 @@ function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
     : property.type === "Identifier" && property.name === "location";
 }
 
+function isWindowRefMember(node: ESTree.Node): node is ESTree.MemberExpression {
+  if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
+  const { object, property } = node;
+  const name = node.computed
+    ? property.type === "Literal" && typeof property.value === "string"
+      ? property.value
+      : undefined
+    : property.type === "Identifier"
+      ? property.name
+      : undefined;
+  if (name === undefined || !WINDOW_REFS.has(name)) return false;
+  if (object.type === "Identifier") return WINDOW_LIKE.has(object.name);
+  if (object.type === "MemberExpression") return isWindowLikeMember(object);
+  return object.type === "CallExpression" && isHelperCall(object) && isWrapperCall(object);
+}
+
+function isWindowLikeMember(node: ESTree.MemberExpression): boolean {
+  const { property } = node;
+  if (node.computed)
+    return property.type === "Literal" && typeof property.value === "string" && WINDOW_LIKE.has(property.value);
+  return property.type === "Identifier" && WINDOW_LIKE.has(property.name);
+}
+
+function isWrapperCall(node: ESTree.CallExpression): boolean {
+  const callee = node.callee;
+  return callee.type === "MemberExpression" && callee.property.type === "Identifier" && callee.property.name === "W";
+}
+
 function isPostMessageCallee(node: ESTree.Node): node is ESTree.MemberExpression {
   if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
   const { property } = node;
@@ -362,14 +423,20 @@ function isPostMessageCallee(node: ESTree.Node): node is ESTree.MemberExpression
     : property.type === "Identifier" && property.name === "postMessage";
 }
 
-function hasLocationKey(pattern: ESTree.ObjectPattern): boolean {
+function hasWrappedKey(pattern: ESTree.ObjectPattern): boolean {
   return pattern.properties.some(
     (property) =>
       property.type === "Property" &&
       !property.computed &&
-      ((property.key.type === "Identifier" && property.key.name === "location") ||
-        (property.key.type === "Literal" && property.key.value === "location")),
+      ((property.key.type === "Identifier" && isWrappedKey(property.key.name)) ||
+        (property.key.type === "Literal" &&
+          typeof property.key.value === "string" &&
+          isWrappedKey(property.key.value))),
   );
+}
+
+function isWrappedKey(name: string): boolean {
+  return name === "location" || WINDOW_REFS.has(name);
 }
 
 function hasOptionalLink(node: ESTree.Node): boolean {

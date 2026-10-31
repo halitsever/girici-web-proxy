@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createChildConfig, createFrameWalker, installFrames, MUTATION_HOOKS } from "../src/client/frames.ts";
 import { DocumentSteps } from "../src/client/renewal.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+import type { WindowGuard } from "../src/client/windows.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 
 describe("createFrameWalker", () => {
@@ -134,11 +135,14 @@ function fakeRealm() {
   return { win: top as unknown as Realm, ctors, top, make, node };
 }
 
-function setup() {
+function setup(
+  guard: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} },
+  toProxy = (raw: string) => `/~/${raw}`,
+) {
   const realm = fakeRealm();
   const installed: Array<{ child: unknown; navigating: boolean | undefined }> = [];
   const steps = new DocumentSteps();
-  const ctx = { origin: "http://proxy.test", toProxy: (raw: string) => `/~/${raw}` } as unknown as UrlContext;
+  const ctx = { origin: "http://proxy.test", toProxy } as unknown as UrlContext;
   const adopter = installFrames(
     realm.win,
     ctx,
@@ -149,6 +153,7 @@ function setup() {
     },
     "",
     steps,
+    guard,
   );
   return { ...realm, installed, adopter, steps };
 }
@@ -196,6 +201,22 @@ describe("installFrames", () => {
     const { win, ctors, installed } = setup();
     (ctors.Document!.prototype.open as (...args: unknown[]) => unknown).call(win.document, "https://x.test/", "n", "");
     expect(installed).toEqual([{ child: { popup: "/~/https://x.test/" }, navigating: true }]);
+  });
+
+  it("hands the window document.open opens to the guard, with the origin it is headed to", () => {
+    const wrapped: Array<[unknown, string | undefined]> = [];
+    const guard: WindowGuard = {
+      wrap: (value, headedTo) => {
+        wrapped.push([value, headedTo]);
+        return "wrapper";
+      },
+      isWrapper: () => false,
+      reset: () => {},
+    };
+    const { win, ctors } = setup(guard, () => "/~/https/x.test/");
+    const open = ctors.Document!.prototype.open as (...args: unknown[]) => unknown;
+    expect(open.call(win.document, "https://x.test/", "n", "")).toBe("wrapper");
+    expect(wrapped).toEqual([[{ popup: "/~/https/x.test/" }, "https://x.test"]]);
   });
 
   it("listens again after document.open clears the document", () => {

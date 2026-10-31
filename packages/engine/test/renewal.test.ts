@@ -144,6 +144,13 @@ describe("createRenew", () => {
     expect(createRenew(() => null, origin, steps)()).toBe(false);
     expect(seen).toEqual([]);
   });
+
+  it("leaves the document steps alone for a config the window refuses", () => {
+    const { seen, steps } = recorded();
+    const script = () => ({ src: engineSrc, config: JSON.stringify(next) });
+    expect(createRenew(script, origin, steps, (value) => value.site !== "https://b.test")()).toBe(false);
+    expect(seen).toEqual([]);
+  });
 });
 
 describe("renewExisting", () => {

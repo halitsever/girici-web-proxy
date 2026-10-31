@@ -187,6 +187,7 @@ describe("installWorker", () => {
       toProxy: (raw) => rewriteUrl(raw, real, ORIGIN),
       fromProxy: (value) => unrewriteUrl(value, real, ORIGIN),
       inherit: () => {},
+      accepts: () => true,
     };
     const partition = () => prefixFor(ctx.realUrl().origin);
     const win = page.globals as unknown as Realm;

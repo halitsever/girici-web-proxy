@@ -5,8 +5,12 @@ import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+import { openedOrigin, type WindowGuard } from "./windows.ts";
 
 const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
+
+// Taken at load: these hooks run on page calls, after page code may have replaced them.
+const ownDescriptor = Object.getOwnPropertyDescriptor;
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
 export function installNavigation(
@@ -14,11 +18,17 @@ export function installNavigation(
   ctx: UrlContext,
   cookies: CookieBridge,
   invoke: Invoke,
+  guard: WindowGuard,
 ): DocumentListeners {
   const history = win.History.prototype;
+  const historyOf = ownDescriptor(win, "history")?.get;
   for (const method of ["pushState", "replaceState"] as const) {
     const native = history[method];
     history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
+      // Another window's History would let a frame rename a page it cannot otherwise touch.
+      if (historyOf && this !== apply(historyOf, win, [])) {
+        throw new win.DOMException(`Failed to execute '${method}' on 'History': access denied.`, "SecurityError");
+      }
       if (url === undefined || url === null) return apply(native, this, [data, unused, url]);
       const current = ctx.realUrl();
       const target = newUrl(toText(url), current);
@@ -35,7 +45,9 @@ export function installNavigation(
   const nativeOpen = win.open;
   win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
     const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
-    return apply(nativeOpen, this ?? win, [proxied, target, features]);
+    const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
+    // Until the page it was opened for arrives, a popup shows a blank page of this origin.
+    return guard.wrap(opened, openedOrigin(proxied, ctx.origin)) as Window | null;
   };
 
   // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.

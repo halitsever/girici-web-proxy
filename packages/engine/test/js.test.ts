@@ -5,12 +5,22 @@ import { MAX_REWRITE_LENGTH, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/j
 describe("rewriteJs", () => {
   it.each([
     ["location.href", "__g$.L(location).href"],
+    ["top.document", "__g$.W(top).document"],
+    ["window.parent.postMessage(m, o)", "__g$.P(__g$.W(window.parent)).postMessage(m, o)"],
+    ["typeof top", "typeof top"],
+    ["o = { parent }", "o = { parent: __g$.W(parent) }"],
+    ["const { opener } = window;", "const { opener } = __g$.D(window);"],
+    ["rect.top + node.parent", "rect.top + node.parent"],
+    ["frame.contentWindow.parent.x", "__g$.W(frame.contentWindow.parent).x"],
+    ["window['top'].x", "__g$.W(window['top']).x"],
+    ["let parent = a; parent = b;", "let parent = a; parent = b;"],
+    ["self.frames[0]", "__g$.W(self.frames)[0]"],
     ["var u = location;", "var u = __g$.L(location);"],
     ['location = "https://x.test/"', 'location = __g$.N(location, ("https://x.test/"))'],
     ["window.location.href = u", "__g$.L(window.location).href = u"],
     ["document.location = u", '__g$.S(document, "location", (u))'],
     ['w["location"] = u', '__g$.S(w, "location", (u))'],
-    ['top["location"].replace(u)', '__g$.L(top["location"]).replace(u)'],
+    ['top["location"].replace(u)', '__g$.L(__g$.W(top)["location"]).replace(u)'],
     ["const { location } = window;", "const { location } = __g$.D(window);"],
     ["({ location: loc } = self);", "({ location: loc } = __g$.D(self));"],
     ["o = { location }", "o = { location: __g$.L(location) }"],
@@ -29,7 +39,7 @@ describe("rewriteJs", () => {
     ["[eval][0](x)", "[__g$.ev][0](x)"],
     ["import(spec)", "import(__g$.I(spec))"],
     ["import(spec, { with: { type: 'json' } })", "import(__g$.I(spec), { with: { type: 'json' } })"],
-    ['parent.postMessage(m, "*")', '__g$.P(parent).postMessage(m, "*")'],
+    ['parent.postMessage(m, "*")', '__g$.P(__g$.W(parent)).postMessage(m, "*")'],
     ["a.b.postMessage(location.href, o, [p])", "__g$.P(a.b).postMessage(__g$.L(location).href, o, [p])"],
     ['w["postMessage"](m, o)', '__g$.P(w)["postMessage"](m, o)'],
     ["(a || b).postMessage(m)", "(__g$.P(a || b)).postMessage(m)"],
@@ -81,6 +91,7 @@ describe("rewriteJs", () => {
     expect(STANDALONE_SHIM).toContain("I:");
     expect(STANDALONE_SHIM).toContain("H:");
     expect(STANDALONE_SHIM).toContain("M:");
+    expect(STANDALONE_SHIM).toContain("W:function(v){return v}");
     expect(STANDALONE_SHIM).toContain("P:");
   });
 

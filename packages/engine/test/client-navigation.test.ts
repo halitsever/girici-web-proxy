@@ -4,6 +4,7 @@ import { createHelpers } from "../src/client/helpers.ts";
 import { createFakeLocation } from "../src/client/location.ts";
 import { installNavigation } from "../src/client/navigation.ts";
 import { createUrlContext, type Realm } from "../src/client/url-context.ts";
+import type { WindowGuard } from "../src/client/windows.ts";
 import { recordingCalls } from "./recording-calls.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
@@ -69,6 +70,7 @@ function fakeWindow() {
   return { win, loads, listeners };
 }
 
+const asIs: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} };
 const noCookies = { pendingWrites: () => null } as unknown as CookieBridge;
 
 function installed() {
@@ -76,7 +78,7 @@ function installed() {
   const { win } = fake;
   const natives = [win.open, win.HTMLFormElement.prototype.submit, win.History.prototype.pushState];
   const ctx = createUrlContext(win as unknown as Realm);
-  installNavigation(win as unknown as Realm, ctx, noCookies, (fn, self, args) => Reflect.apply(fn, self, args));
+  installNavigation(win as unknown as Realm, ctx, noCookies, (fn, self, args) => Reflect.apply(fn, self, args), asIs);
   const location = createFakeLocation({
     real: ctx.realUrl,
     navigate: (url, mode) => fake.loads.push(`${mode} ${url}`),
@@ -94,6 +96,8 @@ function installed() {
     rewrite: {} as never,
     indirectEval: (code) => code,
     messageTarget: (value) => value,
+    wrapWindow: (value) => value,
+    realOrigin: () => "https://a.test",
     renew: () => false,
   });
   const click = (link: FakeElement) => {

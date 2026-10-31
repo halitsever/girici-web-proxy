@@ -11,6 +11,10 @@ export interface HelperEnv {
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
   messageTarget(value: unknown): unknown;
+  /** Another origin's window becomes a restricted wrapper; anything else comes back as is. */
+  wrapWindow(value: unknown): unknown;
+  /** This window's real origin, which other windows read here because a page can redefine `origin`. */
+  realOrigin(): string;
   renew(): boolean;
 }
 
@@ -27,9 +31,19 @@ export interface GiriciHelpers {
   P(value: unknown): unknown;
   /** A javascript: URL's code. A string result is the window's next document, so it comes back with the runtime. */
   J(code: unknown): string | undefined;
+  W(value: unknown): unknown;
+  realOrigin(): string;
   /** The engine script of a document that reuses this window calls this instead of installing again. */
   renew(): boolean;
 }
+
+/** Window links that can lead to another origin's window. A null prototype keeps page additions out of `in`. */
+const WINDOW_LINKS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
+  top: true,
+  parent: true,
+  opener: true,
+  frames: true,
+});
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
 export function createHelpers(env: HelperEnv): GiriciHelpers {
@@ -66,7 +80,8 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
           __proto__: null,
           get: (target, property) => {
             const value: unknown = Reflect.get(target, property, target);
-            return property === "location" ? L(value) : value;
+            if (property === "location") return L(value);
+            return typeof property === "string" && property in WINDOW_LINKS ? env.wrapWindow(value) : value;
           },
         } as ProxyHandler<object>,
       );
@@ -82,6 +97,8 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
       const result = env.indirectEval(env.rewrite.js(toText(code)));
       return typeof result === "string" ? env.rewrite.srcdoc(result) : undefined;
     },
+    W: (value) => env.wrapWindow(value),
+    realOrigin: () => env.realOrigin(),
     renew: () => env.renew(),
   };
 }

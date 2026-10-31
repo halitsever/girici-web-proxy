@@ -3,6 +3,7 @@ import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../sha
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+import { openedOrigin, type WindowGuard } from "./windows.ts";
 
 /** Gives a same-origin child window the runtime; windows that already carry one are left to renew themselves. */
 export interface FrameAdopter {
@@ -124,6 +125,7 @@ export function installFrames(
   install: (win: Realm, config: ClientConfig, clientUrl: string, navigating?: boolean) => void,
   clientUrl: string,
   steps: DocumentSteps,
+  guard: WindowGuard,
 ): FrameAdopter {
   const lengthOf = ownDescriptor(win, "length")?.get;
   const ownerDocument = ownDescriptor(win.Node.prototype, "ownerDocument")?.get;
@@ -237,20 +239,34 @@ export function installFrames(
       // Not a document of this origin.
     }
   };
+  /** Another origin's document stays out of reach, as the browser would keep it. */
+  const visibleDocument = (value: unknown): unknown => {
+    adoptDocument(value);
+    if (!value || !defaultView) return value;
+    try {
+      return guard.isWrapper(guard.wrap(apply(defaultView, value, []))) ? null : value;
+    } catch {
+      return null;
+    }
+  };
   for (const name of FRAME_ELEMENTS) {
     const proto = protoOf(name);
     if (!proto) continue;
     for (const [property, settle] of [
-      ["contentWindow", adopt],
-      ["contentDocument", adoptDocument],
+      [
+        "contentWindow",
+        (value: unknown) => {
+          adopt(value);
+          return guard.wrap(value);
+        },
+      ],
+      ["contentDocument", visibleDocument],
     ] as const) {
       const descriptor = ownDescriptor(proto, property);
       const get = descriptor?.get;
       if (!get) continue;
       const hooked = function (this: unknown): unknown {
-        const value = apply(get, this, []);
-        settle(value);
-        return value;
+        return settle(apply(get, this, []));
       };
       defineProperty(proto, property, { ...descriptor, get: maskNative(hooked, get) });
     }
@@ -261,9 +277,7 @@ export function installFrames(
     const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
     if (!proto || typeof native !== "function") continue;
     const hooked = function (this: unknown): unknown {
-      const value = apply(native, this, []);
-      adoptDocument(value);
-      return value;
+      return visibleDocument(apply(native, this, []));
     };
     defineProperty(proto, "getSVGDocument", { ...descriptor, value: maskNative(hooked, native) });
   }
@@ -289,7 +303,7 @@ export function installFrames(
     (url, rest) => {
       // The three-argument form is window.open, which the navigation hook would otherwise never see.
       const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
-      return apply(openWindow, win, [proxied, rest[0], rest[1]]);
+      return guard.wrap(apply(openWindow, win, [proxied, rest[0], rest[1]]), openedOrigin(proxied, ctx.origin));
     },
     reopenedFor,
   );

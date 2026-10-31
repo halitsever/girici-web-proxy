@@ -1,31 +1,47 @@
 import type { Invoke } from "./invoke.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { realOriginOf, type Realm, type UrlContext } from "./url-context.ts";
+import type { WindowGuard } from "./windows.ts";
 
-type Send = (...args: unknown[]) => void;
+export type Send = (...args: unknown[]) => void;
+
+// Taken at load: the event getters run on page calls, after page code may have replaced these.
+const apply = Reflect.apply;
+const ownDescriptor = Object.getOwnPropertyDescriptor;
+const defineProperty = Object.defineProperty;
+const toText = String;
 
 /** Every proxied page runs on our origin, so postMessage targets and the origin reported to receivers are translated. */
-export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke): void {
+export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, guard: WindowGuard): void {
   const native = win.postMessage;
   const send: Send = (...args) => invoke(native, win, args);
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
     post(send, ctx.realUrl().origin, ctx.origin, message, targetOrigin, rest);
   } as typeof win.postMessage;
 
-  const descriptor = Object.getOwnPropertyDescriptor(win.MessageEvent.prototype, "origin");
+  const proto = win.MessageEvent.prototype;
+  const sourceDescriptor = ownDescriptor(proto, "source");
+  const nativeSource = sourceDescriptor?.get;
+  const sourceOf = (event: unknown): unknown =>
+    nativeSource ? apply(nativeSource, event, []) : (event as { source: unknown }).source;
+  if (sourceDescriptor && nativeSource) {
+    defineProperty(proto, "source", {
+      ...sourceDescriptor,
+      get(this: MessageEvent) {
+        return guard.wrap(apply(nativeSource, this, []));
+      },
+    });
+  }
+
+  const descriptor = ownDescriptor(proto, "origin");
   const nativeOrigin = descriptor?.get;
   if (!nativeOrigin) return;
-  Object.defineProperty(win.MessageEvent.prototype, "origin", {
+  defineProperty(proto, "origin", {
     ...descriptor,
     get(this: MessageEvent) {
-      const origin = String(nativeOrigin.call(this));
+      const origin = toText(apply(nativeOrigin, this, []));
       if (origin !== ctx.origin) return origin;
-      // The sender is on our origin too; its own runtime knows its real origin, blank frames included.
-      try {
-        if (isWindow(this.source)) return String(this.source.origin);
-      } catch {
-        // A detached sender keeps the browser's own value.
-      }
-      return origin;
+      // The sender is on our origin too. Its address, or else its own runtime, tells its real origin.
+      return realOriginOf(sourceOf(this), ctx.origin) ?? origin;
     },
   });
 }
@@ -34,13 +50,19 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke): v
  * Rewritten `x.postMessage()` calls land here. The browser takes event.source from the realm that calls the native
  * postMessage, so a window gets a stand-in that sends from this realm.
  */
-export function createMessageSender(win: Realm, ctx: UrlContext, invoke: Invoke): (value: unknown) => unknown {
+export function createMessageSender(
+  win: Realm,
+  ctx: UrlContext,
+  invoke: Invoke,
+  isWrapper: (value: unknown) => boolean = () => false,
+): (value: unknown) => unknown {
   // Captured before installMessaging replaces it; window methods live on the window itself, not on Window.prototype.
   const native = win.postMessage;
   return (value) => {
     let realOrigin: string;
     try {
-      if (!isWindow(value)) return value;
+      // A restricted window's own postMessage already translates.
+      if (!isWindow(value) || isWrapper(value)) return value;
       realOrigin = String(value.origin);
     } catch {
       // A cross-origin window hides its origin, and its own postMessage needs no translation.
@@ -54,7 +76,8 @@ export function createMessageSender(win: Realm, ctx: UrlContext, invoke: Invoke)
   };
 }
 
-function post(
+/** Delivers as our origin a message addressed to the receiver's real origin, and drops one addressed elsewhere. */
+export function post(
   send: Send,
   realOrigin: string,
   proxyOrigin: string,
