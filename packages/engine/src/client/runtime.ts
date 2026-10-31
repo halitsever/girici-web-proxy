@@ -230,9 +230,9 @@ export function install(
     ],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx, partition, ownAnnounce)],
-    ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
-    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke, guard, blobs))],
-    ["top site", () => listeners.push(installTopSiteResponder(win, container))],
+    ["cookies", () => append(listeners, (cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
+    ["navigation", () => append(listeners, installNavigation(win, ctx, cookies, invoke, guard, blobs))],
+    ["top site", () => append(listeners, installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
@@ -267,7 +267,8 @@ export function install(
   // The document may be of another site now, so windows handed out as is to the last one are judged again.
   steps.add("site", () => guard.reset());
   steps.add("listeners", () => {
-    for (const listener of listeners) listener.listen();
+    // Runs again after document.open, inside a page call, so it reads the list by index.
+    for (let index = 0; index < listeners.length; index++) (listeners[index] as DocumentListeners).listen();
   });
   steps.add("toolbar", (next) => {
     toolbarKeys.use(null);

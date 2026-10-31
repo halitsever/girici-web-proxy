@@ -168,3 +168,23 @@ describe("blob links", () => {
     expect(swaps).toEqual([false]);
   });
 });
+
+describe("listening again", () => {
+  it("adds every listener back when the page replaced the array iterator", () => {
+    const fake = fakeWindow();
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    const nav = installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      noCookies,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      noBlobs,
+    );
+    const first = fake.listeners.length;
+    fake.listeners.length = 0;
+    withReplaced(Array.prototype, Symbol.iterator, { value: function* () {} }, () => nav.listen());
+    expect(first).toBeGreaterThan(0);
+    expect(fake.listeners.length).toBe(first);
+  });
+});

@@ -1,5 +1,6 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import {
+  append,
   apply,
   hrefOf,
   isWebUrl,
@@ -95,9 +96,9 @@ export function installNavigation(
       }
     }
   };
-  for (const type of LINK_EVENTS) listeners.push([type, fixLink, true]);
-  for (const type of INTERACTIONS) listeners.push([type, () => blobs.restoreLinks(), true]);
-  listeners.push([
+  for (const type of LINK_EVENTS) append(listeners, [type, fixLink, true]);
+  for (const type of INTERACTIONS) append(listeners, [type, () => blobs.restoreLinks(), true]);
+  append(listeners, [
     "submit",
     (event) => {
       const submitter = (event as SubmitEvent).submitter;
@@ -124,7 +125,7 @@ export function installNavigation(
   };
 
   // These run after the page's own handlers, so links and forms a page handles itself are left alone.
-  listeners.push([
+  append(listeners, [
     "click",
     (event) => {
       const writes = cookies.pendingWrites();
@@ -141,7 +142,7 @@ export function installNavigation(
     },
     false,
   ]);
-  listeners.push([
+  append(listeners, [
     "submit",
     (event) => {
       const writes = cookies.pendingWrites();
@@ -162,9 +163,13 @@ export function installNavigation(
     false,
   ]);
 
-  const addListener = win.addEventListener.bind(win);
+  const addListener = win.addEventListener;
+  // Runs again after document.open, inside a page call, so it reads the list by index.
   const listen = () => {
-    for (const [type, listener, capture] of listeners) addListener(type, listener, capture);
+    for (let index = 0; index < listeners.length; index++) {
+      const entry = listeners[index] as [string, (event: Event) => void, boolean];
+      apply(addListener, win, [entry[0], entry[1], entry[2]]);
+    }
   };
   listen();
   return { listen };
