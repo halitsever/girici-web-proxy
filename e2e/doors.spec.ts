@@ -108,7 +108,7 @@ test("runs HTML blob documents under the runtime and others inert", async ({ pag
   expect((await download).suggestedFilename()).toBe("x.txt");
 });
 
-test("swaps blob URLs in every navigation sink and reads back the page's own URL", async ({ page, browserName }) => {
+test("swaps blob URLs in every navigation sink and reads back the page's own URL", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/doors-blob-sinks");
   await page.click("#start");
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
@@ -116,9 +116,7 @@ test("swaps blob URLs in every navigation sink and reads back the page's own URL
     ran: [],
     readBack: { property: true, attr: true, object: true, embed: true, markup: true, link: true },
   });
-  // WebKit keeps a revoked blob URL alive while a document loaded from it is open, even when its creator revokes it.
-  if (browserName === "webkit") return;
-  // Playwright reads attributes in its own world, so this is the bootstrap the browser loaded, already revoked.
+  // Playwright reads attributes in its own world, so this is the bootstrap the browser loaded, kept for the frame.
   const boot = (await page.locator("iframe:not([name]):not([id])").first().getAttribute("src")) ?? "";
   expect(boot).toMatch(/^blob:/);
   const state = await page.evaluate(
@@ -129,7 +127,26 @@ test("swaps blob URLs in every navigation sink and reads back the page's own URL
       ),
     boot,
   );
-  expect(state).toBe("revoked");
+  expect(state).toBe("live");
+});
+
+test("loads a blob frame under the runtime again on reload and on the way back", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/blob-frame");
+  const frame = page.frameLocator("#f");
+  await expect(frame.locator("#state")).toHaveText(/^object:/);
+  const first = await frame.locator("#state").textContent();
+  const child = page.frame({ url: /^blob:/ });
+  expect(child).not.toBeNull();
+  await child!.evaluate(() => location.reload());
+  await expect(frame.locator("#state")).toHaveText(/^object:/);
+  await expect(frame.locator("#state")).not.toHaveText(first ?? "");
+  // Through the parent's hooked setter: code Playwright evaluates in the frame is not rewritten.
+  await page.evaluate(() => {
+    (document.getElementById("f") as HTMLIFrameElement).src = "https://site-a.test/page2";
+  });
+  await expect(frame.locator("h1")).toHaveText("Page 2");
+  await page.evaluate(() => history.back());
+  await expect(frame.locator("#state")).toHaveText(/^object:/);
 });
 
 test("opens a blob link from the context menu under the runtime", async ({ page, context, browserName }) => {

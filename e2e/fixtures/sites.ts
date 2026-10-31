@@ -906,6 +906,16 @@ const FAILURE = `const failure = (read) => {
   };`;
 
 // Each change shows as [key, newValue, storageArea is this window's localStorage].
+// The blob page reports whether the runtime is there, with a fresh number for each load.
+const BLOB_FRAME = page(
+  "Blob frame",
+  `<iframe id="f"></iframe>
+<script>
+  const html = '<p id="state"></p><script>document.getElementById("state").textContent = typeof window.__g$ + ":" + Math.random();<' + '/script>';
+  document.getElementById("f").src = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+</script>`,
+);
+
 const STORAGE_EVENTS = page(
   "Storage events",
   `<pre id="events"></pre>
@@ -1565,6 +1575,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/top-host": html(TOP_HOST),
     "/cross-popup": html(CROSS_POPUP),
     "/storage-events": html(STORAGE_EVENTS),
+    "/blob-frame": html(BLOB_FRAME),
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/embed-storage": html(EMBED_STORAGE),

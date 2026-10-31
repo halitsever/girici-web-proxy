@@ -235,16 +235,15 @@ const respond = (body: BodyInit, type: string) => async () =>
 const natives = (calls: unknown[][], fetch: unknown, invoke: Invoke = direct) => ({
   fetch: fetch as typeof globalThis.fetch,
   write: (text: string) => void calls.push(["native write", text]),
-  revoke: (url: string) => void calls.push(["revoke", url]),
   invoke,
 });
 
 describe("loadBlobDocument", () => {
-  it("revokes its own bootstrap once it has read the original", async () => {
+  it("keeps its own bootstrap, so a reload or a return to the frame loads the page again", async () => {
     const { win, calls } = documentRealm();
     (win.location as { href: string }).href = "blob:http://p.test/boot";
     await loadBlobDocument(win, "blob:http://p.test/h", natives(calls, respond("<p>x</p>", "text/html")));
-    expect(calls).toEqual([["revoke", "blob:http://p.test/boot"], ["open"], ["write", "<p>x</p>"], ["close"]]);
+    expect(calls).toEqual([["open"], ["write", "<p>x</p>"], ["close"]]);
   });
 
   it("writes an HTML blob through the hooked document calls, decoded in its own charset", async () => {

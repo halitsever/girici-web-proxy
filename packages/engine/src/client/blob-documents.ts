@@ -30,14 +30,13 @@ export interface BlobLoadNatives {
   fetch: typeof fetch;
   /** The browser's own write: the HTML rewriter would give the viewer's sandbox allow-same-origin. */
   write: (this: Document, ...text: string[]) => void;
-  revoke: (url: string) => void;
   invoke: Invoke;
 }
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const LINK_ATTRIBUTES = ["href", "xlink:href"];
-/** A bootstrap a swapped link never loaded is revoked after this, since nothing else would. */
+/** Link and form bootstraps go after this; a frame keeps its own for reloads and history steps. */
 const LINK_BOOT_TTL = 60_000;
 
 // Taken at load: swaps and loads run inside page calls, after page code may have replaced these.
@@ -137,7 +136,7 @@ export function installBlobDocuments(
       // Already gone.
     }
   };
-  const natives: BlobLoadNatives = { fetch: win.fetch, write: win.Document.prototype.write, revoke, invoke };
+  const natives: BlobLoadNatives = { fetch: win.fetch, write: win.Document.prototype.write, invoke };
   const originals = new NativeMap<string, string>();
   let pending: Array<() => void> = [];
 
@@ -170,7 +169,7 @@ export function installBlobDocuments(
       apply(setAttribute, element, [name, boot]);
       append(undo, () => {
         if (apply(getAttribute, element, [name]) === boot) apply(setAttribute, element, [name, value]);
-        // A link the browser never followed leaves its bootstrap unloaded, and so unrevoked.
+        // The browser has followed the link, or never will, long before this.
         apply(timer, win, [() => revoke(boot), LINK_BOOT_TTL]);
       });
     }
@@ -253,16 +252,15 @@ export function installBlobDocuments(
 
 /**
  * The "blob document" step. HTML goes through the hooked document calls, so it is rewritten and runs under the
- * runtime; a PDF goes to the browser's viewer; anything else is shown sandboxed. The bootstrap is revoked once read.
+ * runtime; a PDF goes to the browser's viewer; anything else is shown sandboxed. The bootstrap stays alive with its
+ * creator, since a reload or a history step loads it again.
  */
 export function loadBlobDocument(win: Realm, blobUrl: string, natives: BlobLoadNatives): Promise<void> {
-  const own = win.location.href;
   const fail = (error: unknown) => {
     // The bootstrap document stays blank.
     apply(warn, nativeConsole, ["Girici: blob document", error]);
   };
   const show = (response: Response): unknown => {
-    if (isBlobUrl(own)) natives.revoke(own);
     const type = apply(headerOf, apply(headersOf, response, []), ["content-type"]) as string | null;
     const treatment = blobTreatment(type);
     if (treatment === "pdf") {
