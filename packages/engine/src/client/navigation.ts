@@ -5,7 +5,10 @@ import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
-const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
+const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
+/** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
+const LATER_EVENTS = ["contextmenu", "dragstart"];
+const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
 export function installNavigation(
@@ -13,7 +16,7 @@ export function installNavigation(
   ctx: UrlContext,
   cookies: CookieBridge,
   invoke: Invoke,
-  blobs: Pick<BlobDocuments, "swap" | "swapLink">,
+  blobs: Pick<BlobDocuments, "swap" | "swapLink" | "restoreLinks" | "swapForm">,
 ): DocumentListeners {
   const history = win.History.prototype;
   for (const method of ["pushState", "replaceState"] as const) {
@@ -57,23 +60,27 @@ export function installNavigation(
     for (const target of event.composedPath()) {
       if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
         fix(target, "href");
-        // A context menu opens the link later, after the swap would be undone.
-        if (event.type !== "contextmenu") blobs.swapLink(target);
+        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
         return;
       }
       if (target instanceof win.SVGAElement) {
         fix(target, "href");
         fix(target, "xlink:href");
+        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
         return;
       }
     }
   };
   for (const type of LINK_EVENTS) listeners.push([type, fixLink, true]);
+  for (const type of INTERACTIONS) listeners.push([type, () => blobs.restoreLinks(), true]);
   listeners.push([
     "submit",
     (event) => {
-      if (event.target instanceof win.HTMLFormElement) fix(event.target, "action");
       const submitter = (event as SubmitEvent).submitter;
+      if (event.target instanceof win.HTMLFormElement) {
+        fix(event.target, "action");
+        blobs.swapForm(event.target, submitter);
+      }
       if (submitter) fix(submitter, "formaction");
     },
     true,
@@ -83,6 +90,7 @@ export function installNavigation(
   const { submit, requestSubmit } = form;
   form.submit = function (this: HTMLFormElement) {
     fix(this, "action");
+    blobs.swapForm(this);
     submit.call(this);
   };
   form.requestSubmit = function (this: HTMLFormElement, submitter?: HTMLElement | null) {
@@ -122,6 +130,7 @@ export function installNavigation(
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");
+        blobs.swapForm(target);
         submit.call(target);
         extra?.remove();
       });

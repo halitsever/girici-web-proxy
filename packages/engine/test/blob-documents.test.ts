@@ -136,6 +136,16 @@ describe("installBlobDocuments", () => {
   });
 });
 
+describe("reading back", () => {
+  it("maps a bootstrap back to the blob URL the page gave", () => {
+    const { win } = blobRealm();
+    const blobs = installBlobDocuments(win, ctx, () => "", direct);
+    const boot = blobs.swap("blob:http://p.test/orig");
+    expect(blobs.original(boot)).toBe("blob:http://p.test/orig");
+    expect(blobs.original("https://a.test/")).toBe("https://a.test/");
+  });
+});
+
 describe("swapLink", () => {
   it("swaps a followed link's blob href until the browser has read it", () => {
     const { win, timers } = blobRealm();
@@ -169,7 +179,28 @@ describe("swapLink", () => {
   });
 });
 
-/** A document whose open, write and close record their calls, and a location whose replace does the same. */
+describe("swapLink in SVG and context menus", () => {
+  it("swaps an SVG link's xlink:href too", () => {
+    const { win } = blobRealm();
+    const blobs = installBlobDocuments(win, ctx, () => "", direct);
+    const link = { attributes: new Map([["xlink:href", "blob:http://p.test/x"]]) };
+    blobs.swapLink(link);
+    expect(link.attributes.get("xlink:href")).toBe(`blob:${origin}/boot-1`);
+  });
+
+  it("keeps a context menu's swap until the next interaction", () => {
+    const { win, timers } = blobRealm();
+    const blobs = installBlobDocuments(win, ctx, () => "", direct);
+    const link = { attributes: new Map([["href", "blob:http://p.test/orig"]]) };
+    blobs.swapLink(link, true);
+    for (const run of timers) run();
+    expect(link.attributes.get("href")).toBe(`blob:${origin}/boot-1`);
+    blobs.restoreLinks();
+    expect(link.attributes.get("href")).toBe("blob:http://p.test/orig");
+  });
+});
+
+/** A document whose open, write and close record their calls/** A document whose open, write and close record their calls, and a location whose replace does the same. */
 function documentRealm() {
   const calls: unknown[][] = [];
   const document = {};
@@ -195,10 +226,18 @@ const respond = (body: BodyInit, type: string) => async () =>
 const natives = (calls: unknown[][], fetch: unknown, invoke: Invoke = direct) => ({
   fetch: fetch as typeof globalThis.fetch,
   write: (text: string) => void calls.push(["native write", text]),
+  revoke: (url: string) => void calls.push(["revoke", url]),
   invoke,
 });
 
 describe("loadBlobDocument", () => {
+  it("revokes its own bootstrap once it has read the original", async () => {
+    const { win, calls } = documentRealm();
+    (win.location as { href: string }).href = "blob:http://p.test/boot";
+    await loadBlobDocument(win, "blob:http://p.test/h", natives(calls, respond("<p>x</p>", "text/html")));
+    expect(calls).toEqual([["revoke", "blob:http://p.test/boot"], ["open"], ["write", "<p>x</p>"], ["close"]]);
+  });
+
   it("writes an HTML blob through the hooked document calls, decoded in its own charset", async () => {
     const { win, calls } = documentRealm();
     const bytes = new Uint8Array([0x3c, 0x70, 0x3e, 0xf0, 0xfe]);

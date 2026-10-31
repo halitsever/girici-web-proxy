@@ -20,6 +20,51 @@ describe("clientTag", () => {
   });
 });
 
+describe("clientTag against page code", () => {
+  it("writes the config it was given, whatever the page put on the prototypes or JSON", () => {
+    const config = {
+      v: 2,
+      cookies: [
+        {
+          name: "a",
+          value: "1",
+          domain: "a.test",
+          path: "/",
+          hostOnly: true,
+          secure: false,
+          expires: null,
+          creation: 1,
+        },
+      ],
+      site: "https://a.test",
+      inherit: { origin: "http://p.test", base: "https://a.test/", blob: "blob:http://p.test/1" },
+    };
+    const clean = clientTag("/_g/c.js", config);
+    const forged = () => ({ v: 2, cookies: [], inherit: { origin: "http://p.test", base: "https://b.test/" } });
+    const objectProto = Object.prototype as { toJSON?: unknown };
+    const arrayProto = Array.prototype as { toJSON?: unknown };
+    const stringify = JSON.stringify;
+    const replace = String.prototype.replace;
+    objectProto.toJSON = forged;
+    arrayProto.toJSON = () => [];
+    JSON.stringify = () => '{"v":2,"cookies":[],"site":"https://b.test"}';
+    String.prototype.replace = function (this: string) {
+      return this;
+    } as typeof replace;
+    let tag: string;
+    try {
+      tag = clientTag("/_g/c.js", config);
+    } finally {
+      delete objectProto.toJSON;
+      delete arrayProto.toJSON;
+      JSON.stringify = stringify;
+      String.prototype.replace = replace;
+    }
+    expect(tag).toBe(clean);
+    expect(clean).toContain("https://a.test/");
+  });
+});
+
 describe("stripClientTag", () => {
   it("strips the injected runtime tag and nothing else", () => {
     const url = "http://p.test/_g/client.T.js";

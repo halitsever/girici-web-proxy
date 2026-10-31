@@ -128,7 +128,7 @@ export function install(
     }
     return fake;
   };
-  const rewrite = createRewriteBridge(ctx, () => clientTag(clientUrl, childConfig()));
+  const rewrite = createRewriteBridge(ctx, () => clientTag(clientUrl, childConfig()), blobs);
   const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
     nativeLocation,
@@ -177,7 +177,7 @@ export function install(
           steps,
         )),
     ],
-    ["attributes", () => installAttributes(win, ctx, rewrite, blobs.swap)],
+    ["attributes", () => installAttributes(win, ctx, rewrite, blobs)],
     [
       "html sinks",
       () =>
