@@ -1,7 +1,8 @@
 export const MAX_NAME_LENGTH = 40;
 
-// Control characters and the bidi overrides could make one name read as another.
-const FORBIDDEN = /[\p{Cc}\u2028\u2029\u202A-\u202E\u2066-\u2069]/u;
+// Control and invisible format characters could make one name read as another. The two joiners stay, since Persian
+// words and emoji sequences need them.
+const FORBIDDEN = /[\p{Cc}\u2028\u2029]|(?![\u200C\u200D])\p{Cf}/u;
 
 /** Null means invalid. An empty or null value resets to the default name. */
 export function readBrandName(value: unknown): { name: string | null } | null {

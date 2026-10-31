@@ -60,4 +60,12 @@ describe("brand name", () => {
     expect(readBrandName(null)).toEqual({ name: null });
     expect(readBrandName(5)).toBeNull();
   });
+
+  it("refuses invisible format characters but keeps the joiners scripts and emoji need", () => {
+    for (const hidden of ["​", "‎", "؜", "﻿", "⁠", "­", "\u{E0041}"]) {
+      expect(readBrandName(`a${hidden}b`), JSON.stringify(hidden)).toBeNull();
+    }
+    expect(readBrandName("می‌خواهم")).toEqual({ name: "می‌خواهم" });
+    expect(readBrandName("👩‍💻")).toEqual({ name: "👩‍💻" });
+  });
 });
