@@ -64,9 +64,8 @@ export function install(
 ): void {
   const existing = ownDescriptor(win, "__g$");
   if (existing) {
-    // The browser reused this window for a new document, which renews the runtime from its own engine script. This
-    // holds across sites too: whoever could script the blank window can script the page that reuses it until windows
-    // of other sites are wrapped, so refusing would only cost every such frame a second load.
+    // The browser reused this window for a new document, which renews the runtime from its own engine script. A
+    // renewal keeps the origin the window was given first, and other sites reach the window only through a wrapper.
     renewExisting(existing.value, () => {
       const location = win.location;
       apply(location.reload, location, []);

@@ -60,6 +60,8 @@ subresources. Turning on public access opens the data path to everyone and skips
   windows. A key built at run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)`,
   `Object.assign(window, { location: url })`, or a window reached as `frames[i]`, `window[i]` or by name, gets the
   browser's own object. Such a page can navigate outside the proxy or open a document without Girici's script.
+- **Blob URLs and the origin private file system are shared.** Every site runs on Girici's origin, so a site that
+  learns another site's `blob:` URL can read it, and `navigator.storage.getDirectory()` gives all sites one folder.
 - **The operator sees traffic.** The relay terminates TLS at the server.
 - **Bot protection still applies.** A correct proxy can still be blocked by a site's bot checks or by
   blocks on datacenter IP ranges.
