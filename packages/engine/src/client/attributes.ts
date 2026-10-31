@@ -4,6 +4,7 @@ import {
   hrefOf,
   indexOf,
   NativeWeakMap,
+  originOf,
   parseUrl,
   setUrlPart,
   setHas,
@@ -269,6 +270,11 @@ export function installAttributes(
     });
   }
 
+  /** The page's real origin, which its javascript: URLs carry. */
+  function owner(): string {
+    return originOf(ctx.realUrl());
+  }
+
   function isRefresh(target: Element): boolean {
     return (
       target.localName === "meta" &&
@@ -280,7 +286,7 @@ export function installAttributes(
     try {
       if (!isRefresh(target)) return;
       const content = apply(getAttribute, target, ["content"]) as string | null;
-      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin, blobs.swap);
+      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin, blobs.swap, owner());
       if (next !== content) apply(setAttribute, target, ["content", next]);
     } catch {
       // Not an element of this realm.
@@ -290,7 +296,7 @@ export function installAttributes(
   function rewrite(target: Element, name: string, value: string): string {
     const attribute = lowerTrim(name);
     if (attribute === "content" && isRefresh(target)) {
-      return rewriteRefresh(value, ctx.realBase(), ctx.origin, blobs.swap);
+      return rewriteRefresh(value, ctx.realBase(), ctx.origin, blobs.swap, owner());
     }
     const kind = attributeKind(target.localName, name);
     if (kind === "html") {
@@ -301,7 +307,7 @@ export function installAttributes(
       return next;
     }
     if (!kind) return value;
-    const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin);
+    const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, undefined, owner());
     return setHas(DOCUMENT_ATTRIBUTES, `${target.localName}.${attribute}`) ? blobs.swap(rewritten) : rewritten;
   }
 

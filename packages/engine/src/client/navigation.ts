@@ -229,7 +229,7 @@ function submitterField(win: Realm, submitter: HTMLElement | null): HTMLInputEle
 }
 
 function escapes(raw: string, ctx: UrlContext): boolean {
-  const script = rewriteJavascriptUrl(raw);
+  const script = rewriteJavascriptUrl(raw, originOf(ctx.realUrl()));
   if (script !== null) return script !== raw;
   let url: URL;
   try {

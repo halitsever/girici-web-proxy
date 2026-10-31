@@ -109,7 +109,7 @@ export function createUrlContext(win: Realm, initial?: InheritedContext): UrlCon
     origin,
     realUrl,
     realBase,
-    toProxy: (raw) => rewriteUrl(raw, realBase(), origin),
+    toProxy: (raw) => rewriteUrl(raw, realBase(), origin, originOf(realUrl())),
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
     inherit: (next) => {
       inherited = next;

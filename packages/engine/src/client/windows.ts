@@ -11,6 +11,7 @@ import {
   parseUrl,
   toText,
 } from "../shared/primordials.ts";
+import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import { realOriginOf, realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
 export { realOriginOf };
@@ -146,7 +147,10 @@ export function createWindowGuard(
   };
 
   const navigate = (target: object, url: unknown, replace: boolean) => {
-    const proxied = swapBlob(ctx.toProxy(toText(url)));
+    const text = toText(url);
+    // Code for another site's window is dropped, as a browser drops a cross-origin javascript: navigation.
+    if (rewriteJavascriptUrl(text, "null") !== null) return;
+    const proxied = swapBlob(ctx.toProxy(text));
     // location and its members cannot be redefined by a page.
     const location = (target as { location: Location }).location;
     if (replace) invoke(location.replace, location, [proxied]);

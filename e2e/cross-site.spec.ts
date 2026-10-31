@@ -91,3 +91,11 @@ test("shows a storage change only to windows of the site that made it", async ({
   await expect(page.locator("#events")).toContainText('["k","v2",true]');
   await expect(other.locator("#events")).toHaveText("");
 });
+
+test("runs no code another site sends to its top through javascript: URLs", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/");
+  // WebKit holds the load event while the frame's javascript: navigations are pending, so this waits for less.
+  await page.goto("/~/https/site-a.test/xs-js-host", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({ pwned: 0 });
+});

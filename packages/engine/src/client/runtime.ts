@@ -146,6 +146,8 @@ export function install(
         {
           ...locationCalls(location, invoke, blobs.swap),
           real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
+          // The caller is this realm, whichever window the stand-in navigates.
+          owner: () => originOf(ctx.realUrl()),
         },
         win.Location.prototype,
       );

@@ -34,7 +34,7 @@ export interface GiriciHelpers {
   M(url: unknown): string;
   P(value: unknown): unknown;
   /** A javascript: URL's code. A string result is the window's next document, so it comes back with the runtime. */
-  J(code: unknown): string | undefined;
+  J(code: unknown, owner?: unknown): string | undefined;
   W(value: unknown): unknown;
   realOrigin(): string;
   site(): string | undefined;
@@ -106,7 +106,9 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     H: (html) => env.rewrite.html(toText(html)),
     M: (url) => env.rewrite.metaUrl(toText(url)),
     P: (value) => env.messageTarget(value),
-    J: (code) => {
+    J: (code, owner) => {
+      // A browser runs a javascript: URL only for a document of the target's origin; another site's is dropped.
+      if (owner !== env.realOrigin()) return undefined;
       const result = env.indirectEval(env.rewrite.js(toText(code)));
       return typeof result === "string" ? env.rewrite.srcdoc(result) : undefined;
     },

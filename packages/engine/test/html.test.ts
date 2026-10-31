@@ -62,7 +62,7 @@ describe("URL attributes", () => {
     ],
     [
       "<a href=\"javascript:location='https://x.test/'\">",
-      "<a href=\"javascript:__g$.J(&quot;location='https://x.test/'&quot;)\">",
+      "<a href=\"javascript:__g$.J(&quot;location='https://x.test/'&quot;,&quot;https://site.test&quot;)\">",
     ],
   ])("rewrites %s", (input, output) => {
     expect(rw(input)).toBe(output);
@@ -165,7 +165,7 @@ describe("documents that are not well formed", () => {
 
   it("survives URLs and bases that are not web URLs", () => {
     expect(rw('<a href="java&#10;script:void(0)">x</a>')).toBe(
-      '<a href="javascript:__g$.J(&quot;void(0)&quot;)">x</a>',
+      '<a href="javascript:__g$.J(&quot;void(0)&quot;,&quot;https://site.test&quot;)">x</a>',
     );
     expect(rw('<base href="ftp://x.test/"><a href="y">')).toBe('<base href="ftp://x.test/"><a href="y">');
   });

@@ -40,19 +40,35 @@ describe("rewriteUrl", () => {
   });
 
   it("runs javascript: URLs through the runtime of the window they navigate", () => {
-    expect(rewriteUrl("javascript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)")');
+    expect(rewriteUrl("javascript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)","https://site.test")');
     // The browser drops tabs and newlines, trims the ends and percent-decodes the code, so the helper gets what would run.
-    expect(rewriteUrl(" Java\nScript:'<b>%41</b>' ", base, origin)).toBe(`javascript:__g$.J("'<b>A</b>'")`);
-    expect(rewriteUrl("javascript:'100%25'", base, origin)).toBe(`javascript:__g$.J("'100%25'")`);
-    expect(rewriteUrl("javascript:'%E2%9C%93 %ZZ'", base, origin)).toBe(`javascript:__g$.J("'\u2713 %25ZZ'")`);
+    expect(rewriteUrl(" Java\nScript:'<b>%41</b>' ", base, origin)).toBe(
+      `javascript:__g$.J("'<b>A</b>'","https://site.test")`,
+    );
+    expect(rewriteUrl("javascript:'100%25'", base, origin)).toBe(`javascript:__g$.J("'100%25'","https://site.test")`);
+    expect(rewriteUrl("javascript:'%E2%9C%93 %ZZ'", base, origin)).toBe(
+      `javascript:__g$.J("'\u2713 %25ZZ'","https://site.test")`,
+    );
   });
 
-  it("wraps a javascript: URL once, and only one that calls the helper with a single string", () => {
+  it("wraps a javascript: URL once, and only one that calls the helper with its own owner", () => {
     const wrapped = rewriteUrl("javascript:'%'", base, origin);
     expect(rewriteUrl(wrapped, base, origin)).toBe(wrapped);
-    const smuggled = `javascript:__g$.J("1"),'<script>x</script>'`;
-    expect(rewriteJavascriptUrl(smuggled)).toBe(`javascript:__g$.J(${JSON.stringify(smuggled.slice(11))})`);
-    expect(rewriteJavascriptUrl("https://x.test/")).toBeNull();
+    const smuggled = `javascript:__g$.J("1","https://site.test"),'<script>x</script>'`;
+    expect(rewriteJavascriptUrl(smuggled, "https://site.test")).toBe(
+      `javascript:__g$.J(${JSON.stringify(smuggled.slice(11))},"https://site.test")`,
+    );
+    expect(rewriteJavascriptUrl("https://x.test/", "https://site.test")).toBeNull();
+  });
+
+  it("wraps again a URL written for another owner, so it runs with the writer's origin", () => {
+    const borrowed = 'javascript:__g$.J("x","https://victim.test")';
+    expect(rewriteJavascriptUrl(borrowed, "https://evil.test")).toBe(
+      `javascript:__g$.J(${JSON.stringify(borrowed.slice(11))},"https://evil.test")`,
+    );
+    expect(rewriteUrl("javascript:x", new URL("https://cdn.test/"), origin, "https://site.test")).toBe(
+      'javascript:__g$.J("x","https://site.test")',
+    );
   });
 
   it("gives a wrapped javascript: URL back as the page wrote it", () => {
@@ -73,7 +89,7 @@ describe("rewriteUrl", () => {
   });
 
   it("never throws on URLs or bases that are not web URLs", () => {
-    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)")');
+    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)","https://site.test")');
     expect(rewriteUrl("/x", new URL("ftp://x.test/"), origin)).toBe("/x");
     expect(rewriteUrl("http://proxy.test/other", new URL("about:blank"), origin)).toBe("http://proxy.test/other");
     expect(rewriteUrl("https://other.test/", new URL("about:blank"), origin)).toBe("/~/https/other.test/");
@@ -112,11 +128,11 @@ describe("rewriteSrcset", () => {
 });
 
 describe("with built-ins the page replaced", () => {
-  const smuggled = `javascript:__g$.J("1"),'<script>x</script>'`;
+  const smuggled = `javascript:__g$.J("1","https://site.test"),'<script>x</script>'`;
   const javascriptCases = () => [
     rewriteUrl(" Java\nScript:'%E2%9C%93 %ZZ \u{1F600}' ", base, origin),
-    rewriteJavascriptUrl(smuggled),
-    unrewriteUrl(`javascript:__g$.J("'50%2525'")`, base, origin),
+    rewriteJavascriptUrl(smuggled, "https://site.test"),
+    unrewriteUrl(`javascript:__g$.J("'50%2525'","https://site.test")`, base, origin),
   ];
   const javascriptExpected = javascriptCases();
   const JAVASCRIPT_BUILTINS: Array<[string, object, PropertyKey, PropertyDescriptor]> = [

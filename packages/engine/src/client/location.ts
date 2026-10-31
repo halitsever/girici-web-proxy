@@ -6,6 +6,7 @@ import {
   indexOf,
   isWebUrl,
   newUrl,
+  originOf,
   setUrlPart,
   sliceOf,
   toText,
@@ -18,6 +19,8 @@ export interface LocationEnv {
   navigate(url: string, mode: "assign" | "replace"): void;
   reload(): void;
   setHash(hash: string): void;
+  /** The real origin of the realm that navigates, which its javascript: URLs carry; defaults to `real()`'s. */
+  owner?(): string;
 }
 
 export type FakeLocation = Pick<
@@ -46,7 +49,7 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
   const go = (value: unknown, mode: "assign" | "replace") => {
     // Converted once, so a value cannot read as a web URL to the check and as javascript: to the parser.
     const text = toText(value);
-    const script = rewriteJavascriptUrl(text);
+    const script = rewriteJavascriptUrl(text, env.owner ? env.owner() : originOf(env.real()));
     if (script !== null) {
       env.navigate(script, mode);
       return;

@@ -952,6 +952,51 @@ const XS_CHILD = page(
   `<script>parent.postMessage({ from: "xs-child", frameElement: window.frameElement === null }, "*");</script>`,
 );
 
+// Every route a cross-site frame has to send code to its top; none of it may run there.
+const XS_JS_HOST = page(
+  "Cross-site javascript host",
+  `<pre id="results"></pre><iframe src="https://site-b.test/xs-js-child"></iframe>
+<script>
+  window.pwned = 0;
+  addEventListener("message", (event) => {
+    if (event.data !== "xs-js-done") return;
+    setTimeout(() => {
+      document.getElementById("results").textContent = JSON.stringify({ pwned: window.pwned });
+    }, 1500);
+  });
+</script>`,
+);
+
+const XS_JS_CHILD = page(
+  "Cross-site javascript child",
+  `<script>
+  const code = "javascript:void(window.pwned = (window.pwned || 0) + 1)";
+  const attempt = (run) => {
+    try {
+      run();
+    } catch {
+      // A refusal may throw; the host only counts what ran.
+    }
+  };
+  attempt(() => {
+    top.location = code;
+  });
+  attempt(() => {
+    parent.location.href = code;
+  });
+  attempt(() => top.location.replace(code));
+  attempt(() => open(code, "_top"));
+  attempt(() => {
+    const link = document.createElement("a");
+    link.href = code;
+    link.target = "_top";
+    document.body.appendChild(link);
+    link.click();
+  });
+  parent.postMessage("xs-js-done", "*");
+</script>`,
+);
+
 const XS_OPENER = page(
   "Cross-site opener",
   `<button id="open">open</button><button id="doc-open">document.open</button><button id="check">check</button>
@@ -1591,6 +1636,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/blob-frame": html(BLOB_FRAME),
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
+    "/xs-js-host": html(XS_JS_HOST),
     "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
     "/reuse-same": html(REUSE_SAME),
@@ -1761,6 +1807,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/storage-events": html(STORAGE_EVENTS),
     "/xs-child": html(XS_CHILD),
     "/xs-opened": html(XS_OPENED),
+    "/xs-js-child": html(XS_JS_CHILD),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(

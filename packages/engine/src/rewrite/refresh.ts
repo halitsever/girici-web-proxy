@@ -9,8 +9,9 @@ export function rewriteRefresh(
   base: URL,
   origin: string,
   swapBlob: (url: string) => string = (url) => url,
+  owner?: string,
 ): string {
-  return mapRefresh(value, (target) => swapBlob(rewriteUrl(target, base, origin)));
+  return mapRefresh(value, (target) => swapBlob(rewriteUrl(target, base, origin, owner)));
 }
 
 /** Maps the URL of a refresh value; a value whose URL stays the same comes back exactly as written. */

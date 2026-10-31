@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
-import { lowerCase, setHas, trim } from "../shared/primordials.ts";
+import { isWebUrl, lowerCase, originOf, setHas, trim } from "../shared/primordials.ts";
 import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
 import { rewriteCss } from "./css.ts";
 import { rewriteJs } from "./js.ts";
@@ -15,6 +15,8 @@ export interface HtmlRewriteOptions {
   frameInject?: (base: URL) => string;
   /** The runtime's blob swap for URLs that load a document, so a blob page starts with the runtime in place. */
   swapBlob?: (url: string) => string;
+  /** The document's real origin, which its javascript: URLs carry; a `<base>` does not change it. */
+  owner?: string;
 }
 
 interface Attribute {
@@ -62,6 +64,7 @@ class HtmlRewriter {
   readonly #scripts: boolean;
   readonly #output: MagicString;
   #base: URL;
+  readonly #owner: string;
   #baseSeen = false;
   #injectAt = 0;
   #injectFrozen = false;
@@ -76,6 +79,7 @@ class HtmlRewriter {
     this.#scripts = options.scripts ?? true;
     this.#output = new MagicString(html);
     this.#base = options.url;
+    this.#owner = options.owner ?? (isWebUrl(options.url) ? originOf(options.url) : "null");
   }
 
   run(): string {
@@ -190,8 +194,8 @@ class HtmlRewriter {
         return value;
       }
       // A javascript: URL is left as written where scripts are not rewritten.
-      if (!this.#scripts && rewriteJavascriptUrl(value) !== null) return value;
-      const rewritten = rewriteUrl(value, this.#base, origin);
+      if (!this.#scripts && rewriteJavascriptUrl(value, this.#owner) !== null) return value;
+      const rewritten = rewriteUrl(value, this.#base, origin, this.#owner);
       if (tag === "base" && name === "href" && !this.#baseSeen) {
         this.#baseSeen = true;
         try {
@@ -218,7 +222,7 @@ class HtmlRewriter {
     if (name.startsWith("on")) return this.#scripts ? rewriteJs(value, { kind: "handler" }) : value;
     if (tag === "iframe" && name === "srcdoc") {
       const { frameInject } = this.#options;
-      if (!frameInject) return rewriteHtml(value, { url: this.#base, origin, scripts: false });
+      if (!frameInject) return rewriteHtml(value, { url: this.#base, origin, scripts: false, owner: this.#owner });
       return rewriteHtml(value, {
         url: this.#base,
         origin,
@@ -226,10 +230,11 @@ class HtmlRewriter {
         inject: frameInject(this.#base),
         frameInject,
         swapBlob: this.#options.swapBlob,
+        owner: this.#owner,
       });
     }
     if (tag === "meta" && name === "content" && keyword(attribs["http-equiv"]) === "refresh") {
-      return rewriteRefresh(value, this.#base, origin, this.#options.swapBlob);
+      return rewriteRefresh(value, this.#base, origin, this.#options.swapBlob, this.#owner);
     }
     return value;
   }

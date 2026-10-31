@@ -177,7 +177,13 @@ describe("createHelpers", () => {
 
   it("J runs a javascript: URL's code and puts the runtime in front of a document it makes", () => {
     const { helpers } = setup();
-    expect(helpers.J("'doc'")).toBe("<script data-engine></script><p>doc</p>");
-    expect(helpers.J("void 0")).toBeUndefined();
+    expect(helpers.J("'doc'", "https://site.test")).toBe("<script data-engine></script><p>doc</p>");
+    expect(helpers.J("void 0", "https://site.test")).toBeUndefined();
+  });
+
+  it("J runs nothing for a javascript: URL another origin wrote", () => {
+    const { helpers } = setup();
+    expect(helpers.J("'doc'", "https://other.test")).toBeUndefined();
+    expect(helpers.J("'doc'")).toBeUndefined();
   });
 });

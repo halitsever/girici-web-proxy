@@ -39,9 +39,12 @@ const space = () => " ";
 const PERCENT = /%/g;
 const escapedPercent = () => "%25";
 
-/** Rewrites a URL found in a page so that requests and navigations stay on the proxy. */
-export function rewriteUrl(raw: string, base: URL, origin: string): string {
-  const script = rewriteJavascriptUrl(raw);
+/**
+ * Rewrites a URL found in a page so that requests and navigations stay on the proxy. `owner` is the real origin of the
+ * document the URL belongs to, which a javascript: URL carries; it defaults to the base's.
+ */
+export function rewriteUrl(raw: string, base: URL, origin: string, owner?: string): string {
+  const script = rewriteJavascriptUrl(raw, owner ?? (isWeb(base) ? originOf(base) : "null"));
   if (script !== null) return script;
   // Browsers ignore ASCII whitespace around URL attributes.
   const value = replaceAll(raw, EDGE_WHITESPACE, none);
@@ -73,8 +76,8 @@ export function rewriteUrl(raw: string, base: URL, origin: string): string {
 
 /** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */
 export function unrewriteUrl(value: string, base: URL, origin: string): string {
-  const code = wrappedJavascript(value);
-  if (code !== null) return `javascript:${code}`;
+  const wrapped = wrappedJavascript(value);
+  if (wrapped !== null) return `javascript:${wrapped.code}`;
   if (!isWeb(base)) return value;
   // blob:, data: and other non-web schemes are the page's own and never one of our proxy URLs.
   const scheme = exec(SCHEME, value)?.[0];
@@ -94,24 +97,29 @@ export function unrewriteUrl(value: string, base: URL, origin: string): string {
 /**
  * A javascript: URL runs in the window it navigates, and a string result becomes that window's new document. The code
  * goes to the window's runtime helper, which rewrites it and puts the runtime in front of any document it makes; a
- * window without the runtime has no helper, so its navigation fails. Null for any other URL.
+ * window without the runtime has no helper, so its navigation fails. The helper runs the code only when `owner`, the
+ * real origin of the document that wrote the URL, is the window's own, as a browser would. Null for any other URL.
  */
-export function rewriteJavascriptUrl(raw: string): string | null {
+export function rewriteJavascriptUrl(raw: string, owner: string): string | null {
   const value = replaceAll(replaceAll(raw, URL_EDGES, none), TAB_OR_NEWLINE, none);
   if (!exec(JAVASCRIPT, value)) return null;
-  // Only an exact call with one string literal is left alone; anything after it would run unwrapped.
-  if (wrappedJavascript(value) !== null) return value;
+  // Only an exact call with this owner is left alone: anything after it would run unwrapped, and another owner may
+  // have been written by the page to borrow a different origin.
+  if (wrappedJavascript(value)?.owner === owner) return value;
   const code = percentDecode(sliceOf(value, "javascript:".length));
   // The browser percent-decodes the URL before running it, so a % in the literal is escaped once more.
-  return `${HELPER_CALL}${replaceAll(quoteJson(code), PERCENT, escapedPercent)})`;
+  const call = `${quoteJson(code)},${quoteJson(owner)}`;
+  return `${HELPER_CALL}${replaceAll(call, PERCENT, escapedPercent)})`;
 }
 
-/** The page's code inside a URL this module wrapped, or null. */
-function wrappedJavascript(value: string): string | null {
+/** The page's code and its owner inside a URL this module wrapped, or null. */
+function wrappedJavascript(value: string): { code: string; owner: string } | null {
   if (!startsWith(value, HELPER_CALL) || !endsWith(value, ")")) return null;
   try {
-    const code = parseJson(percentDecode(sliceOf(value, HELPER_CALL.length, -1)));
-    return typeof code === "string" ? code : null;
+    const args = parseJson(`[${percentDecode(sliceOf(value, HELPER_CALL.length, -1))}]`) as unknown[];
+    const code = args[0];
+    const owner = args[1];
+    return args.length === 2 && typeof code === "string" && typeof owner === "string" ? { code, owner } : null;
   } catch {
     return null;
   }

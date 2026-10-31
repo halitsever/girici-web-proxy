@@ -184,6 +184,20 @@ describe("createWindowGuard", () => {
     expect(set).toEqual([`swapped:${proxy}/~/proxied/blob:x`]);
   });
 
+  it("drops javascript: URLs sent to a restricted window, as a browser drops cross-origin ones", () => {
+    const set: unknown[] = [];
+    const guard = guardFor("https://a.test");
+    const target = fakeWindow(`${proxy}/~/https/b.test/`);
+    const nativeLocation = { replace: (url: string) => set.push(["replace", url]) };
+    Object.defineProperty(nativeLocation, "href", { set: (url: string) => set.push(["href", url]) });
+    target.location = nativeLocation as unknown as { href: string };
+    const wrapped = guard.wrap(target) as { location: { href: string; replace(url: string): void } };
+    wrapped.location.href = "javascript:alert(1)";
+    wrapped.location.replace(" JavaScript:alert(1)");
+    (wrapped as unknown as Record<string, unknown>).location = "java\nscript:alert(1)";
+    expect(set).toEqual([]);
+  });
+
   it("navigates a restricted window but never reads its address", () => {
     const navigated: string[] = [];
     const set: unknown[] = [];

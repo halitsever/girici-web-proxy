@@ -24,10 +24,11 @@ export function rewriteAttribute(
   base: URL,
   origin: string,
   html?: (markup: string) => string,
+  owner?: string,
 ): string {
   switch (attributeKind(element, name)) {
     case "url":
-      return rewriteUrl(value, base, origin);
+      return rewriteUrl(value, base, origin, owner);
     case "srcset":
       return rewriteSrcset(value, (url) => rewriteUrl(url, base, origin));
     // The proxy rewrites scripts and styles, so their hash no longer matches; an empty value turns the check off.
