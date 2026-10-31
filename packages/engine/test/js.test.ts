@@ -274,7 +274,7 @@ describe("location targets next to comments", () => {
   });
 
   it("replaces the page's own operator, not one written in a comment", () => {
-    expect(rewriteJs("location /*+=*/ += u")).toBe("location /*+=*/ = __g$.N(location, __g$.L(location) + (u))");
+    expect(rewriteJs("location /*+=*/ += u")).toBe("location = __g$.N(location, __g$.L(location) + (u))");
   });
 
   it("leaves super.location targets as written", () => {

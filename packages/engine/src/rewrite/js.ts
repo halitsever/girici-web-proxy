@@ -33,6 +33,7 @@ const WINDOW_LIKE = new Set([
 ]);
 const WRAPPED_NAME = /location|top|parent|opener|frames/;
 const LOGICAL = new Set(["&&=", "||=", "??="]);
+const LINE_BREAK = /[\n\r\u2028\u2029]/;
 // A setter keeps a local binding named `location` working, while a real Location gets the converted URL.
 const LOCATION_SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
 
@@ -171,7 +172,12 @@ class LocationRewriter {
         this.#assignment(node);
         return;
       case "UpdateExpression":
-        this.visit(node.argument, "target", false);
+        if (isLocationIdentifier(node.argument)) {
+          // Converted like `location = location + 1`, with the number the page's operator would make.
+          const step = node.operator === "++" ? "+" : "-";
+          this.#output.overwrite(start(node), end(node), `(location = __g$.N(location, +__g$.L(location) ${step} 1))`);
+        } else if (isLocationMember(node.argument)) this.#locationTarget(node.argument);
+        else this.visit(node.argument, "target", false);
         return;
       case "UnaryExpression":
         // An undeclared name stays safe under typeof only while it is left bare.
@@ -305,9 +311,14 @@ class LocationRewriter {
         // Logical assignment converts only when it assigns, so its operator stays and only the value goes through N.
         if (node.operator === "=" || LOGICAL.has(node.operator)) this.#call("__g$.N(location, (", "))", right);
         else {
-          const operator = this.#tokenAfter(end(left));
-          this.#output.overwrite(operator, operator + node.operator.length, "=");
-          this.#call(`__g$.N(location, __g$.L(location) ${node.operator.slice(0, -1)} (`, "))", right);
+          // Everything up to the value is replaced, so no comment or parenthesis in between decides what is kept.
+          const operator = node.operator.slice(0, -1);
+          this.#output.overwrite(
+            start(node),
+            start(right),
+            `location = __g$.N(location, __g$.L(location) ${operator} (`,
+          );
+          this.#closeAfter(right, node, "))");
         }
       }
     } else if (left.type === "MemberExpression" && node.operator === "=" && isLocationMember(left)) {
@@ -315,7 +326,7 @@ class LocationRewriter {
       const operator = this.#tokenAfter(end(left.object));
       this.#output.appendRight(start(node), "__g$.S(");
       this.#output.overwrite(operator, start(right), ', "location", (');
-      this.#output.appendLeft(end(right), "))");
+      this.#closeAfter(right, node, "))");
       this.visit(left.object, "read", false);
     } else if (left.type === "MemberExpression" && isLocationMember(left)) {
       // The operator stays, so the value is evaluated only when the page's own operator would evaluate it.
@@ -327,6 +338,15 @@ class LocationRewriter {
       this.visit(left, (left as ESTree.Node).type === "MemberExpression" ? "target" : "assign", false);
     }
     this.visit(right, "read", false);
+  }
+
+  /**
+   * Closes a call opened before `value`. Parentheses the page put around the value were replaced with the opening, so
+   * the text after it up to the end of `node`, its closing parentheses and comments, is replaced too.
+   */
+  #closeAfter(value: ESTree.Node, node: ESTree.Node, close: string): void {
+    if (end(value) < end(node)) this.#output.overwrite(end(value), end(node), close);
+    else this.#output.appendLeft(end(value), close);
   }
 
   /** `obj.location` as a target: the object is evaluated in place, and its `v` reads and writes through S. */
@@ -377,23 +397,50 @@ class LocationRewriter {
     return position;
   }
 
+  /** Past whitespace and every comment the parser skips, the HTML-like `<!--` and line-start `-->` of scripts included. */
   #nextToken(index: number): number {
     const source = this.#source;
+    let lineStart = this.#atLineStart(index);
     while (index < source.length) {
-      const char = source[index];
+      const char = source[index] as string;
       if (char === "/" && source[index + 1] === "*") {
         const close = source.indexOf("*/", index + 2);
-        index = close < 0 ? source.length : close + 2;
-      } else if (char === "/" && source[index + 1] === "/") {
-        const newline = source.indexOf("\n", index);
-        index = newline < 0 ? source.length : newline + 1;
-      } else if (char !== undefined && /\s/.test(char)) {
+        const next = close < 0 ? source.length : close + 2;
+        // A block comment that holds a line break starts a new line for `-->`.
+        if (LINE_BREAK.test(source.slice(index, next))) lineStart = true;
+        index = next;
+      } else if (
+        (char === "/" && source[index + 1] === "/") ||
+        source.slice(index, index + 4) === "<!--" ||
+        (lineStart && source.slice(index, index + 3) === "-->")
+      ) {
+        index = this.#lineEnd(index);
+      } else if (LINE_BREAK.test(char)) {
+        lineStart = true;
+        index++;
+      } else if (/\s/.test(char)) {
         index++;
       } else {
         return index;
       }
     }
     return index;
+  }
+
+  #lineEnd(index: number): number {
+    const source = this.#source;
+    while (index < source.length && !LINE_BREAK.test(source[index] as string)) index++;
+    return index;
+  }
+
+  #atLineStart(index: number): boolean {
+    const source = this.#source;
+    for (let position = index - 1; position >= 0; position--) {
+      const char = source[position] as string;
+      if (LINE_BREAK.test(char)) return true;
+      if (!/\s/.test(char)) return false;
+    }
+    return true;
   }
 }
 
