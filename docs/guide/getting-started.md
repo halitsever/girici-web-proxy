@@ -48,3 +48,4 @@ media, stays inside Girici.
 - [How it works](/guide/how-it-works) for the architecture.
 - [Configuration](/guide/configuration) for environment variables.
 - [Running with Docker](/guide/docker) for deployment.
+- [Reverse proxies](/guide/reverse-proxy) and [Cloud platforms](/guide/cloud-platforms) to put it online.

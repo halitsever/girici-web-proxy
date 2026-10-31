@@ -54,6 +54,8 @@ subresources. Turning on public access opens the data path to everyone and skips
 
 ## Known limitations
 
+The [threat model](/guide/threat-model) covers these in more depth, along with what the operator can see.
+
 - **Single origin.** Every proxied site shares one browser origin, so isolation between sites is
   limited. `HttpOnly` is not a boundary here.
 - **Computed access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other

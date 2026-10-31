@@ -13,6 +13,18 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: "Admin and auth", link: "/guide/admin-and-auth" },
       { text: "Configuration", link: "/guide/configuration" },
       { text: "Running with Docker", link: "/guide/docker" },
+      { text: "Supported sites", link: "/guide/supported-sites" },
+    ],
+  },
+  {
+    text: "Operate",
+    items: [
+      { text: "Reverse proxies", link: "/guide/reverse-proxy" },
+      { text: "Cloud platforms", link: "/guide/cloud-platforms" },
+      { text: "Monitoring", link: "/guide/monitoring" },
+      { text: "Troubleshooting and FAQ", link: "/guide/troubleshooting" },
+      { text: "Migrating from v1", link: "/guide/migrating-from-v1" },
+      { text: "Threat model", link: "/guide/threat-model" },
     ],
   },
   {
