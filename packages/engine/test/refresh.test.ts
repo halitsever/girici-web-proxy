@@ -73,6 +73,10 @@ describe("rewriteRefresh", () => {
     for (const value of tricky) expect(rewrite(value)).not.toMatch(/url=['"]/);
   });
 
+  it.each(tricky)("writes %j the same in a document with a sealed address", (value) => {
+    expect(rewriteRefresh(value, base, origin, true)).toBe(rewrite(value));
+  });
+
   it("keeps a refresh of the page itself", () => {
     expect(rewrite("3")).toBe("3");
   });
