@@ -1,0 +1,39 @@
+version: 2
+updates:
+  # Runtime dependency and base image bumps use "fix" so semantic-release ships them in a new image.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: fix
+      prefix-development: build
+      include: scope
+    groups:
+      production:
+        dependency-type: production
+        update-types: [minor, patch]
+      development:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: fix
+    ignore:
+      # Node majors change the runtime; move to a new LTS by hand.
+      - dependency-name: node
+        update-types: [version-update:semver-major]

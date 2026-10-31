@@ -5,6 +5,7 @@ export default defineConfig({
   testIgnore: process.env.SMOKE ? [] : ["smoke/**"],
   // The fixture servers and the escape trap are shared, so tests run one at a time.
   workers: 1,
+  forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: "http://127.0.0.1:41000",

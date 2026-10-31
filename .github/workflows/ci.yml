@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Every release pushes and signs the same tags in each of these repositories.
+  RELEASE_IMAGES: halitsever/girici-web-proxy ghcr.io/halitsever/girici-web-proxy
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -69,3 +73,80 @@ jobs:
           path: |
             playwright-report
             test-results
+
+  node22:
+    name: unit tests (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  # semantic-release pushes the images in its prepare step, so a failed push leaves no tag and no release.
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'halitsever/girici-web-proxy'
+    needs: [check, node22, docker, e2e]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      digest: ${{ steps.release.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASS }}
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Signing runs on its own so a Sigstore outage cannot hold back a release that is already out.
+  sign:
+    needs: release
+    if: needs.release.outputs.digest != ''
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+    steps:
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASS }}
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Sign the image by digest
+        env:
+          DIGEST: ${{ needs.release.outputs.digest }}
+        run: |
+          for image in $RELEASE_IMAGES; do
+            cosign sign --yes "$image@$DIGEST"
+          done
