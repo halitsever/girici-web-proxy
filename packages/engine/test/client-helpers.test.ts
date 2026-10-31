@@ -20,12 +20,12 @@ function setup() {
       jsBody: (c) => c,
       html: (h) => h,
       unhtml: (h) => h,
-      srcdoc: (h) => h,
+      srcdoc: (h) => `<script data-engine></script>${h}`,
       unsrcdoc: (h) => h,
       importSpecifier: (s) => s,
       metaUrl: (u) => u,
     },
-    indirectEval: (code) => code,
+    indirectEval: (code) => (code === "'doc'" ? "<p>doc</p>" : undefined),
     messageTarget: (value) => value,
     renew: () => false,
   });
@@ -123,5 +123,11 @@ describe("createHelpers", () => {
     expect(helpers.M("/~/x")).toBe("real:/~/x");
     expect(helpers.P("w")).toEqual({ standIn: "w" });
     expect(helpers.renew()).toBe(true);
+  });
+
+  it("J runs a javascript: URL's code and puts the runtime in front of a document it makes", () => {
+    const { helpers } = setup();
+    expect(helpers.J("'doc'")).toBe("<script data-engine></script><p>doc</p>");
+    expect(helpers.J("void 0")).toBeUndefined();
   });
 });

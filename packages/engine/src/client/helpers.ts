@@ -24,9 +24,14 @@ export interface GiriciHelpers {
   H(html: unknown): string;
   M(url: unknown): string;
   P(value: unknown): unknown;
+  /** A javascript: URL's code. A string result is the window's next document, so it comes back with the runtime. */
+  J(code: unknown): string | undefined;
   /** The engine script of a document that reuses this window calls this instead of installing again. */
   renew(): boolean;
 }
+
+// Taken at load, so a page that replaced String never sees the code on its way to the rewriter.
+const toText = String;
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
 export function createHelpers(env: HelperEnv): GiriciHelpers {
@@ -75,6 +80,10 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     H: (html) => env.rewrite.html(String(html)),
     M: (url) => env.rewrite.metaUrl(String(url)),
     P: (value) => env.messageTarget(value),
+    J: (code) => {
+      const result = env.indirectEval(env.rewrite.js(toText(code)));
+      return typeof result === "string" ? env.rewrite.srcdoc(result) : undefined;
+    },
     renew: () => env.renew(),
   };
 }

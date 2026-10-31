@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
 
 const base = new URL("https://site.test/dir/page.html");
 const origin = "http://proxy.test";
@@ -30,12 +30,31 @@ describe("rewriteUrl", () => {
       "mailto:a@b.test",
       "tel:1",
       "about:blank",
-      "javascript:void(0)",
       "ftp://x.test/",
       "http://[::1",
     ]) {
       expect(rewriteUrl(raw, base, origin)).toBe(raw);
     }
+  });
+
+  it("runs javascript: URLs through the runtime of the window they navigate", () => {
+    expect(rewriteUrl("javascript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)")');
+    // The browser drops tabs and newlines, trims the ends and percent-decodes the code, so the helper gets what would run.
+    expect(rewriteUrl(" Java\nScript:'<b>%41</b>' ", base, origin)).toBe(`javascript:__g$.J("'<b>A</b>'")`);
+    expect(rewriteUrl("javascript:'100%25'", base, origin)).toBe(`javascript:__g$.J("'100%25'")`);
+    expect(rewriteUrl("javascript:'%E2%9C%93 %ZZ'", base, origin)).toBe(`javascript:__g$.J("'\u2713 %25ZZ'")`);
+  });
+
+  it("wraps a javascript: URL once, and only one that calls the helper with a single string", () => {
+    const wrapped = rewriteUrl("javascript:'%'", base, origin);
+    expect(rewriteUrl(wrapped, base, origin)).toBe(wrapped);
+    const smuggled = `javascript:__g$.J("1"),'<script>x</script>'`;
+    expect(rewriteJavascriptUrl(smuggled)).toBe(`javascript:__g$.J(${JSON.stringify(smuggled.slice(11))})`);
+    expect(rewriteJavascriptUrl("https://x.test/")).toBeNull();
+  });
+
+  it("gives a wrapped javascript: URL back as the page wrote it", () => {
+    expect(unrewriteUrl(rewriteUrl("javascript:'50%25 off'", base, origin), base, origin)).toBe("javascript:'50% off'");
   });
 
   it("is idempotent for URLs that are already ours", () => {
@@ -52,7 +71,7 @@ describe("rewriteUrl", () => {
   });
 
   it("never throws on URLs or bases that are not web URLs", () => {
-    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe("java\nscript:void(0)");
+    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)")');
     expect(rewriteUrl("/x", new URL("ftp://x.test/"), origin)).toBe("/x");
     expect(rewriteUrl("http://proxy.test/other", new URL("about:blank"), origin)).toBe("http://proxy.test/other");
     expect(rewriteUrl("https://other.test/", new URL("about:blank"), origin)).toBe("/~/https/other.test/");

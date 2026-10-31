@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
-import { rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
+import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
 import { rewriteCss } from "./css.ts";
 import { rewriteJs } from "./js.ts";
 import { rewriteRefresh } from "./refresh.ts";
@@ -46,7 +46,6 @@ const DROPPED_META = new Set([
   "origin-trial",
 ]);
 const JS_TYPE = /^(?:(?:text|application)\/(?:x-)?(?:java|ecma)script(?:1\.[0-5])?|text\/(?:jscript|livescript))$/i;
-const JAVASCRIPT_URL = /^\s*javascript:/i;
 
 /** Edits attribute and inline code ranges in place; the document is never re-serialised, so markup quirks survive. */
 export function rewriteHtml(html: string, options: HtmlRewriteOptions): string {
@@ -171,7 +170,8 @@ class HtmlRewriter {
       if (tag === "link" && name === "href" && !tokens(attribs.rel).some((rel) => FETCHED_LINK_RELS.has(rel))) {
         return value;
       }
-      if (JAVASCRIPT_URL.test(value)) return this.#scripts ? rewriteJavascriptUrl(value) : value;
+      // A javascript: URL is left as written where scripts are not rewritten.
+      if (!this.#scripts && rewriteJavascriptUrl(value) !== null) return value;
       const rewritten = rewriteUrl(value, this.#base, origin);
       if (tag === "base" && name === "href" && !this.#baseSeen) {
         this.#baseSeen = true;
@@ -240,19 +240,6 @@ class HtmlRewriter {
     const rewritten = rewrite(text);
     if (rewritten !== text) this.#output.overwrite(start, end, rewritten);
   }
-}
-
-/** The browser percent-decodes javascript: URLs before running them, so any % in the rewritten code is escaped again. */
-function rewriteJavascriptUrl(value: string): string {
-  const prefix = value.slice(0, value.indexOf(":") + 1);
-  let code: string;
-  try {
-    code = decodeURIComponent(value.slice(prefix.length));
-  } catch {
-    return value;
-  }
-  const rewritten = rewriteJs(code);
-  return rewritten === code ? value : prefix + rewritten.replace(/%/g, "%25");
 }
 
 /** Bare specifiers in "imports" stay keys; URL values and scope prefixes have to point at the proxy. */

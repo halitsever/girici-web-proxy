@@ -1,4 +1,5 @@
 import { encodeUrl } from "../shared/codec.ts";
+import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 
 export interface LocationEnv {
   real(): URL;
@@ -31,6 +32,11 @@ const NAVIGATING_PARTS: NavigatingPart[] = ["protocol", "host", "hostname", "por
 /** The real Location object cannot be replaced, so rewritten scripts get this stand-in that speaks in real URLs. */
 export function createFakeLocation(env: LocationEnv, proto: object = Object.prototype): FakeLocation {
   const go = (value: unknown, mode: "assign" | "replace") => {
+    const script = rewriteJavascriptUrl(String(value));
+    if (script !== null) {
+      env.navigate(script, mode);
+      return;
+    }
     const current = env.real();
     const target = new URL(String(value), current);
     if (isFragmentNavigation(target, current)) {

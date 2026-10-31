@@ -1,4 +1,5 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
+import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
@@ -173,6 +174,8 @@ function submitterField(win: Realm, submitter: HTMLElement | null): HTMLInputEle
 }
 
 function escapes(raw: string, ctx: UrlContext): boolean {
+  const script = rewriteJavascriptUrl(raw);
+  if (script !== null) return script !== raw;
   let url: URL;
   try {
     url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));

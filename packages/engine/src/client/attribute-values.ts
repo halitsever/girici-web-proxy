@@ -3,6 +3,7 @@ import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.t
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
 const SRCSET_ATTRIBUTES = new Set(["srcset", "imagesrcset"]);
+const WRAPPED_SCRIPT = "javascript:__g$.J(";
 const INTEGRITY_ELEMENTS = new Set(["script", "link"]);
 
 export type AttributeKind = "url" | "srcset" | "integrity" | "html";
@@ -49,7 +50,7 @@ export function restoreAttribute(
 ): string {
   const restore = (url: string) => {
     const trimmed = url.trim();
-    return trimmed.startsWith(PROXY_PREFIX) || trimmed.startsWith(`${origin}/`)
+    return trimmed.startsWith(PROXY_PREFIX) || trimmed.startsWith(`${origin}/`) || trimmed.startsWith(WRAPPED_SCRIPT)
       ? unrewriteUrl(trimmed, base, origin)
       : url;
   };

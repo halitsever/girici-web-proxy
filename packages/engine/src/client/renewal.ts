@@ -59,7 +59,7 @@ export function createRenew(
 /**
  * The engine script of a document that reuses a window renews the runtime already there. When that runtime cannot
  * (another engine version, a broken config), a reload gives the document a fresh window instead of the old state.
- * A reload never reuses the window, so this cannot loop.
+ * Chromium, Firefox and WebKit reuse only a window's initial blank document, so a reloaded page gets its own window.
  */
 export function renewExisting(helpers: unknown, reload: () => void): void {
   let renewed = false;
@@ -80,19 +80,30 @@ export interface DocumentListeners {
 /** Per-document state: a window the browser reuses for a new document runs these again with that document's config. */
 export class DocumentSteps {
   readonly #steps: Array<[string, (config: ClientConfig) => void]> = [];
+  #config: ClientConfig | null = null;
 
   add(name: string, step: (config: ClientConfig) => void): void {
     this.#steps.push([name, step]);
   }
 
   run(config: ClientConfig): void {
-    for (const [name, step] of this.#steps) {
-      try {
-        step(config);
-      } catch (error) {
-        // One browser difference should cost one step, not the whole document.
-        console.warn("Girici:", name, error);
-      }
+    this.#config = config;
+    for (const [name, step] of this.#steps) this.#runStep(name, step, config);
+  }
+
+  /** Runs the named steps again with the current config, for a document that document.open cleared. */
+  again(names: readonly string[]): void {
+    const config = this.#config;
+    if (!config) return;
+    for (const [name, step] of this.#steps) if (names.includes(name)) this.#runStep(name, step, config);
+  }
+
+  #runStep(name: string, step: (config: ClientConfig) => void, config: ClientConfig): void {
+    try {
+      step(config);
+    } catch (error) {
+      // One browser difference should cost one step, not the whole document.
+      console.warn("Girici:", name, error);
     }
   }
 }

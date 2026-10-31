@@ -1,12 +1,12 @@
 import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
-import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
+import type { ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
-import { installFrames, type FrameAdopter } from "./frames.ts";
+import { createChildConfig, installFrames, type FrameAdopter } from "./frames.ts";
 import { createHelpers } from "./helpers.ts";
 import { createInvoker, type Invoke } from "./invoke.ts";
 import { createFakeLocation, type LocationEnv } from "./location.ts";
@@ -68,14 +68,23 @@ export function install(
   const readContainer = serviceWorkerContainer(win);
   // Chromium gives the page that reuses a blank window the container the blank document read, without a controller,
   // so a window already headed for another page waits for that page before reading it.
-  let awaiting = navigating || headedElsewhere(win);
+  let awaiting = navigating || headedElsewhere(win, config.inherit?.origin ?? win.location.origin);
   const container = () => (awaiting ? null : readContainer());
   const nativeLocation = win.location;
   const ownLocation = locationCalls(nativeLocation, invoke);
   const steps = new DocumentSteps();
+  if (awaiting) {
+    const blank = win.document;
+    // A page that never arrives leaves the blank document in place; from its load on it listens like any other.
+    const lift = () => {
+      if (!awaiting || win.document !== blank) return;
+      awaiting = false;
+      steps.again(["listeners"]);
+    };
+    apply(win.EventTarget.prototype.addEventListener, win, ["load", lift, { once: true }]);
+  }
   const toolbarKeys = createToolbarKeys(win);
   const listeners: DocumentListeners[] = [toolbarKeys];
-  let current = config;
   // Only a document that inherits a page announces through that page; a proxied page has its own address.
   let inheritedAnnounce = config.inherit ? announce : undefined;
   const ownAnnounce: Announce = (url, init) =>
@@ -144,16 +153,7 @@ export function install(
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
   defineProperty(win, "__g$", { value: freeze(helpers), enumerable: false });
 
-  const childConfig = (): ClientConfig => {
-    const child: ClientConfig = {
-      v: PROTOCOL_VERSION,
-      cookies: cookies.snapshot(),
-      inherit: { origin: ctx.origin, base: ctx.realUrl().href },
-    };
-    if (current.cookiesBlocked !== undefined) child.cookiesBlocked = current.cookiesBlocked;
-    if (current.site !== undefined) child.site = current.site;
-    return child;
-  };
+  const childConfig = createChildConfig(ctx, () => cookies.snapshot(), steps, config);
 
   const installSteps: Array<[string, () => void]> = [
     ["document", () => (resetDomain = installDocument(win, ctx))],
@@ -179,6 +179,7 @@ export function install(
           (html) => helpers.H(html),
           rewrite.unhtml,
           (at) => frames?.walkFor(at),
+          (doc) => frames?.reopened(doc),
         ),
     ],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
@@ -210,7 +211,6 @@ export function install(
 
   steps.add("config", (next) => {
     awaiting &&= next === config;
-    current = next;
     inheritedAnnounce = next.inherit ? announce : undefined;
   });
   steps.add("document", () => resetDomain());
@@ -251,8 +251,8 @@ function locationCalls(location: Location, invoke: Invoke): Pick<LocationEnv, "n
   };
 }
 
-/** A blank frame whose element names a page to load: the browser will reuse this window for that page. */
-function headedElsewhere(win: Realm): boolean {
+/** A blank frame whose element names a web page to load: the browser will reuse this window for that page. */
+function headedElsewhere(win: Realm, origin: string): boolean {
   try {
     if (win.location.href !== "about:blank") return false;
     const frame = ownDescriptor(win, "frameElement")?.get;
@@ -260,7 +260,9 @@ function headedElsewhere(win: Realm): boolean {
     if (!element) return false;
     const getAttribute = win.Element.prototype.getAttribute;
     const src = apply(getAttribute, element, ["src"]) as string | null;
-    return !!src && src !== "about:blank" && apply(getAttribute, element, ["srcdoc"]) === null;
+    if (!src || apply(getAttribute, element, ["srcdoc"]) !== null) return false;
+    const { protocol } = new URL(src, origin);
+    return protocol === "http:" || protocol === "https:";
   } catch {
     return false;
   }

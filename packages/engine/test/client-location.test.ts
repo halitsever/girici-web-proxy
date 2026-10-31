@@ -74,4 +74,11 @@ describe("createFakeLocation", () => {
       location.href = "http://[bad";
     }).toThrow();
   });
+
+  it("hands javascript: URLs to the target window's runtime", () => {
+    const { location, calls } = setup();
+    location.href = "javascript:'<p>x</p>'";
+    location.replace("javascript:void 0");
+    expect(calls).toEqual([`assign javascript:__g$.J("'<p>x</p>'")`, 'replace javascript:__g$.J("void 0")']);
+  });
 });

@@ -37,22 +37,21 @@ test("keeps workers, nested workers and leaked or tampered constructors away fro
   });
 });
 
-test("gives every new same-origin window the runtime before page code can reach it", async ({
-  page,
-  context,
-  browserName,
-}) => {
+test("gives every new same-origin window the runtime before page code can reach it", async ({ page, context }) => {
   await openThroughUi(page, "https://site-a.test/doors-frames");
   await startBroadcast(context);
   await page.click("#start");
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 20_000 });
-  const { hooked, frameProbe, popupProbe } = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
-  // Object loads skip the service worker everywhere. WebKit loads them as frames, so it gets a window to hook;
-  // Chromium and Firefox are refused by the server and keep none.
-  expect(hooked.object).toBe(browserName === "webkit" ? true : "none");
-  delete hooked.object;
+  const { hooked, loaded, pip, frameProbe, popupProbe } = JSON.parse(
+    (await page.locator("#results").textContent()) ?? "{}",
+  );
   expect(Object.entries(hooked).filter(([, value]) => value !== true)).toEqual([]);
-  expect(Object.keys(hooked)).toHaveLength(29);
+  expect(Object.keys(hooked)).toHaveLength(37);
+  // Object and embed loads skip the service worker and get the server's inert answer. What remains is no window, a
+  // sandboxed one, or the blank window a failed object keeps, which must be hooked.
+  for (const state of Object.values(loaded)) expect(["none", "cross-origin", true]).toContain(state);
+  // Headless browsers refuse a Picture-in-Picture window; where one opens, it must be hooked.
+  expect([true, "unavailable"]).toContain(pip);
   expect(frameProbe).toEqual(closed);
   expect(popupProbe).toEqual(closed);
 });

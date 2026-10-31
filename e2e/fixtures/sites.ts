@@ -291,28 +291,51 @@ const DOORS_FRAMES = page(
 <script>
   ${PROBE}
   const hookedOf = (w) => Boolean(w) && Object.getOwnPropertyDescriptor(w, "__g$") !== undefined;
-  const frame = () => document.createElement("iframe");
+  // A window may be missing (the server refused the load) or sandboxed into another origin; neither reaches storage.
+  const stateOf = (w) => {
+    if (!w) return "none";
+    try {
+      return hookedOf(w);
+    } catch {
+      return "cross-origin";
+    }
+  };
+  // Frames name a page, as real ones do: a frame without src loads its blank document at once, and that load alone
+  // would adopt it.
+  const frame = () => {
+    const f = document.createElement("iframe");
+    f.src = "/page2";
+    return f;
+  };
+  const blankFrame = () => document.createElement("iframe");
   // A fresh empty element at the end of body, so a frame made in it is the last window.
   const box = () => document.getElementById("slot").appendChild(document.createElement("div"));
   const last = () => frames[frames.length - 1];
+  // Each case must make a window; one that makes none reports that instead of passing on an older frame.
+  const newest = (view, count) => (view.length > count ? view[view.length - 1] : "no window");
   const inBox = (insert) => {
+    const count = frames.length;
     insert(box(), frame());
-    return last();
+    return newest(window, count);
   };
-  // A shadow tree's frames are not indexed in every browser; one that is must be hooked.
-  const inShadow = (insert) => {
-    const before = frames.length;
-    insert(box().attachShadow({ mode: "open" }), frame());
-    return frames.length > before ? last() : "unindexed";
-  };
+  // Frames in a shadow tree are never indexed, so DocumentFragment insertions are reachable only through the hooked
+  // getters and have no case here.
   // A blank frame whose document has no element yet, for Document and DocumentType insertions.
   const inHost = (insert) => {
-    const host = box().appendChild(frame());
+    const host = box().appendChild(blankFrame());
     const doc = host.contentDocument;
     const child = host.contentWindow;
     doc.documentElement.remove();
     insert(doc, frame());
-    return child[0];
+    return newest(child, 0);
+  };
+  // A blank frame whose document keeps its elements, for setters that need a document element.
+  const inLoadedHost = (insert) => {
+    const host = box().appendChild(blankFrame());
+    const doc = host.contentDocument;
+    const child = host.contentWindow;
+    insert(doc, child);
+    return newest(child, 0);
   };
   const withDoctype = (doc) => {
     const doctype = doc.implementation.createDocumentType("html", "", "");
@@ -333,9 +356,39 @@ const DOORS_FRAMES = page(
     "Document.append": () => inHost((d, f) => d.append(f)),
     "Document.prepend": () => inHost((d, f) => d.prepend(f)),
     "Document.replaceChildren": () => inHost((d, f) => d.replaceChildren(f)),
-    "DocumentFragment.append": () => inShadow((r, f) => r.append(f)),
-    "DocumentFragment.prepend": () => inShadow((r, f) => r.prepend(f)),
-    "DocumentFragment.replaceChildren": () => inShadow((r, f) => r.replaceChildren(f)),
+    "Document.body": () =>
+      inLoadedHost((d) => {
+        const body = d.createElement("body");
+        const f = d.createElement("iframe");
+        f.src = "/page2";
+        body.append(f);
+        d.body = body;
+      }),
+    "table.caption": () =>
+      inBox((b, f) => {
+        const caption = document.createElement("caption");
+        caption.append(f);
+        b.appendChild(document.createElement("table")).caption = caption;
+      }),
+    "table.tHead": () =>
+      inBox((b, f) => {
+        const head = document.createElement("thead");
+        head.insertRow().insertCell().append(f);
+        b.appendChild(document.createElement("table")).tHead = head;
+      }),
+    "table.tFoot": () =>
+      inBox((b, f) => {
+        const foot = document.createElement("tfoot");
+        foot.insertRow().insertCell().append(f);
+        b.appendChild(document.createElement("table")).tFoot = foot;
+      }),
+    execCommand: () =>
+      inBox((b) => {
+        b.contentEditable = "true";
+        b.focus();
+        getSelection().selectAllChildren(b);
+        document.execCommand("insertHTML", false, "<iframe src='/page2'></iframe>");
+      }),
     "CharacterData.before": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).before(f)),
     "CharacterData.after": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).after(f)),
     "CharacterData.replaceWith": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).replaceWith(f)),
@@ -355,44 +408,95 @@ const DOORS_FRAMES = page(
         range.selectNodeContents(b);
         range.surroundContents(f);
       }),
-    innerHTML: () => inBox((b) => (b.innerHTML = "<iframe></iframe>")),
-    outerHTML: () => inBox((b) => (b.appendChild(document.createElement("span")).outerHTML = "<iframe></iframe>")),
-    insertAdjacentHTML: () => inBox((b) => b.insertAdjacentHTML("beforeend", "<iframe></iframe>")),
+    innerHTML: () => inBox((b) => (b.innerHTML = "<iframe src='/page2'></iframe>")),
+    outerHTML: () => inBox((b) => (b.appendChild(document.createElement("span")).outerHTML = "<iframe src='/page2'></iframe>")),
+    insertAdjacentHTML: () => inBox((b) => b.insertAdjacentHTML("beforeend", "<iframe src='/page2'></iframe>")),
     "document.write": () => {
-      const host = box().appendChild(frame());
+      const host = box().appendChild(blankFrame());
       const doc = host.contentDocument;
       const child = host.contentWindow;
       doc.open();
-      doc.write("<iframe></iframe>");
+      doc.write("<iframe src='/page2'></iframe>");
       const made = child[0];
       doc.close();
       return made;
     },
+    // A write to a loaded document opens it first, which drops the document's listeners.
+    "document.write after load": () =>
+      inLoadedHost((d) => {
+        d.write("<iframe src='/page2'></iframe>");
+        d.close();
+      }),
+    "fragment after open": () =>
+      inLoadedHost((d) => {
+        d.open();
+        d.write("<body></body>");
+        d.close();
+        const fragment = d.createDocumentFragment();
+        const f = d.createElement("iframe");
+        f.src = "/page2";
+        fragment.append(f);
+        d.body.appendChild(fragment);
+      }),
   };
+  // A javascript: URL whose string result becomes the frame's next document; its script reports what it found.
+  const jsDocument = (key) =>
+    "javascript:" +
+    JSON.stringify(
+      "<scr" + "ipt>parent.jsDone(" + JSON.stringify(key) + ", Object.getOwnPropertyDescriptor(window, '__g$') !== undefined)</scr" + "ipt>",
+    );
+  const jsWaiting = {};
+  window.jsDone = (key, value) => jsWaiting[key]?.(value);
+  const viaJavascript = (key, navigate) =>
+    new Promise((resolve) => {
+      jsWaiting[key] = resolve;
+      setTimeout(() => resolve("timeout"), 5000);
+      const f = box().appendChild(blankFrame());
+      navigate(f, jsDocument(key));
+    });
+  const loadedWindow = (element) =>
+    new Promise((resolve) => {
+      const count = frames.length;
+      element.onload = element.onerror = () => resolve(frames.length > count ? last() : null);
+      setTimeout(() => resolve(frames.length > count ? last() : null), 5000);
+      box().appendChild(element);
+    });
   document.getElementById("start").onclick = async () => {
     const hooked = { parsed: parsedHooked };
+    // First, while the click still counts as user activation.
+    let pip = "unavailable";
+    try {
+      const w = await documentPictureInPicture.requestWindow();
+      pip = hookedOf(w);
+      w.close();
+    } catch {}
     for (const [name, make] of Object.entries(cases)) {
       const made = make();
-      hooked[name] = made === "unindexed" || hookedOf(made);
+      hooked[name] = made === "no window" ? made : hookedOf(made);
     }
-    // An object's window comes a task later, so it is checked when the object loads.
+    hooked["javascript: src"] = await viaJavascript("src", (f, url) => (f.src = url));
+    hooked["javascript: location"] = await viaJavascript("location", (f, url) => (f.contentWindow.location.href = url));
+    hooked["javascript: self"] = await viaJavascript("self", (f, url) =>
+      new f.contentWindow.Function("location.href = " + JSON.stringify(url))(),
+    );
+    // Object and embed windows come a task later, so they are checked when the element loads.
     const object = document.createElement("object");
     object.type = "text/html";
     object.data = "/page2";
-    const loaded = new Promise((resolve) => {
-      object.onload = () => resolve(true);
-      setTimeout(() => resolve(false), 5000);
-    });
-    const count = frames.length;
-    box().appendChild(object);
-    await loaded;
-    // Chromium and Firefox refuse the object outright, since its load skips the service worker; no window remains.
-    hooked.object = frames.length > count ? hookedOf(last()) : "none";
+    const embed = document.createElement("embed");
+    embed.type = "text/html";
+    embed.src = "/page2";
+    const loaded = { object: stateOf(await loadedWindow(object)), embed: stateOf(await loadedWindow(embed)) };
     const popup = open();
     hooked.open = hookedOf(popup);
-    const [frameProbe, popupProbe] = await Promise.all([girProbe(last()), girProbe(popup)]);
+    const named = document.open("", "doors-named", "");
+    hooked["document.open with three arguments"] = hookedOf(named);
+    let probed = null;
+    for (let i = frames.length - 1; i >= 0 && !probed; i--) if (stateOf(frames[i]) === true) probed = frames[i];
+    const [frameProbe, popupProbe] = await Promise.all([girProbe(probed), girProbe(popup)]);
     popup.close();
-    document.getElementById("results").textContent = JSON.stringify({ hooked, frameProbe, popupProbe });
+    named?.close();
+    document.getElementById("results").textContent = JSON.stringify({ hooked, loaded, pip, frameProbe, popupProbe });
   };
 </script><div id="slot"></div>`,
 );

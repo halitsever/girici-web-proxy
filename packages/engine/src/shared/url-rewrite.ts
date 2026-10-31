@@ -2,9 +2,16 @@ import { decodeUrl, encodeUrl, isReservedPath } from "./codec.ts";
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i;
 const EDGE_WHITESPACE = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
+const URL_EDGES = /^[\u0000-\u0020]+|[\u0000-\u0020]+$/g;
+const TAB_OR_NEWLINE = /[\t\n\r]/g;
+const JAVASCRIPT = /^javascript:/i;
+const HELPER_CALL = "javascript:__g$.J(";
+const PERCENT_BYTE = /^%[\da-f]{2}/i;
 
 /** Rewrites a URL found in a page so that requests and navigations stay on the proxy. */
 export function rewriteUrl(raw: string, base: URL, origin: string): string {
+  const script = rewriteJavascriptUrl(raw);
+  if (script !== null) return script;
   // Browsers ignore ASCII whitespace around URL attributes.
   const value = raw.replace(EDGE_WHITESPACE, "");
   if (!value || value.startsWith("#")) return raw;
@@ -34,6 +41,8 @@ export function rewriteUrl(raw: string, base: URL, origin: string): string {
 
 /** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */
 export function unrewriteUrl(value: string, base: URL, origin: string): string {
+  const code = wrappedJavascript(value);
+  if (code !== null) return `javascript:${code}`;
   if (!isWeb(base)) return value;
   // blob:, data: and other non-web schemes are the page's own and never one of our proxy URLs.
   const scheme = SCHEME.exec(value)?.[0].toLowerCase();
@@ -47,6 +56,50 @@ export function unrewriteUrl(value: string, base: URL, origin: string): string {
   }
   if (isReservedPath(url.pathname)) return value;
   return new URL(url.pathname + url.search + url.hash, base.origin).href;
+}
+
+/**
+ * A javascript: URL runs in the window it navigates, and a string result becomes that window's new document. The code
+ * goes to the window's runtime helper, which rewrites it and puts the runtime in front of any document it makes; a
+ * window without the runtime has no helper, so its navigation fails. Null for any other URL.
+ */
+export function rewriteJavascriptUrl(raw: string): string | null {
+  const value = raw.replace(URL_EDGES, "").replace(TAB_OR_NEWLINE, "");
+  if (!JAVASCRIPT.test(value)) return null;
+  // Only an exact call with one string literal is left alone; anything after it would run unwrapped.
+  if (wrappedJavascript(value) !== null) return value;
+  const code = percentDecode(value.slice("javascript:".length));
+  // The browser percent-decodes the URL before running it, so a % in the literal is escaped once more.
+  return `${HELPER_CALL}${JSON.stringify(code).replace(/%/g, "%25")})`;
+}
+
+/** The page's code inside a URL this module wrapped, or null. */
+function wrappedJavascript(value: string): string | null {
+  if (!value.startsWith(HELPER_CALL) || !value.endsWith(")")) return null;
+  try {
+    const code: unknown = JSON.parse(percentDecode(value.slice(HELPER_CALL.length, -1)));
+    return typeof code === "string" ? code : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The URL standard's percent-decode: valid escapes become UTF-8 bytes, anything else stays as written. */
+function percentDecode(text: string): string {
+  if (!text.includes("%")) return text;
+  const encoder = new TextEncoder();
+  const bytes: number[] = [];
+  for (let index = 0; index < text.length;) {
+    if (PERCENT_BYTE.test(text.slice(index, index + 3))) {
+      bytes.push(parseInt(text.slice(index + 1, index + 3), 16));
+      index += 3;
+      continue;
+    }
+    const char = String.fromCodePoint(text.codePointAt(index) ?? 0);
+    for (const byte of encoder.encode(char)) bytes.push(byte);
+    index += char.length;
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
 }
 
 /** Follows the HTML srcset parsing rules, so URLs that contain commas survive. */
