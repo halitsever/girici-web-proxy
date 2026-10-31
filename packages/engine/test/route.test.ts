@@ -327,6 +327,20 @@ describe("sealed addresses", () => {
     expect(classifyRequest({ origin, ...load, url: origin + sealed })).toEqual({ kind: "unsealable" });
   });
 
+  it("seals a non-canonical plain address in one redirect", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}/~/https/A.TEST/dir/page?x=1` })).toEqual({
+      kind: "redirect",
+      location: sealed,
+    });
+  });
+
+  it("clears the sealed query for a bare question mark, as a form with no fields does", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}${sealed}?` })).toEqual({
+      kind: "redirect",
+      location: master.seal(new URL("https://a.test/dir/page")),
+    });
+  });
+
   it("keeps a sealed page whose address does not open away from the Girici server", () => {
     const keyless = { origin, navigation: false, clientUrl: origin + sealed, referrer: null };
     expect(classifyRequest({ ...keyless, url: `${origin}/root.js` })).toEqual({ kind: "unsealable" });

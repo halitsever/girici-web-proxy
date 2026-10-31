@@ -40,7 +40,9 @@ export function classifyRequest(input: RouteInput): Route {
   const pathAndQuery = url.pathname + url.search;
   const sealOnLoad = input.topLevelGet ? input.seal : undefined;
   if (isSealedPath(url.pathname)) {
-    const target = input.open?.(pathAndQuery) ?? null;
+    // URL.search drops a bare "?", which still means a query emptied the way a form with no fields empties it.
+    const bare = url.search === "" && url.href.endsWith("?") ? "?" : "";
+    const target = input.open?.(pathAndQuery + bare) ?? null;
     if (target) {
       const address = sealOnLoad?.(target);
       // A query written after the token is sealed in, so the address bar never shows it.
@@ -57,9 +59,9 @@ export function classifyRequest(input: RouteInput): Route {
       const base = sealedBase(input);
       return base ? relativeToSealed(`../${sliceAfter(pathAndQuery, PROXY_PREFIX)}`, input) : { kind: "invalid" };
     }
+    if (sealOnLoad) return { kind: "redirect", location: sealOnLoad(target) };
     const canonical = encodeUrl(target);
     if (canonical !== pathAndQuery) return { kind: "redirect", location: canonical };
-    if (sealOnLoad) return { kind: "redirect", location: sealOnLoad(target) };
     return { kind: "proxy", target, navigation: input.navigation, sealed: false };
   }
 
