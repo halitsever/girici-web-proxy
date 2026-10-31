@@ -25,7 +25,12 @@ function fakeWindow(href: string, origin = "", extra: Record<string, unknown> = 
   return win;
 }
 
-function guardFor(realOrigin: string, invoke: Invoke = direct, navigated: string[] = []) {
+function guardFor(
+  realOrigin: string,
+  invoke: Invoke = direct,
+  navigated: string[] = [],
+  swapBlob?: (url: string) => string,
+) {
   // A realm's own window getters, which read whatever window they are applied to.
   const win = { DOMException, postMessage: () => {} } as unknown as Realm;
   for (const name of ["closed", "length", "top", "parent", "opener"]) {
@@ -43,7 +48,7 @@ function guardFor(realOrigin: string, invoke: Invoke = direct, navigated: string
       return `${proxy}/~/proxied/${raw}`;
     },
   } as unknown as UrlContext;
-  return createWindowGuard(win, ctx, invoke);
+  return createWindowGuard(win, ctx, invoke, swapBlob);
 }
 
 describe("realOriginOf", () => {
@@ -166,6 +171,17 @@ describe("createWindowGuard", () => {
       wrapped.name = "x";
     }).toThrow(/SecurityError|Blocked/);
     expect(() => Object.defineProperty(wrapped, "x", { value: 1 })).toThrow(/SecurityError|Blocked/);
+  });
+
+  it("sends a restricted window's navigation through the blob swap", () => {
+    const set: unknown[] = [];
+    const guard = guardFor("https://a.test", direct, [], (url) => `swapped:${url}`);
+    const target = fakeWindow(`${proxy}/~/https/b.test/`);
+    const nativeLocation = { replace: (url: string) => set.push(url) };
+    target.location = nativeLocation as unknown as { href: string };
+    const wrapped = guard.wrap(target) as { location: { replace(url: string): void } };
+    wrapped.location.replace("blob:x");
+    expect(set).toEqual([`swapped:${proxy}/~/proxied/blob:x`]);
   });
 
   it("navigates a restricted window but never reads its address", () => {

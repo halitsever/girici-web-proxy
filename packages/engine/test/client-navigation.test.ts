@@ -71,6 +71,7 @@ function fakeWindow() {
 }
 
 const asIs: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} };
+const noBlobs = { swap: (url: string) => url, swapLink: () => {}, restoreLinks: () => {}, swapForm: () => {} };
 const noCookies = { pendingWrites: () => null } as unknown as CookieBridge;
 
 function installed() {
@@ -78,7 +79,14 @@ function installed() {
   const { win } = fake;
   const natives = [win.open, win.HTMLFormElement.prototype.submit, win.History.prototype.pushState];
   const ctx = createUrlContext(win as unknown as Realm);
-  installNavigation(win as unknown as Realm, ctx, noCookies, (fn, self, args) => Reflect.apply(fn, self, args), asIs);
+  installNavigation(
+    win as unknown as Realm,
+    ctx,
+    noCookies,
+    (fn, self, args) => Reflect.apply(fn, self, args),
+    asIs,
+    noBlobs,
+  );
   const location = createFakeLocation({
     real: ctx.realUrl,
     navigate: (url, mode) => fake.loads.push(`${mode} ${url}`),

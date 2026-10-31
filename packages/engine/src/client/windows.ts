@@ -78,7 +78,12 @@ function isIndex(property: string): boolean {
   return `${index}` === property && index >= 0 && index % 1 === 0;
 }
 
-export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): WindowGuard {
+export function createWindowGuard(
+  win: Realm,
+  ctx: UrlContext,
+  invoke: Invoke,
+  swapBlob: (url: string) => string = (url) => url,
+): WindowGuard {
   // Taken before the messaging and window hooks replace them; window members are own properties of each window.
   const DOMException = win.DOMException;
   const nativePost = win.postMessage;
@@ -141,7 +146,7 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
   };
 
   const navigate = (target: object, url: unknown, replace: boolean) => {
-    const proxied = ctx.toProxy(toText(url));
+    const proxied = swapBlob(ctx.toProxy(toText(url)));
     // location and its members cannot be redefined by a page.
     const location = (target as { location: Location }).location;
     if (replace) invoke(location.replace, location, [proxied]);

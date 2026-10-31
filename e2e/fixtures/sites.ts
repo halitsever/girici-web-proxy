@@ -230,6 +230,16 @@ const COOKIE_SCRIPT = page(
     });
 </script>`,
 );
+// The click writes a cookie first, so the runtime holds the navigation until the write is stored.
+const COOKIE_CLICK = page(
+  "Cookie click",
+  `<a id="go" href="https://site-b.test/">site b</a>
+<script>
+  document.getElementById("go").addEventListener("click", () => {
+    document.cookie = "clicked=1; path=/";
+  });
+</script>`,
+);
 const COOKIE_API_PAGE = page(
   "Cookie API",
   `<pre id="after"></pre>
@@ -1141,6 +1151,201 @@ const DOORS_SRCDOC = page(
 <iframe srcdoc="${escapeHtml(srcdocReport("parsed"))}"></iframe>`,
 );
 
+/**
+ * A blob page that reports the address it sees and what its realm reaches; a popup names itself by its opener.
+ * WebKit gives blob documents a cache storage that refuses every call, so a refusal counts as reaching no cache.
+ */
+const blobReport = (id: string): string =>
+  `<!doctype html><p>${id}</p><script>${PROBE}
+(async () => {
+  const keys = () => Promise.resolve().then(() => caches.keys()).catch(() => []);
+  const scope = { indexedDB, BroadcastChannel, caches: { keys } };
+  const report = { id: opener ? "popup" : ${JSON.stringify(id)}, ran: true, href: location.href, probe: await girProbe(scope) };
+  (opener || parent).postMessage(JSON.stringify(report), "*");
+})();</script>`;
+
+const DOORS_BLOBS = page(
+  "Doors blobs",
+  `<button id="start">start</button><pre id="results"></pre>
+<a id="dl" download="x.txt">download</a>
+<script>
+  const docs = ${JSON.stringify({
+    html: blobReport("html"),
+    untyped: blobReport("untyped"),
+    svg: '<svg xmlns="http://www.w3.org/2000/svg"><script>parent.postMessage("svg ran", "*")</script></svg>',
+  }).replace(/<\//g, "<\\/")};
+  const blobUrl = (text, type) => URL.createObjectURL(type === undefined ? new Blob([text]) : new Blob([text], { type }));
+  document.getElementById("dl").href = blobUrl("hello", "text/plain");
+  const seen = {};
+  let svgRan = false;
+  addEventListener("message", (event) => {
+    if (event.data === "svg ran") svgRan = true;
+    else {
+      try {
+        const report = JSON.parse(event.data);
+        seen[report.id] = { ran: report.ran, href: report.href, probe: report.probe };
+      } catch {}
+    }
+  });
+  const frameOf = (set) => {
+    const frame = document.createElement("iframe");
+    set(frame);
+    document.body.appendChild(frame);
+    return frame;
+  };
+  // True when this page can read the SVG document, directly or inside the frame that shows it.
+  const readable = (frame) => {
+    try {
+      if (frame.contentDocument?.querySelector("svg")) return true;
+      const inner = frame.contentWindow.frames[0];
+      return Boolean(inner?.document.querySelector("svg"));
+    } catch {
+      return false;
+    }
+  };
+  document.getElementById("start").onclick = () => {
+    const htmlUrl = blobUrl(docs.html, "text/html");
+    const popup = open(htmlUrl);
+    frameOf((frame) => (frame.src = htmlUrl));
+    const svgFrame = frameOf((frame) => frame.setAttribute("src", blobUrl(docs.svg, "image/svg+xml")));
+    frameOf((frame) => (frame.src = blobUrl(docs.untyped)));
+    const started = Date.now();
+    // The two pages that should run report first; the others get two more seconds to show they stay inert.
+    const finish = () => {
+      if ((!seen.html || !seen.popup) && Date.now() - started < 10000) return void setTimeout(finish, 100);
+      setTimeout(() => {
+        popup?.close();
+        document.getElementById("results").textContent = JSON.stringify({
+          html: seen.html ?? null,
+          svgRan,
+          untypedRan: Boolean(seen.untyped),
+          popup: seen.popup ?? null,
+          svgReadable: readable(svgFrame),
+        });
+      }, 2000);
+    };
+    finish();
+  };
+</script>`,
+);
+
+// Each sink loads an SVG whose script would report its name; a swapped sink shows it sandboxed instead.
+const DOORS_BLOB_SINKS = page(
+  "Doors blob sinks",
+  `<button id="start">start</button><pre id="results"></pre>
+<a id="ctx">context</a>
+<iframe name="t-link"></iframe><iframe name="t-detached"></iframe><iframe name="t-dispatch"></iframe>
+<iframe name="t-svg"></iframe><iframe name="t-xlink"></iframe><iframe name="t-form"></iframe><iframe name="t-request"></iframe>
+<iframe id="nav"></iframe><iframe id="writer"></iframe>
+<iframe id="meta-attr"></iframe><iframe id="meta-property"></iframe><iframe id="meta-markup"></iframe>
+<div id="box"></div>
+<script>
+  const ran = [];
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("ran:")) ran.push(event.data.slice(4));
+  });
+  const blobOf = (text, type) => URL.createObjectURL(new Blob([text], { type }));
+  const svg = (id) =>
+    blobOf('<svg xmlns="http://www.w3.org/2000/svg"><script>top.postMessage("ran:' + id + '", "*")<\\/script></svg>', "image/svg+xml");
+  document.getElementById("ctx").href = blobOf('<!doctype html><p id="opened">opened</p>', "text/html");
+  const SVG = "http://www.w3.org/2000/svg";
+  const XLINK = "http://www.w3.org/1999/xlink";
+  const byId = (id) => document.getElementById(id);
+  const add = (element, parent = document.body) => parent.appendChild(element);
+  const readBack = {};
+  byId("start").onclick = () => {
+    const property = document.createElement("iframe");
+    const propertyUrl = svg("property");
+    property.src = propertyUrl;
+    add(property);
+    readBack.property = property.src === propertyUrl && property.getAttribute("src") === propertyUrl;
+
+    const byNode = document.createElement("iframe");
+    const node = document.createAttribute("src");
+    const nodeUrl = svg("attr");
+    node.value = nodeUrl;
+    byNode.setAttributeNode(node);
+    add(byNode);
+    readBack.attr = byNode.getAttributeNode("src").value === nodeUrl;
+
+    const object = document.createElement("object");
+    const objectUrl = svg("object");
+    object.data = objectUrl;
+    add(object);
+    readBack.object = object.data === objectUrl;
+    const embed = document.createElement("embed");
+    const embedUrl = svg("embed");
+    embed.src = embedUrl;
+    add(embed);
+    readBack.embed = embed.src === embedUrl;
+
+    byId("nav").contentWindow.location.href = svg("location");
+
+    const box = byId("box");
+    const markupUrl = svg("innerHTML");
+    box.innerHTML = '<iframe src="' + markupUrl + '"></iframe>';
+    readBack.markup = box.innerHTML.includes(markupUrl) && box.firstChild.src === markupUrl;
+    box.insertAdjacentHTML("beforeend", '<iframe src="' + svg("insertAdjacentHTML") + '"></iframe>');
+    add(document.createElement("div"), box).outerHTML = '<iframe src="' + svg("outerHTML") + '"></iframe>';
+    box.appendChild(document.createRange().createContextualFragment('<iframe src="' + svg("fragment") + '"></iframe>'));
+    const parsed = new DOMParser().parseFromString('<iframe src="' + svg("DOMParser") + '"></iframe>', "text/html");
+    box.appendChild(document.adoptNode(parsed.body.firstChild));
+    const written = byId("writer").contentDocument;
+    written.write('<iframe src="' + svg("write") + '"></iframe>');
+    written.close();
+
+    const link = document.createElement("a");
+    const linkUrl = svg("link");
+    link.href = linkUrl;
+    link.target = "t-link";
+    link.addEventListener("click", () => {
+      readBack.link = link.href === linkUrl && link.getAttribute("href") === linkUrl;
+    });
+    add(link).click();
+    const detached = document.createElement("a");
+    detached.href = svg("detached");
+    detached.target = "t-detached";
+    detached.click();
+    const dispatched = document.createElement("a");
+    dispatched.href = svg("dispatch");
+    dispatched.target = "t-dispatch";
+    dispatched.dispatchEvent(new MouseEvent("click"));
+
+    const root = add(document.createElementNS(SVG, "svg"));
+    const svgLink = document.createElementNS(SVG, "a");
+    svgLink.setAttribute("href", svg("svg-href"));
+    svgLink.setAttribute("target", "t-svg");
+    add(svgLink, root).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const xlink = document.createElementNS(SVG, "a");
+    xlink.setAttributeNS(XLINK, "xlink:href", svg("svg-xlink"));
+    xlink.setAttribute("target", "t-xlink");
+    add(xlink, root).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const form = add(document.createElement("form"));
+    form.action = svg("form-submit");
+    form.target = "t-form";
+    form.submit();
+    const requested = add(document.createElement("form"));
+    requested.setAttribute("action", svg("form-request"));
+    requested.target = "t-request";
+    requested.requestSubmit();
+
+    const refresh = (id) => byId(id).contentDocument;
+    const byAttribute = refresh("meta-attr").createElement("meta");
+    byAttribute.setAttribute("http-equiv", "refresh");
+    byAttribute.setAttribute("content", "0;url=" + svg("meta-attr"));
+    refresh("meta-attr").head.appendChild(byAttribute);
+    const byProperty = refresh("meta-property").createElement("meta");
+    byProperty.content = "0; url=" + svg("meta-property");
+    byProperty.httpEquiv = "refresh";
+    refresh("meta-property").head.appendChild(byProperty);
+    refresh("meta-markup").body.innerHTML = '<meta http-equiv="refresh" content="0;url=' + svg("meta-markup") + '">';
+
+    setTimeout(() => (byId("results").textContent = JSON.stringify({ ran: ran.sort(), readBack })), 4000);
+  };
+</script>`,
+);
+
 const ATTR_NODE = page(
   "Attr node",
   `<script>
@@ -1330,6 +1535,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/echo": cookieEcho,
     "/old-channel": html(OLD_CHANNEL),
     "/cookie/script": html(COOKIE_SCRIPT),
+    "/cookie/click": html(COOKIE_CLICK),
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),
     "/network": html(NETWORK),
@@ -1495,6 +1701,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/doors-frames": html(DOORS_FRAMES),
     "/doors-srcdoc": html(DOORS_SRCDOC),
     "/doors-builtins": html(DOORS_BUILTINS),
+    "/doors-blobs": html(DOORS_BLOBS),
+    "/doors-blob-sinks": html(DOORS_BLOB_SINKS),
     "/attr-node": html(ATTR_NODE),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(

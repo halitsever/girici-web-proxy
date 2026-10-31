@@ -12,6 +12,8 @@ export interface HtmlRewriteOptions {
   scripts?: boolean;
   /** Runtime tag for a srcdoc document, which has no address of its own to load the runtime through. */
   frameInject?: (base: URL) => string;
+  /** The runtime's blob swap for URLs that load a document, so a blob page starts with the runtime in place. */
+  swapBlob?: (url: string) => string;
 }
 
 interface Attribute {
@@ -24,6 +26,7 @@ interface Attribute {
 type ScriptKind = "classic" | "module" | "importmap" | "remove" | "none";
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
+const DOCUMENT_URLS = new Set(["iframe src", "frame src", "embed src", "object data"]);
 const SRCSET_ATTRIBUTES = new Set(["srcset", "imagesrcset"]);
 const DROPPED_ATTRIBUTES = new Set(["integrity", "nonce", "ping"]);
 const FETCHED_LINK_RELS = new Set([
@@ -198,7 +201,8 @@ class HtmlRewriter {
           // Browsers ignore a base URL they cannot parse, and so do we.
         }
       }
-      return rewritten;
+      const { swapBlob } = this.#options;
+      return swapBlob && DOCUMENT_URLS.has(`${tag} ${name}`) ? swapBlob(rewritten) : rewritten;
     }
     if (SRCSET_ATTRIBUTES.has(name)) {
       let changed = false;
@@ -220,10 +224,11 @@ class HtmlRewriter {
         scripts: true,
         inject: frameInject(this.#base),
         frameInject,
+        swapBlob: this.#options.swapBlob,
       });
     }
     if (tag === "meta" && name === "content" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh") {
-      return rewriteRefresh(value, this.#base, origin);
+      return rewriteRefresh(value, this.#base, origin, this.#options.swapBlob);
     }
     return value;
   }

@@ -90,3 +90,64 @@ test("runs srcdoc documents under the runtime from their first script", async ({
     markup: true,
   });
 });
+
+test("runs HTML blob documents under the runtime and others inert", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/doors-blobs");
+  await startBroadcast(context);
+  await page.click("#start");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    html: { ran: true, href: "https://site-a.test/doors-blobs", probe: closed },
+    svgRan: false,
+    untypedRan: false,
+    popup: { ran: true, href: "https://site-a.test/doors-blobs", probe: closed },
+    svgReadable: false,
+  });
+  const download = page.waitForEvent("download");
+  await page.click("#dl");
+  expect((await download).suggestedFilename()).toBe("x.txt");
+});
+
+test("swaps blob URLs in every navigation sink and reads back the page's own URL", async ({ page, browserName }) => {
+  await openThroughUi(page, "https://site-a.test/doors-blob-sinks");
+  await page.click("#start");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "null")).toEqual({
+    ran: [],
+    readBack: { property: true, attr: true, object: true, embed: true, markup: true, link: true },
+  });
+  // WebKit keeps a revoked blob URL alive while a document loaded from it is open, even when its creator revokes it.
+  if (browserName === "webkit") return;
+  // Playwright reads attributes in its own world, so this is the bootstrap the browser loaded, already revoked.
+  const boot = (await page.locator("iframe:not([name]):not([id])").first().getAttribute("src")) ?? "";
+  expect(boot).toMatch(/^blob:/);
+  const state = await page.evaluate(
+    (url) =>
+      fetch(url).then(
+        () => "live",
+        () => "revoked",
+      ),
+    boot,
+  );
+  expect(state).toBe("revoked");
+});
+
+test("opens a blob link from the context menu under the runtime", async ({ page, context, browserName }) => {
+  await openThroughUi(page, "https://site-a.test/doors-blob-sinks");
+  const link = page.locator("#ctx");
+  const original = await link.getAttribute("href");
+  await link.click({ button: "right" });
+  // The browser's own menu would open whatever the attribute holds now.
+  const opened = await link.getAttribute("href");
+  expect(opened).not.toBe(original);
+  // WebKit opens no blob URL in another page at all (WebKitBlobResource error 1), the original included.
+  if (browserName !== "webkit") {
+    const tab = await context.newPage();
+    await tab.goto(opened ?? "");
+    await expect(tab.locator("#opened")).toHaveText("opened");
+    expect(await tab.evaluate("typeof __g$")).toBe("object");
+    await tab.close();
+  }
+  await page.keyboard.press("Escape");
+  await expect.poll(() => link.getAttribute("href")).toBe(original);
+});

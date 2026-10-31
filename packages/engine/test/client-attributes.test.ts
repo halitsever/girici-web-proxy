@@ -158,7 +158,7 @@ describe("srcdoc through the DOM hooks", () => {
       fromProxy: (value: string) => value,
     };
     const bridge = createRewriteBridge(ctx, (b) => `<script src="/_g/c.js" data-girici="${b.href}"></script>`);
-    installAttributes(win, ctx as never, bridge);
+    installAttributes(win, ctx as never, bridge, { swap: (url) => url, original: (url) => url });
     return { iframe: new FakeIframe(), FakeAttr, FakeIframe };
   }
   const code = "<script>go(location)</script>";

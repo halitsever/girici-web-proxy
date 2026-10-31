@@ -1,13 +1,17 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import { apply, hrefOf, isWebUrl, newUrl, originOf, pathnameOf, startsWith, toText } from "../shared/primordials.ts";
 import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
+import type { BlobDocuments } from "./blob-documents.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { openedOrigin, type WindowGuard } from "./windows.ts";
 
-const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
+const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
+/** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
+const LATER_EVENTS = ["contextmenu", "dragstart"];
+const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
 
 // Taken at load: these hooks run on page calls, after page code may have replaced them.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
@@ -19,6 +23,7 @@ export function installNavigation(
   cookies: CookieBridge,
   invoke: Invoke,
   guard: WindowGuard,
+  blobs: Pick<BlobDocuments, "swap" | "swapLink" | "restoreLinks" | "swapForm">,
 ): DocumentListeners {
   const history = win.History.prototype;
   const historyOf = ownDescriptor(win, "history")?.get;
@@ -44,7 +49,7 @@ export function installNavigation(
 
   const nativeOpen = win.open;
   win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
-    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
+    const proxied = url === undefined || url === null || url === "" ? url : blobs.swap(ctx.toProxy(toText(url)));
     const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
     // Until the page it was opened for arrives, a popup shows a blank page of this origin.
     return guard.wrap(opened, openedOrigin(proxied, ctx.origin)) as Window | null;
@@ -55,7 +60,8 @@ export function installNavigation(
     .navigation;
   if (navigation && typeof navigation.navigate === "function") {
     const nativeNavigate = navigation.navigate.bind(navigation);
-    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(toText(url)), options);
+    navigation.navigate = (url: string, options?: unknown) =>
+      nativeNavigate(blobs.swap(ctx.toProxy(toText(url))), options);
   }
 
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
@@ -68,21 +74,27 @@ export function installNavigation(
     for (const target of event.composedPath()) {
       if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
         fix(target, "href");
+        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
         return;
       }
       if (target instanceof win.SVGAElement) {
         fix(target, "href");
         fix(target, "xlink:href");
+        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
         return;
       }
     }
   };
   for (const type of LINK_EVENTS) listeners.push([type, fixLink, true]);
+  for (const type of INTERACTIONS) listeners.push([type, () => blobs.restoreLinks(), true]);
   listeners.push([
     "submit",
     (event) => {
-      if (event.target instanceof win.HTMLFormElement) fix(event.target, "action");
       const submitter = (event as SubmitEvent).submitter;
+      if (event.target instanceof win.HTMLFormElement) {
+        fix(event.target, "action");
+        blobs.swapForm(event.target, submitter);
+      }
       if (submitter) fix(submitter, "formaction");
     },
     true,
@@ -92,6 +104,7 @@ export function installNavigation(
   const { submit, requestSubmit } = form;
   form.submit = function (this: HTMLFormElement) {
     fix(this, "action");
+    blobs.swapForm(this);
     apply(submit, this, []);
   };
   form.requestSubmit = function (this: HTMLFormElement, submitter?: HTMLElement | null) {
@@ -113,8 +126,8 @@ export function installNavigation(
       const url = resolve(link.getAttributeNode("href")?.value, ctx);
       if (!url) return;
       event.preventDefault();
-      // The next page must already see cookies this one has just written.
-      void writes.then(() => invoke(win.location.assign, win.location, [url]));
+      // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
+      void writes.then(() => invoke(win.location.assign, win.location, [ctx.toProxy(url)]));
     },
     false,
   ]);
@@ -131,6 +144,7 @@ export function installNavigation(
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");
+        blobs.swapForm(target);
         apply(submit, target, []);
         extra?.remove();
       });

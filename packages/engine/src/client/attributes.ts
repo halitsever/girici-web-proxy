@@ -10,7 +10,9 @@ import {
   toText,
   urlPart,
 } from "../shared/primordials.ts";
+import { mapRefresh, rewriteRefresh } from "../rewrite/refresh.ts";
 import { attributeKind, restoreAttribute, rewriteAttribute } from "./attribute-values.ts";
+import { lowerTrim, type BlobDocuments } from "./blob-documents.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -44,6 +46,14 @@ const INTEGRITY_PROPERTIES: Array<[string, string]> = [
   ["HTMLScriptElement", "integrity"],
   ["HTMLLinkElement", "integrity"],
 ];
+/** Sinks that load a document into a frame, where a blob URL must become a bootstrap blob. */
+const DOCUMENT_PROPERTIES = new Set([
+  "HTMLIFrameElement.src",
+  "HTMLFrameElement.src",
+  "HTMLObjectElement.data",
+  "HTMLEmbedElement.src",
+]);
+const DOCUMENT_ATTRIBUTES = new Set(["iframe.src", "frame.src", "object.data", "embed.src"]);
 const LINK_ELEMENTS = ["HTMLAnchorElement", "HTMLAreaElement"];
 const LINK_PARTS = ["protocol", "host", "hostname", "port", "pathname", "search", "hash"] as const;
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
@@ -52,6 +62,7 @@ const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
+const setHas = Set.prototype.has;
 const RUNTIME_ATTRIBUTE = "data-girici=";
 
 /** What the page wrote for a srcdoc and the value that went into the DOM for it. */
@@ -67,7 +78,12 @@ export interface SrcdocBridge {
 }
 
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
-export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBridge): void {
+export function installAttributes(
+  win: Realm,
+  ctx: UrlContext,
+  markup: SrcdocBridge,
+  blobs: Pick<BlobDocuments, "swap" | "original">,
+): void {
   const written = new NativeWeakMap<object, SrcdocRecord>();
   const carried = new NativeWeakMap<object, SrcdocRecord>();
   const original = (node: object, value: string): string => {
@@ -75,12 +91,13 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     return record && record.native === value ? record.original : value;
   };
   for (const [name, property] of URL_PROPERTIES) {
+    const opens = apply(setHas, DOCUMENT_PROPERTIES, [`${name}.${property}`]);
     wrap(
       win,
       name,
       property,
-      (value) => (value ? ctx.fromProxy(value) : value),
-      (value) => ctx.toProxy(value),
+      (value) => (value ? ctx.fromProxy(blobs.original(value)) : value),
+      (value) => (opens ? blobs.swap(ctx.toProxy(value)) : ctx.toProxy(value)),
     );
   }
   for (const [name, property] of SRCSET_PROPERTIES) {
@@ -108,6 +125,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   const { setAttribute, getAttribute, setAttributeNS, getAttributeNS } = element;
   element.setAttribute = function (this: Element, name: string, value: string) {
     apply(setAttribute, this, [name, rewrite(this, name, toText(value))]);
+    settle(this);
   };
   element.getAttribute = function (this: Element, name: string) {
     const value = apply(getAttribute, this, [name]);
@@ -115,6 +133,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   };
   element.setAttributeNS = function (this: Element, namespace: string | null, name: string, value: string) {
     apply(setAttributeNS, this, [namespace, name, rewrite(this, attributeName(namespace, name), toText(value))]);
+    settle(this);
   };
   element.getAttributeNS = function (this: Element, namespace: string | null, name: string) {
     const value = apply(getAttributeNS, this, [namespace, name]);
@@ -139,6 +158,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       set(this: Attr, value: unknown) {
         const owner = this.ownerElement;
         apply(set, this, [owner ? rewrite(owner, this.name, toText(value)) : toText(value)]);
+        if (owner) settle(owner);
       },
     });
   }
@@ -169,7 +189,11 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     const native = element[name] as (...args: unknown[]) => unknown;
     element[name] = maskNative(function (this: Element, node: Attr) {
       prepare(this, node);
-      return apply(native, this, [node]);
+      try {
+        return apply(native, this, [node]);
+      } finally {
+        settle(this);
+      }
     }, native) as typeof element.setAttributeNode;
   }
 
@@ -195,7 +219,11 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       mapProto[name] = maskNative(function (this: NamedNodeMap, node: Attr) {
         const owner = apply(mapGet, owners, [this]);
         if (owner) prepare(owner, node);
-        return apply(native, this, [node]);
+        try {
+          return apply(native, this, [node]);
+        } finally {
+          if (owner) settle(owner);
+        }
       }, native) as typeof mapProto.setNamedItem;
     }
   }
@@ -220,7 +248,50 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     });
   }
 
+  // The browser reads a refresh when the meta goes in, so its content is kept rewritten whichever was set first.
+  const metaProto = win.HTMLMetaElement?.prototype;
+  for (const [property, attribute] of [
+    ["content", "content"],
+    ["httpEquiv", "http-equiv"],
+  ] as const) {
+    const descriptor = metaProto && ownDescriptor(metaProto, property);
+    if (!metaProto || !descriptor?.set) continue;
+    const hookedGet = element.getAttribute;
+    const hookedSet = element.setAttribute;
+    define(metaProto, property, {
+      ...descriptor,
+      get(this: Element) {
+        return (apply(hookedGet, this, [attribute]) as string | null) ?? "";
+      },
+      set(this: Element, value: unknown) {
+        apply(hookedSet, this, [attribute, String(value)]);
+      },
+    });
+  }
+
+  function isRefresh(target: Element): boolean {
+    return (
+      target.localName === "meta" &&
+      lowerTrim(apply(getAttribute, target, ["http-equiv"]) as string | null) === "refresh"
+    );
+  }
+
+  function settle(target: Element): void {
+    try {
+      if (!isRefresh(target)) return;
+      const content = apply(getAttribute, target, ["content"]) as string | null;
+      const next = content === null ? null : rewriteRefresh(content, ctx.realBase(), ctx.origin, blobs.swap);
+      if (next !== content) apply(setAttribute, target, ["content", next]);
+    } catch {
+      // Not an element of this realm.
+    }
+  }
+
   function rewrite(target: Element, name: string, value: string): string {
+    const attribute = lowerTrim(name);
+    if (attribute === "content" && isRefresh(target)) {
+      return rewriteRefresh(value, ctx.realBase(), ctx.origin, blobs.swap);
+    }
     const kind = attributeKind(target.localName, name);
     if (kind === "html") {
       const next = markup.srcdoc(value);
@@ -229,16 +300,24 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       apply(mapSet, written, [target, { native: next, original }]);
       return next;
     }
-    return kind ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin) : value;
+    if (!kind) return value;
+    const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin);
+    return apply(setHas, DOCUMENT_ATTRIBUTES, [`${target.localName}.${attribute}`]) ? blobs.swap(rewritten) : rewritten;
   }
 
   function restore(target: Element, name: string, value: string): string {
+    const base = ctx.realBase();
+    if (lowerTrim(name) === "content" && isRefresh(target)) {
+      return mapRefresh(value, (url) => blobs.original(restoreAttribute("a", "href", url, base, ctx.origin)));
+    }
     const kind = attributeKind(target.localName, name);
     if (kind === "html") {
       const record = apply(mapGet, written, [target]) as SrcdocRecord | undefined;
       if (record && record.native === value) return record.original;
     }
-    return kind ? restoreAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.unsrcdoc) : value;
+    return kind
+      ? blobs.original(restoreAttribute(target.localName, name, value, base, ctx.origin, markup.unsrcdoc))
+      : value;
   }
 }
 

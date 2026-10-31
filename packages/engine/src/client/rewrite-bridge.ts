@@ -2,8 +2,10 @@ import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { rewriteHtml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
+import { mapRefresh } from "../rewrite/refresh.ts";
 import { stripClientTag } from "../shared/client-tag.ts";
 import { attributeKind, restoreAttribute } from "./attribute-values.ts";
+import type { BlobDocuments } from "./blob-documents.ts";
 import type { UrlContext } from "./url-context.ts";
 
 /** The rewriters, bound to the page's current real base, so the runtime can rewrite code and markup synchronously. */
@@ -22,13 +24,15 @@ export interface RewriteBridge {
 export function createRewriteBridge(
   ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy">,
   frameTag: (base: URL) => string,
+  blobs: Pick<BlobDocuments, "swap" | "original"> = { swap: (url) => url, original: (url) => url },
 ): RewriteBridge {
+  const swapBlob = blobs.swap;
   const html = (markup: string) =>
-    rewriteHtml(markup, { url: ctx.realBase(), origin: ctx.origin, scripts: true, frameInject: frameTag });
+    rewriteHtml(markup, { url: ctx.realBase(), origin: ctx.origin, scripts: true, frameInject: frameTag, swapBlob });
   const clientUrl = () => tagSource(frameTag(ctx.realBase()));
   // Nested srcdoc values come back through the same path, so the tag goes at every level.
   const unsrcdoc = (markup: string): string =>
-    stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc), clientUrl());
+    stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original), clientUrl());
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
@@ -42,8 +46,9 @@ export function createRewriteBridge(
         scripts: true,
         inject: frameTag(ctx.realBase()),
         frameInject: frameTag,
+        swapBlob,
       }),
-    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc),
+    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original),
     unsrcdoc,
     importSpecifier: (spec) => ctx.toProxy(spec),
     metaUrl: (url) => ctx.fromProxy(url),
@@ -68,7 +73,9 @@ function unrewriteHtmlAttributes(
   base: URL,
   origin: string,
   unsrcdoc: (markup: string) => string,
+  original: (url: string) => string,
 ): string {
+  const restoreUrl = (url: string) => original(restoreAttribute("a", "href", url, base, origin));
   const output = new MagicString(html);
   let attributes: PendingAttribute[] = [];
   const parser: Parser = new Parser(
@@ -76,13 +83,17 @@ function unrewriteHtmlAttributes(
       onattribute: (name, value) => {
         attributes.push({ name, value, start: parser.startIndex, end: parser.endIndex });
       },
-      onopentag: (name, _attribs, implied) => {
+      onopentag: (name, attribs, implied) => {
         const pending = attributes;
         attributes = [];
         if (implied) return;
+        const refresh = name === "meta" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh";
         for (const attribute of pending) {
-          if (!attributeKind(name, attribute.name)) continue;
-          const restored = restoreAttribute(name, attribute.name, attribute.value, base, origin, unsrcdoc);
+          let restored: string;
+          if (refresh && attribute.name === "content") restored = mapRefresh(attribute.value, restoreUrl);
+          else if (attributeKind(name, attribute.name)) {
+            restored = original(restoreAttribute(name, attribute.name, attribute.value, base, origin, unsrcdoc));
+          } else continue;
           if (restored !== attribute.value) {
             output.overwrite(attribute.start, attribute.end, `${attribute.name}="${escapeAttribute(restored)}"`);
           }
