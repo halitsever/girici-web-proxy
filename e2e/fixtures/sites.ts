@@ -1351,6 +1351,7 @@ const DOORS_BLOB_SINKS = page(
     frameRun("location &&= parent.svgBlob('location-and')");
     frameRun("[location] = [parent.svgBlob('location-pattern')]");
     document.open(svg("document-open"), "t-docopen", "");
+    frameRun("if (window.navigation) Object.getPrototypeOf(navigation).navigate.call(navigation, parent.svgBlob('navigation-proto'))");
 
     const refresh = (id) => byId(id).contentDocument;
     const byAttribute = refresh("meta-attr").createElement("meta");

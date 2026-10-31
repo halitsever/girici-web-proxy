@@ -2,6 +2,7 @@ import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import {
   append,
   apply,
+  define,
   hrefOf,
   isWebUrl,
   listIncludes,
@@ -73,13 +74,18 @@ export function installNavigation(
   }, nativeOpen);
   win.open = hookedOpen as typeof win.open;
 
-  // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.
-  const navigation = (win as unknown as { navigation?: { navigate?: (url: string, options?: unknown) => unknown } })
-    .navigation;
-  if (navigation && typeof navigation.navigate === "function") {
-    const nativeNavigate = navigation.navigate.bind(navigation);
-    navigation.navigate = (url: string, options?: unknown) =>
-      nativeNavigate(blobs.swap(ctx.toProxy(toText(url))), options);
+  // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first. The
+  // prototype is hooked, since a page can call its method on the instance directly.
+  const navigationProto = (win as unknown as { Navigation?: { prototype: object } }).Navigation?.prototype;
+  const navigateDescriptor = navigationProto && ownDescriptor(navigationProto, "navigate");
+  const nativeNavigate = navigateDescriptor?.value as ((...args: unknown[]) => unknown) | undefined;
+  if (navigationProto && navigateDescriptor && typeof nativeNavigate === "function") {
+    define(navigationProto, "navigate", {
+      ...navigateDescriptor,
+      value: maskNative(function (this: unknown, url: unknown, options?: unknown) {
+        return apply(nativeNavigate, this, [blobs.swap(ctx.toProxy(toText(url))), options]);
+      }, nativeNavigate),
+    });
   }
 
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.

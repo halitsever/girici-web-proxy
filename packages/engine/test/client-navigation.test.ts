@@ -188,3 +188,33 @@ describe("listening again", () => {
     expect(fake.listeners.length).toBe(first);
   });
 });
+
+describe("Navigation API", () => {
+  it("proxies and swaps a URL given to Navigation.prototype.navigate itself", () => {
+    const fake = fakeWindow();
+    const calls: unknown[] = [];
+    class Navigation {
+      navigate(url: string) {
+        calls.push(url);
+      }
+    }
+    const navigation = new Navigation();
+    Object.assign(fake.win, { Navigation, navigation });
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      noCookies,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      {
+        ...noBlobs,
+        swap: (url) => (url.includes("blob:") ? "blob:boot" : url),
+      },
+    );
+    Reflect.apply(Navigation.prototype.navigate, navigation, ["blob:http://proxy.test/1"]);
+    Reflect.apply(Object.getPrototypeOf(navigation).navigate, navigation, ["https://b.test/x"]);
+    navigation.navigate("/y");
+    expect(calls).toEqual(["blob:boot", "/~/https/b.test/x", "/~/https/a.test/y"]);
+  });
+});
