@@ -48,6 +48,11 @@ export class AuthStore {
     this.#db.close();
   }
 
+  /** Throws when the database cannot be read. */
+  ping(): void {
+    this.#db.prepare("SELECT count(*) FROM settings").get();
+  }
+
   hasAdmin(): boolean {
     return this.#adminRow() !== null;
   }

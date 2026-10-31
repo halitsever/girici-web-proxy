@@ -58,7 +58,7 @@ export function createApp({
   app.set("trust proxy", trustFn);
   app.use(securityHeaders());
   app.use(serviceWorkerScriptGuard());
-  app.use(healthRouter());
+  app.use(healthRouter(authStore, logger));
   app.use(robotsRouter());
   app.use(sourceRouter(sourceUrl));
   app.use(authRouter(authStore, { setupToken }));
