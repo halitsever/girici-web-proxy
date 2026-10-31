@@ -20,6 +20,8 @@ export class BrandStore {
   readonly #dir: string;
   readonly #store: AuthStore;
   #cached: StoredLogo | null = null;
+  /** The recorded logo whose file was missing, so a lost file costs one disk read, not one per request. */
+  #missing: string | null = null;
 
   constructor(dir: string, store: AuthStore) {
     this.#dir = dir;
@@ -39,9 +41,11 @@ export class BrandStore {
     const meta = this.#store.brandLogo();
     if (!meta) return null;
     if (this.#cached?.sha256 === meta.sha256) return this.#cached;
+    if (this.#missing === meta.sha256) return null;
     try {
       this.#cached = { ...meta, bytes: readFileSync(this.#file()) };
     } catch {
+      this.#missing = meta.sha256;
       return null;
     }
     return this.#cached;
@@ -49,12 +53,13 @@ export class BrandStore {
 
   /** An absent key leaves that part alone; null clears it. */
   update(change: { name?: string | null; logo?: { bytes: Buffer; type: LogoType } | null }): BrandInfo {
-    if (change.name !== undefined) this.#store.setBrandName(change.name);
+    // The file goes first, so a failed write leaves the name and the recorded logo as they were.
     if (change.logo) {
       mkdirSync(this.#dir, { recursive: true });
       const temp = join(this.#dir, "logo.tmp");
       writeFileSync(temp, change.logo.bytes);
       renameSync(temp, this.#file());
+      this.#missing = null;
       this.#store.setBrandLogo({
         type: change.logo.type,
         sha256: createHash("sha256").update(change.logo.bytes).digest("hex"),
@@ -64,6 +69,7 @@ export class BrandStore {
       rmSync(this.#file(), { force: true });
       this.#cached = null;
     }
+    if (change.name !== undefined) this.#store.setBrandName(change.name);
     return this.info();
   }
 
