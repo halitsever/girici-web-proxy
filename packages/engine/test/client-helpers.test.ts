@@ -59,17 +59,17 @@ describe("createHelpers", () => {
     expect(helpers.N(nativeLocation, "blob:http://p.test/1")).toBe("blob:boot/blob:http://p.test/1");
   });
 
-  it("S keeps logical assignment semantics, with a Location always truthy", () => {
+  it("A reads a window's location as a read would and writes it as S does", () => {
     const { helpers, fake, win } = setup();
-    helpers.S(win, "location", "a", "||=");
-    helpers.S(win, "location", "b", "??=");
-    expect(fake.href).toBe("https://site.test/");
-    helpers.S(win, "location", "c", "&&=");
+    const target = helpers.A(win);
+    expect(target.v).toBe(fake);
+    target.v = "c";
     expect(fake.href).toBe("c");
     const plain: Record<string, unknown> = { location: 0 };
-    expect(helpers.S(plain, "location", 1, "&&=")).toBe(0);
-    expect(helpers.S(plain, "location", 2, "||=")).toBe(2);
-    expect(helpers.S(plain, "location", 3, "??=")).toBe(2);
+    const other = helpers.A(plain);
+    expect(other.v).toBe(0);
+    other.v = 2;
+    expect(plain.location).toBe(2);
   });
 
   it("S navigates windows and documents and assigns everything else", () => {

@@ -24,8 +24,9 @@ export interface HelperEnv {
 export interface GiriciHelpers {
   L(value: unknown): unknown;
   N(target: unknown, value: unknown): unknown;
-  /** `op` is the logical assignment operator, when the page wrote one. */
-  S(object: unknown, key: string, value: unknown, op?: string): unknown;
+  S(object: unknown, key: string, value: unknown): unknown;
+  /** `obj.location` as a target the page names in place: `v` reads it as a read would and writes it as S does. */
+  A(object: unknown): { v: unknown };
   D(object: unknown): unknown;
   E(code: unknown): unknown;
   ev(code: unknown): unknown;
@@ -64,26 +65,34 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     return value;
   };
 
+  const S = (object: unknown, key: string, value: unknown): unknown => {
+    if (env.isWindowOrDocument(object)) {
+      const location = (object as { location: { href: string } }).location;
+      const fake = L(location) as { href: string };
+      // A window whose stand-in cannot be found still must not navigate outside the proxy.
+      if (fake === location) location.href = env.navigationUrl(toText(value));
+      else fake.href = toText(value);
+    } else {
+      (object as Record<string, unknown>)[key] = value;
+    }
+    return value;
+  };
+
   return {
     L,
     N: (target, value) => (isRealLocation(target) ? env.navigationUrl(toText(value)) : value),
-    S: (object, key, value, op) => {
-      if (env.isWindowOrDocument(object)) {
-        const location = (object as { location: { href: string } }).location;
-        const fake = L(location) as { href: string };
-        // A Location is always truthy: `||=` and `??=` never assign, `&&=` always does.
-        if (op === "||=" || op === "??=") return fake;
-        // A window whose stand-in cannot be found still must not navigate outside the proxy.
-        if (fake === location) location.href = env.navigationUrl(toText(value));
-        else fake.href = toText(value);
-        return value;
-      }
-      const target = object as Record<string, unknown>;
-      if (op === "&&=") return target[key] && (target[key] = value);
-      if (op === "||=") return target[key] || (target[key] = value);
-      if (op === "??=") return target[key] ?? (target[key] = value);
-      return (target[key] = value);
-    },
+    S,
+    A: (object) =>
+      ({
+        __proto__: null,
+        get v() {
+          const value = (object as { location: unknown }).location;
+          return env.isWindowOrDocument(object) ? L(value) : value;
+        },
+        set v(value: unknown) {
+          S(object, "location", value);
+        },
+      }) as unknown as { v: unknown },
     D: (object) => {
       if (!env.isWindowOrDocument(object)) return object;
       // A null prototype keeps traps a page adds to Object.prototype out of this handler.
