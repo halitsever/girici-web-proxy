@@ -231,7 +231,14 @@ export function install(
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx, partition, ownAnnounce)],
     ["cookies", () => append(listeners, (cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
-    ["navigation", () => append(listeners, installNavigation(win, ctx, cookies, invoke, guard, blobs))],
+    [
+      "navigation",
+      () => {
+        const navigation = installNavigation(win, ctx, cookies, invoke, guard, blobs);
+        append(listeners, navigation);
+        frames?.useOpen(navigation.open);
+      },
+    ],
     ["top site", () => append(listeners, installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.

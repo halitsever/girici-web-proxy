@@ -14,6 +14,8 @@ export interface FrameAdopter {
   walkFor(target: unknown): void;
   /** Adds back the per-document listeners of a document that document.open cleared. */
   reopened(doc: unknown): void;
+  /** The window.open that three-argument document.open calls, so one function proxies, swaps and wraps. */
+  useOpen(open: (this: unknown, ...args: unknown[]) => unknown): void;
 }
 
 export interface FrameWalker {
@@ -298,10 +300,12 @@ export function installFrames(
       view === win ? reopened : view ? (apply(mapGet, reopeners, [view]) as (() => void) | undefined) : undefined;
     reopen?.();
   };
+  // The three-argument form is window.open, so it goes through the navigation layer's open once that exists.
+  let windowOpen: ((this: unknown, ...args: unknown[]) => unknown) | null = null;
   hookDocumentOpen(
     win,
     (url, rest) => {
-      // The three-argument form is window.open, which the navigation hook would otherwise never see.
+      if (windowOpen) return apply(windowOpen, win, [url, rest[0], rest[1]]);
       const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
       return guard.wrap(apply(openWindow, win, [proxied, rest[0], rest[1]]), openedOrigin(proxied, ctx.origin));
     },
@@ -356,6 +360,9 @@ export function installFrames(
   return {
     adopt,
     reopened: reopenedFor,
+    useOpen: (open) => {
+      windowOpen = open;
+    },
     walk: walker.walk,
     walkFor: (target) => {
       const view = viewOf(target);

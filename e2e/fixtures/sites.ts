@@ -1246,7 +1246,7 @@ const DOORS_BLOB_SINKS = page(
 <a id="ctx">context</a>
 <iframe name="t-link"></iframe><iframe name="t-detached"></iframe><iframe name="t-dispatch"></iframe>
 <iframe name="t-svg"></iframe><iframe name="t-xlink"></iframe><iframe name="t-form"></iframe><iframe name="t-request"></iframe>
-<iframe id="nav"></iframe><iframe id="writer"></iframe>
+<iframe id="nav"></iframe><iframe id="writer"></iframe><iframe name="t-docopen"></iframe>
 <iframe id="meta-attr"></iframe><iframe id="meta-property"></iframe><iframe id="meta-markup"></iframe>
 <div id="box"></div>
 <script>
@@ -1350,6 +1350,7 @@ const DOORS_BLOB_SINKS = page(
     frameRun("location = parent.svgBlob('location-assign')");
     frameRun("location &&= parent.svgBlob('location-and')");
     frameRun("[location] = [parent.svgBlob('location-pattern')]");
+    document.open(svg("document-open"), "t-docopen", "");
 
     const refresh = (id) => byId(id).contentDocument;
     const byAttribute = refresh("meta-attr").createElement("meta");

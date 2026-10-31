@@ -204,6 +204,18 @@ describe("installFrames", () => {
     expect(installed).toEqual([{ child: { popup: "/~/https://x.test/" }, navigating: true }]);
   });
 
+  it("opens through the navigation layer's open once there is one, with the page's own arguments", () => {
+    const { win, ctors, adopter } = setup();
+    const calls: unknown[][] = [];
+    adopter.useOpen(function (this: unknown, ...args: unknown[]) {
+      calls.push([this, ...args]);
+      return "opened";
+    } as never);
+    const open = ctors.Document!.prototype.open as (...args: unknown[]) => unknown;
+    expect(open.call(win.document, "blob:http://p.test/1", "_self", "")).toBe("opened");
+    expect(calls).toEqual([[win, "blob:http://p.test/1", "_self", ""]]);
+  });
+
   it("hands the window document.open opens to the guard, with the origin it is headed to", () => {
     const wrapped: Array<[unknown, string | undefined]> = [];
     const guard: WindowGuard = {

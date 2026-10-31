@@ -15,6 +15,7 @@ import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import type { BlobDocuments } from "./blob-documents.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
+import { maskNative } from "./native-mask.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { openedOrigin, type WindowGuard } from "./windows.ts";
@@ -27,6 +28,11 @@ const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
 // Taken at load: these hooks run on page calls, after page code may have replaced them.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 
+export interface NavigationHooks extends DocumentListeners {
+  /** The hooked window.open, which owns proxying, the blob swap and the guard for every window opened by URL. */
+  open: (this: unknown, ...args: unknown[]) => unknown;
+}
+
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
 export function installNavigation(
   win: Realm,
@@ -35,7 +41,7 @@ export function installNavigation(
   invoke: Invoke,
   guard: WindowGuard,
   blobs: Pick<BlobDocuments, "swap" | "swapLink" | "restoreLinks" | "swapForm">,
-): DocumentListeners {
+): NavigationHooks {
   const history = win.History.prototype;
   const historyOf = ownDescriptor(win, "history")?.get;
   for (const method of ["pushState", "replaceState"] as const) {
@@ -59,12 +65,13 @@ export function installNavigation(
   }
 
   const nativeOpen = win.open;
-  win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
+  const hookedOpen = maskNative(function (this: unknown, url?: unknown, target?: unknown, features?: unknown) {
     const proxied = url === undefined || url === null || url === "" ? url : blobs.swap(ctx.toProxy(toText(url)));
     const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
     // Until the page it was opened for arrives, a popup shows a blank page of this origin.
     return guard.wrap(opened, openedOrigin(proxied, ctx.origin)) as Window | null;
-  };
+  }, nativeOpen);
+  win.open = hookedOpen as typeof win.open;
 
   // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.
   const navigation = (win as unknown as { navigation?: { navigate?: (url: string, options?: unknown) => unknown } })
@@ -172,7 +179,7 @@ export function installNavigation(
     }
   };
   listen();
-  return { listen };
+  return { listen, open: hookedOpen };
 }
 
 function isPlainClick(event: Event): boolean {
