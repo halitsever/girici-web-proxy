@@ -20,6 +20,7 @@ import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
 import { errorResponse, forbiddenResponse } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
+import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
 import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
@@ -61,6 +62,10 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
+const sealing = new Sealing(createIdbKeyStore(), prefs);
+// The admin's switch reaches open tabs within a minute without a UI tab telling the worker.
+const INSTANCE_SEAL_INTERVAL = 60_000;
+let instanceSealCheckedAt = -Infinity;
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
@@ -89,6 +94,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   seeding = seedUiClients();
+  refreshInstanceSeal(true);
   const cleanup = caches
     .keys()
     .then((keys) =>
@@ -109,6 +115,16 @@ async function seedUiClients(): Promise<void> {
   }
 }
 
+/** Fire and forget; a failed check keeps the switch the worker last heard. */
+function refreshInstanceSeal(force = false): void {
+  const now = Date.now();
+  if (!force && now - instanceSealCheckedAt < INSTANCE_SEAL_INTERVAL) return;
+  instanceSealCheckedAt = now;
+  void readInstanceSeal(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" })).then(
+    (instanceSeal) => (instanceSeal === null ? undefined : prefs.set({ instanceSeal })),
+  );
+}
+
 async function uiReady(): Promise<void> {
   await Promise.all([ui.ready(), seeding]);
 }
@@ -122,6 +138,11 @@ self.addEventListener("message", (event) => {
   const answer = event.ports[0];
   event.waitUntil(
     uiReady().then(async () => {
+      const sealRequest = readSealMessage(event.data, event.source as Client | null, self.location.origin, ui);
+      if (sealRequest !== null) {
+        answer?.postMessage({ path: await sealing.addressFor(sealRequest).catch(() => null) });
+        return;
+      }
       const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
       if (!update) return;
       await prefs.set(update);

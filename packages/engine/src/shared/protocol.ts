@@ -46,9 +46,20 @@ export interface CookieSnapshot {
 /** Settings the service worker needs but cannot read from the UI's localStorage. */
 export interface EnginePrefs {
   blockThirdPartyCookies: boolean;
+  /** This browser's own switch for sealed page addresses. */
+  sealAddresses: boolean;
+  /** The admin's switch, which turns sealing on for every visitor. */
+  instanceSeal: boolean;
 }
 
-export const DEFAULT_ENGINE_PREFS: EnginePrefs = { blockThirdPartyCookies: true };
+export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
+  blockThirdPartyCookies: true,
+  sealAddresses: false,
+  instanceSeal: false,
+};
+
+/** The UI asks the service worker for a page's sealed address; the UI never holds the key. */
+export const SEAL_MESSAGE = "girici:seal";
 
 /** One registrable domain's stored data, as the Settings screen lists it. */
 export interface SiteSummary {
