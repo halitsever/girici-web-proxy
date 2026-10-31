@@ -103,7 +103,9 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      headers.append(name, name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value);
+      const next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value;
+      // An empty refresh is one that would have loaded a blob document.
+      if (next !== "" || value === "") headers.append(name, next);
     } catch {
       // A value the Headers API rejects would otherwise fail the whole response.
     }
@@ -161,8 +163,11 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
         site: schemefulSite(ctx.target),
       };
       if (ctx.cookiesBlocked) config.cookiesBlocked = true;
-      const inject = clientTag(new URL(ctx.clientScript, ctx.origin).href, config);
-      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
+      const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
+      const inject = clientTag(clientUrl, config);
+      const frameInject = (base: URL) =>
+        clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
+      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject, frameInject });
     }
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);

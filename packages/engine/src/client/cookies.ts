@@ -1,3 +1,4 @@
+import { append, define, ownValue, parseJson, quoteJson, toText } from "../shared/primordials.ts";
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
   COOKIE_MESSAGE,
@@ -7,6 +8,7 @@ import {
   type ClientConfig,
   type CookieSnapshot,
 } from "../shared/protocol.ts";
+import { readCookies } from "./config.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { allowVersionReload } from "./version.ts";
@@ -28,9 +30,10 @@ export function installCookies(
   win: Realm,
   ctx: UrlContext,
   config: ClientConfig,
-  container: ServiceWorkerContainer | null,
+  container: () => ServiceWorkerContainer | null,
+  reload: () => void,
 ): CookieBridge {
-  let mirror = [...config.cookies];
+  let mirror = copyCookies(config.cookies);
   let blocked = config.cookiesBlocked === true;
   let seq = 0;
   // Answers to the previous document's writes must not land in the renewed document's mirror.
@@ -64,19 +67,22 @@ export function installCookies(
     const mySeq = ++seq;
     const myGeneration = generation;
     inflight++;
+    // Written out from strings, so a page's JSON.stringify or toJSON never sees the cookie.
     const request = nativeFetch(ctx.origin + COOKIE_RPC_PATH, {
+      __proto__: null,
       method: "POST",
-      body: JSON.stringify({ v: PROTOCOL_VERSION, seq: mySeq, cookie: text }),
-    })
+      body: `{"v":${PROTOCOL_VERSION},"seq":${mySeq},"cookie":${quoteJson(text)}}`,
+    } as RequestInit)
       .then(async (response) => {
         if (response.status === 409) {
           // The worker updated under this page; one reload brings a matching runtime.
-          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) win.location.reload();
+          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
           return;
         }
-        const body = (await response.json()) as { cookies?: CookieSnapshot[] };
+        const body: unknown = await response.json();
+        const cookies = typeof body === "object" && body !== null ? readCookies(ownValue(body, "cookies")) : null;
         // A newer write may already be in the mirror, so only the latest answer replaces it.
-        if (Array.isArray(body.cookies) && mySeq === seq && myGeneration === generation) mirror = body.cookies;
+        if (cookies && mySeq === seq && myGeneration === generation) mirror = cookies;
       })
       .catch(() => {})
       .finally(() => {
@@ -86,22 +92,26 @@ export function installCookies(
     pending = pending ? Promise.all([pending, request]).then(() => {}) : request;
   };
 
-  Object.defineProperty(win.Document.prototype, "cookie", {
+  define(win.Document.prototype, "cookie", {
     configurable: true,
     enumerable: true,
     get: () => cookieString(mirror, ctx.realUrl(), Date.now()),
-    set: (value: unknown) => write(String(value)),
+    set: (value: unknown) => write(toText(value)),
   });
 
-  const onMessage = (event: MessageEvent<{ type?: unknown; v?: unknown; changes?: unknown }>) => {
-    const { type, v, changes } = event.data ?? {};
-    if (type === COOKIE_MESSAGE && v === PROTOCOL_VERSION && Array.isArray(changes)) apply(changes as CookieSnapshot[]);
+  const onMessage = (event: MessageEvent) => {
+    const data: unknown = event.data;
+    if (typeof data !== "object" || data === null) return;
+    if (ownValue(data, "type") !== COOKIE_MESSAGE || ownValue(data, "v") !== PROTOCOL_VERSION) return;
+    const changes = readCookies(ownValue(data, "changes"));
+    if (changes) apply(changes);
   };
   const listen = () => {
-    if (!container) return;
-    container.addEventListener("message", onMessage);
+    const current = container();
+    if (!current) return;
+    current.addEventListener("message", onMessage);
     // Messages wait in a queue until this runs.
-    container.startMessages();
+    current.startMessages();
   };
   listen();
 
@@ -112,17 +122,38 @@ export function installCookies(
     applySync: (header) => {
       if (!header) return;
       try {
-        apply(JSON.parse(decodeHeaderValue(header)) as CookieSnapshot[]);
+        const changes = readCookies(parseJson(decodeHeaderValue(header)));
+        if (changes) apply(changes);
       } catch {
         // A malformed header only costs the mirror one update.
       }
     },
     reset: (next) => {
-      mirror = [...next.cookies];
+      mirror = copyCookies(next.cookies);
       blocked = next.cookiesBlocked === true;
       seq = 0;
       generation++;
     },
-    snapshot: () => [...mirror],
+    snapshot: () => copyCookies(mirror),
   };
+}
+
+/** Indexed copies with null prototypes: snapshots go into frames' configs, which page code must not steer. */
+function copyCookies(cookies: readonly CookieSnapshot[]): CookieSnapshot[] {
+  const copy: CookieSnapshot[] = [];
+  for (let index = 0; index < cookies.length; index++) {
+    const cookie = cookies[index] as CookieSnapshot;
+    append(copy, {
+      __proto__: null,
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      hostOnly: cookie.hostOnly,
+      secure: cookie.secure,
+      expires: cookie.expires,
+      creation: cookie.creation,
+    } as CookieSnapshot);
+  }
+  return copy;
 }

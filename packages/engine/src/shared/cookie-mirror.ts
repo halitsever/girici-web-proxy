@@ -2,7 +2,10 @@ import type { CookieSnapshot } from "./protocol.ts";
 
 /** Parses a document.cookie assignment as browsers do for scripts; null when a script may not set it. */
 export function parseScriptCookie(input: string, url: URL, now: number): CookieSnapshot | null {
-  const [pair = "", ...attributes] = input.split(";");
+  // Indexed, without destructuring: this runs on the page's cookie writes, after the page may have replaced the
+  // array iterator.
+  const parts = input.split(";");
+  const pair = parts[0] ?? "";
   const separator = pair.indexOf("=");
   const name = separator < 0 ? "" : pair.slice(0, separator).trim();
   const value = (separator < 0 ? pair : pair.slice(separator + 1)).trim();
@@ -14,7 +17,8 @@ export function parseScriptCookie(input: string, url: URL, now: number): CookieS
   let maxAge: number | null = null;
   let expires: number | null = null;
   let secure = false;
-  for (const attribute of attributes) {
+  for (let index = 1; index < parts.length; index++) {
+    const attribute = parts[index] as string;
     const equals = attribute.indexOf("=");
     const key = (equals < 0 ? attribute : attribute.slice(0, equals)).trim().toLowerCase();
     const raw = equals < 0 ? "" : attribute.slice(equals + 1).trim();
@@ -56,7 +60,8 @@ export function applyCookieChanges(
   now: number,
 ): CookieSnapshot[] {
   let next = cookies;
-  for (const change of changes) {
+  for (let index = 0; index < changes.length; index++) {
+    const change = changes[index] as CookieSnapshot;
     next = next.filter(
       (cookie) => !(cookie.name === change.name && cookie.domain === change.domain && cookie.path === change.path),
     );

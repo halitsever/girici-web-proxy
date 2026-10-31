@@ -1,3 +1,4 @@
+import { joined } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, WORKER_NONCE_PARAM, WORKER_RPC_PATH } from "../shared/protocol.ts";
 import { hookConstructor } from "./constructors.ts";
 
@@ -101,10 +102,13 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
     const blobOptions = { __proto__: null, type: "text/javascript" } as { type: string };
     return apply(createObjectURL, urls, [new Blob(blobParts(code), blobOptions)]) as string;
   };
-  for (const name of ["Worker", "SharedWorker"] as const) {
+  // Indexed, without spreads: adopting a frame installs this inside a page call.
+  const names = ["Worker", "SharedWorker"] as const;
+  for (let index = 0; index < names.length; index++) {
+    const name = names[index] as (typeof names)[number];
     const Native = globals[name];
     if (!Native) continue;
-    globals[name] = hookConstructor(Native, (input) => [bootstrapUrl(toText(input[0]), input[1]), ...input.slice(1)]);
+    globals[name] = hookConstructor(Native, (input) => joined([bootstrapUrl(toText(input[0]), input[1])], input, 1));
   }
 }
 
@@ -124,7 +128,7 @@ function randomHex(): string {
  * One Blob part whose iteration reads only own properties, so a page that replaced the array iterator or its next
  * cannot hand the Blob a script of its own.
  */
-function blobParts(part: string): string[] {
+export function blobParts(part: string): string[] {
   const parts = [part];
   let given = false;
   const next = () => {

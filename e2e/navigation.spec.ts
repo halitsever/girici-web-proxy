@@ -71,7 +71,7 @@ test("loads iframes through the proxy", async ({ page }) => {
   const frame = page.frameLocator("#frame");
   await expect(frame.locator("h1")).toHaveText("Frame");
   const results = JSON.parse((await frame.locator("#frame-results").textContent()) ?? "{}");
-  expect(results).toEqual({ href: "https://site-b.test/frame", parent: "https://site-a.test/nav" });
+  expect(results).toEqual({ href: "https://site-b.test/frame", parent: "SecurityError" });
 });
 
 test("resolves URLs against <base>, srcset and stylesheets", async ({ page }) => {
@@ -82,6 +82,14 @@ test("resolves URLs against <base>, srcset and stylesheets", async ({ page }) =>
   await expect.poll(() => page.locator("#srcset").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
   await expect(page.locator("#inline")).toHaveCSS("background-image", /\/~\/https\/cdn\.site-a\.test\/b\.png/);
   await expect(page.locator("#external")).toHaveCSS("background-image", /\/~\/https\/cdn\.site-a\.test\/b\.png/);
+});
+
+test("keeps a blank popup the page navigates later inside the proxy", async ({ page }) => {
+  const popup = page.waitForEvent("popup");
+  await page.click("#blank-popup");
+  const opened = await popup;
+  await expect(opened.locator("h1")).toHaveText("Site B");
+  await expect(opened).toHaveURL(/\/~\/https\/site-b\.test\/$/);
 });
 
 test("keeps script navigation of a blank frame inside the proxy", async ({ page }) => {

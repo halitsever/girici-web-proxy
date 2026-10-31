@@ -322,6 +322,32 @@ describe("buildPageResponse", () => {
       ]),
       context({ destination: "document", navigation: true }),
     );
-    expect(res.headers.get("refresh")).toBe("0; url=/~/https/site-b.test/x");
+    expect(res.headers.get("refresh")).toBe("0; url=http://127.0.0.1:41000/~/https/site-b.test/x");
+  });
+
+  it("drops a Refresh header that would load a blob document, which no bootstrap can cover here", async () => {
+    const res = await buildPageResponse(
+      upstream([
+        ["content-type", "text/plain"],
+        ["refresh", "0; url=blob:http://proxy.test/1"],
+      ]),
+      context({ destination: "document", navigation: true }),
+    );
+    expect(res.headers.has("refresh")).toBe(false);
+  });
+
+  it("serves no markup that loads a blob document", async () => {
+    const res = await buildPageResponse(
+      upstream(
+        [["content-type", "text/html"]],
+        '<meta http-equiv="refresh" content="0;url=blob:http://proxy.test/1"><iframe src="blob:http://proxy.test/2"></iframe>' +
+          '<object data=" BLOB:http://proxy.test/3"></object><embed src="blob:http://proxy.test/4"><frame src="blob:x">',
+      ),
+      context({ destination: "document", navigation: true }),
+    );
+    const text = await res.text();
+    expect(text).not.toMatch(/blob:/i);
+    expect(text).toContain('<iframe src="about:blank">');
+    expect(text).toContain('<meta http-equiv="refresh" content="">');
   });
 });
