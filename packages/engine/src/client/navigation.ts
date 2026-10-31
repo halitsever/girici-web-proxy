@@ -1,4 +1,5 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
+import { apply, hrefOf, isWebUrl, newUrl, originOf, pathnameOf, startsWith, toText } from "../shared/primordials.ts";
 import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
@@ -18,23 +19,23 @@ export function installNavigation(
   for (const method of ["pushState", "replaceState"] as const) {
     const native = history[method];
     history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      if (url === undefined || url === null) return native.call(this, data, unused, url);
+      if (url === undefined || url === null) return apply(native, this, [data, unused, url]);
       const current = ctx.realUrl();
-      const target = new URL(String(url), current);
-      if (target.origin !== current.origin) {
+      const target = newUrl(toText(url), current);
+      if (originOf(target) !== originOf(current)) {
         throw new win.DOMException(
-          `A history state with URL '${target.href}' cannot be created in a document with origin '${current.origin}'.`,
+          `A history state with URL '${hrefOf(target)}' cannot be created in a document with origin '${originOf(current)}'.`,
           "SecurityError",
         );
       }
-      return native.call(this, data, unused, encodeUrl(target));
+      return apply(native, this, [data, unused, encodeUrl(target)]);
     };
   }
 
   const nativeOpen = win.open;
   win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
-    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(String(url));
-    return nativeOpen.call(this ?? win, proxied, target, features);
+    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
+    return apply(nativeOpen, this ?? win, [proxied, target, features]);
   };
 
   // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.
@@ -42,7 +43,7 @@ export function installNavigation(
     .navigation;
   if (navigation && typeof navigation.navigate === "function") {
     const nativeNavigate = navigation.navigate.bind(navigation);
-    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(String(url)), options);
+    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(toText(url)), options);
   }
 
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
@@ -79,12 +80,12 @@ export function installNavigation(
   const { submit, requestSubmit } = form;
   form.submit = function (this: HTMLFormElement) {
     fix(this, "action");
-    submit.call(this);
+    apply(submit, this, []);
   };
   form.requestSubmit = function (this: HTMLFormElement, submitter?: HTMLElement | null) {
     fix(this, "action");
     if (submitter) fix(submitter, "formaction");
-    requestSubmit.call(this, submitter);
+    apply(requestSubmit, this, [submitter]);
   };
 
   // These run after the page's own handlers, so links and forms a page handles itself are left alone.
@@ -118,7 +119,7 @@ export function installNavigation(
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");
-        submit.call(target);
+        apply(submit, target, []);
         extra?.remove();
       });
     },
@@ -147,8 +148,8 @@ function isPlainClick(event: Event): boolean {
 function resolve(raw: string | undefined, ctx: UrlContext): string | null {
   if (!raw) return null;
   try {
-    const url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    const url = newUrl(raw, newUrl(encodeUrl(ctx.realBase()), ctx.origin));
+    return isWebUrl(url) ? hrefOf(url) : null;
   } catch {
     return null;
   }
@@ -178,11 +179,12 @@ function escapes(raw: string, ctx: UrlContext): boolean {
   if (script !== null) return script !== raw;
   let url: URL;
   try {
-    url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));
+    url = newUrl(raw, newUrl(encodeUrl(ctx.realBase()), ctx.origin));
   } catch {
     return false;
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  if (url.origin !== ctx.origin) return true;
-  return !url.pathname.startsWith(PROXY_PREFIX) && !isReservedPath(url.pathname);
+  if (!isWebUrl(url)) return false;
+  if (originOf(url) !== ctx.origin) return true;
+  const pathname = pathnameOf(url);
+  return !startsWith(pathname, PROXY_PREFIX) && !isReservedPath(pathname);
 }

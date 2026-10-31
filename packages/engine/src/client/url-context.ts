@@ -1,4 +1,16 @@
 import { decodeUrl } from "../shared/codec.ts";
+import {
+  apply,
+  hashOf,
+  hrefOf,
+  isWebUrl,
+  newUrl,
+  originOf,
+  pathnameOf,
+  searchOf,
+  setUrlPart,
+  toText,
+} from "../shared/primordials.ts";
 import type { InheritedContext } from "../shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 
@@ -26,32 +38,32 @@ export function createUrlContext(win: Realm, initial?: InheritedContext): UrlCon
   const realUrl = (): URL => {
     let native: URL | null = null;
     try {
-      native = new URL(win.location.href);
+      native = newUrl(win.location.href);
     } catch {
       // A frame with an opaque address cannot be parsed; the inherited base stands in.
     }
-    const real = native && native.origin === origin ? decodeUrl(native.pathname + native.search) : null;
+    const real = native && originOf(native) === origin ? decodeUrl(pathnameOf(native) + searchOf(native)) : null;
     if (native && real) {
-      real.hash = native.hash;
+      setUrlPart(real, "hash", hashOf(native));
       return real;
     }
     if (inherited) {
       try {
-        return new URL(inherited.base);
+        return newUrl(inherited.base);
       } catch {
         // An unusable inherited base falls back to the frame's own address.
       }
     }
-    return native ?? new URL(origin);
+    return native ?? newUrl(origin);
   };
 
   const realBase = (): URL => {
     const page = realUrl();
-    const nativeBase = nativeBaseUri ? String(nativeBaseUri.call(win.document)) : page.href;
+    const nativeBase = nativeBaseUri ? toText(apply(nativeBaseUri, win.document, [])) : hrefOf(page);
     try {
-      const base = new URL(unrewriteUrl(nativeBase, page, origin));
+      const base = newUrl(unrewriteUrl(nativeBase, page, origin));
       // A blank or srcdoc frame reports an about: base that cannot resolve relative URLs; use the real page instead.
-      return base.protocol === "http:" || base.protocol === "https:" ? base : page;
+      return isWebUrl(base) ? base : page;
     } catch {
       return page;
     }

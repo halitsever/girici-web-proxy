@@ -1,4 +1,16 @@
 import { encodeUrl } from "../shared/codec.ts";
+import {
+  hashOf,
+  hrefOf,
+  includes,
+  indexOf,
+  isWebUrl,
+  newUrl,
+  setUrlPart,
+  sliceOf,
+  toText,
+  urlPart,
+} from "../shared/primordials.ts";
 import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 
 export interface LocationEnv {
@@ -38,40 +50,39 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
       return;
     }
     const current = env.real();
-    const target = new URL(String(value), current);
+    const target = newUrl(toText(value), current);
     if (isFragmentNavigation(target, current)) {
-      env.setHash(target.hash);
+      env.setHash(hashOf(target));
       return;
     }
-    const web = target.protocol === "http:" || target.protocol === "https:";
-    env.navigate(web ? encodeUrl(target) : target.href, mode);
+    env.navigate(isWebUrl(target) ? encodeUrl(target) : hrefOf(target), mode);
   };
 
   const properties: PropertyDescriptorMap = {
-    href: { get: () => env.real().href, set: (value: unknown) => go(value, "assign"), enumerable: true },
-    origin: { get: () => env.real().origin, enumerable: true },
+    href: { get: () => hrefOf(env.real()), set: (value: unknown) => go(value, "assign"), enumerable: true },
+    origin: { get: () => urlPart(env.real(), "origin"), enumerable: true },
     hash: {
-      get: () => env.real().hash,
+      get: () => hashOf(env.real()),
       set: (value: unknown) => {
-        const next = new URL(env.real().href);
-        next.hash = String(value);
-        env.setHash(next.hash);
+        const next = newUrl(hrefOf(env.real()));
+        setUrlPart(next, "hash", toText(value));
+        env.setHash(hashOf(next));
       },
       enumerable: true,
     },
     assign: { value: (url: unknown) => go(url, "assign") },
     replace: { value: (url: unknown) => go(url, "replace") },
     reload: { value: () => env.reload() },
-    toString: { value: () => env.real().href },
+    toString: { value: () => hrefOf(env.real()) },
     [Symbol.toStringTag]: { value: "Location" },
   };
   for (const part of NAVIGATING_PARTS) {
     properties[part] = {
-      get: () => env.real()[part],
+      get: () => urlPart(env.real(), part),
       set: (value: unknown) => {
-        const next = new URL(env.real().href);
-        next[part] = String(value);
-        go(next, "assign");
+        const next = newUrl(hrefOf(env.real()));
+        setUrlPart(next, part, toText(value));
+        go(hrefOf(next), "assign");
       },
       enumerable: true,
     };
@@ -81,11 +92,12 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
 
 /** Browsers only scroll when the target differs from the current URL in its fragment alone. */
 function isFragmentNavigation(target: URL, current: URL): boolean {
-  if (!target.href.includes("#")) return false;
+  if (!includes(hrefOf(target), "#")) return false;
   return withoutFragment(target) === withoutFragment(current);
 }
 
 function withoutFragment(url: URL): string {
-  const index = url.href.indexOf("#");
-  return index < 0 ? url.href : url.href.slice(0, index);
+  const href = hrefOf(url);
+  const index = indexOf(href, "#");
+  return index < 0 ? href : sliceOf(href, 0, index);
 }

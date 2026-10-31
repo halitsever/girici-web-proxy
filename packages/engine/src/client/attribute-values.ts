@@ -1,4 +1,5 @@
 import { PROXY_PREFIX } from "../shared/codec.ts";
+import { lowerCase, setHas, startsWith, trim } from "../shared/primordials.ts";
 import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
@@ -9,11 +10,11 @@ const INTEGRITY_ELEMENTS = new Set(["script", "link"]);
 export type AttributeKind = "url" | "srcset" | "integrity" | "html";
 
 export function attributeKind(element: string, name: string): AttributeKind | null {
-  const attribute = name.toLowerCase();
-  if (attribute === "srcdoc" && element.toLowerCase() === "iframe") return "html";
-  if (URL_ATTRIBUTES.has(attribute) || (attribute === "data" && element.toLowerCase() === "object")) return "url";
-  if (attribute === "integrity" && INTEGRITY_ELEMENTS.has(element.toLowerCase())) return "integrity";
-  return SRCSET_ATTRIBUTES.has(attribute) ? "srcset" : null;
+  const attribute = lowerCase(name);
+  if (attribute === "srcdoc" && lowerCase(element) === "iframe") return "html";
+  if (setHas(URL_ATTRIBUTES, attribute) || (attribute === "data" && lowerCase(element) === "object")) return "url";
+  if (attribute === "integrity" && setHas(INTEGRITY_ELEMENTS, lowerCase(element))) return "integrity";
+  return setHas(SRCSET_ATTRIBUTES, attribute) ? "srcset" : null;
 }
 
 export function rewriteAttribute(
@@ -49,8 +50,8 @@ export function restoreAttribute(
   unhtml?: (markup: string) => string,
 ): string {
   const restore = (url: string) => {
-    const trimmed = url.trim();
-    return trimmed.startsWith(PROXY_PREFIX) || trimmed.startsWith(`${origin}/`) || trimmed.startsWith(WRAPPED_SCRIPT)
+    const trimmed = trim(url);
+    return startsWith(trimmed, PROXY_PREFIX) || startsWith(trimmed, `${origin}/`) || startsWith(trimmed, WRAPPED_SCRIPT)
       ? unrewriteUrl(trimmed, base, origin)
       : url;
   };

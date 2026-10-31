@@ -1,4 +1,22 @@
 import { decodeUrl, encodeUrl, isReservedPath } from "./codec.ts";
+import {
+  endsWith,
+  exec,
+  hashOf,
+  hrefOf,
+  isWebUrl as isWeb,
+  lowerCase,
+  newUrl,
+  originOf,
+  parseUrl as parse,
+  pathnameOf,
+  replaceAll,
+  searchOf,
+  setUrlPart,
+  sliceOf,
+  startsWith,
+  trim,
+} from "./primordials.ts";
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i;
 const EDGE_WHITESPACE = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
@@ -7,35 +25,40 @@ const TAB_OR_NEWLINE = /[\t\n\r]/g;
 const JAVASCRIPT = /^javascript:/i;
 const HELPER_CALL = "javascript:__g$.J(";
 const PERCENT_BYTE = /^%[\da-f]{2}/i;
+const TRAILING_COMMAS = /,+$/g;
+const INNER_WHITESPACE = /[\t\n\f\r ]+/g;
+const none = () => "";
+const space = () => " ";
 
 /** Rewrites a URL found in a page so that requests and navigations stay on the proxy. */
 export function rewriteUrl(raw: string, base: URL, origin: string): string {
   const script = rewriteJavascriptUrl(raw);
   if (script !== null) return script;
   // Browsers ignore ASCII whitespace around URL attributes.
-  const value = raw.replace(EDGE_WHITESPACE, "");
-  if (!value || value.startsWith("#")) return raw;
+  const value = replaceAll(raw, EDGE_WHITESPACE, none);
+  if (!value || startsWith(value, "#")) return raw;
 
-  const scheme = SCHEME.exec(value)?.[0].toLowerCase();
+  const scheme = exec(SCHEME, value)?.[0];
   if (scheme) {
-    if (scheme !== "http:" && scheme !== "https:") return raw;
+    const lower = lowerCase(scheme);
+    if (lower !== "http:" && lower !== "https:") return raw;
     const absolute = parse(value);
     if (!absolute) return raw;
-    if (absolute.origin !== origin) return encodeUrl(absolute);
+    if (originOf(absolute) !== origin) return encodeUrl(absolute);
     return isWeb(base) ? ownUrl(absolute, base, raw) : raw;
   }
   // Against a base such as about:blank, relative URLs have no web target to proxy.
   if (!isWeb(base)) return raw;
 
-  if (value.startsWith("/") && !value.startsWith("//")) {
+  if (startsWith(value, "/") && !startsWith(value, "//")) {
     const own = parse(value, origin);
-    if (own && decodeUrl(own.pathname + own.search)) return raw;
+    if (own && decodeUrl(pathnameOf(own) + searchOf(own))) return raw;
   }
 
   // The URL parser drops tabs and newlines, so "java\nscript:" only shows its scheme once resolved.
   const real = parse(value, base);
   if (!real || !isWeb(real)) return raw;
-  if (!value.startsWith("/") && resolvesInsideProxy(value, real, base, origin)) return raw;
+  if (!startsWith(value, "/") && resolvesInsideProxy(value, real, base, origin)) return raw;
   return encodeUrl(real);
 }
 
@@ -45,17 +68,18 @@ export function unrewriteUrl(value: string, base: URL, origin: string): string {
   if (code !== null) return `javascript:${code}`;
   if (!isWeb(base)) return value;
   // blob:, data: and other non-web schemes are the page's own and never one of our proxy URLs.
-  const scheme = SCHEME.exec(value)?.[0].toLowerCase();
-  if (scheme && scheme !== "http:" && scheme !== "https:") return value;
-  const url = parse(value, new URL(encodeUrl(base), origin));
-  if (!url || url.origin !== origin) return value;
-  const real = decodeUrl(url.pathname + url.search);
+  const scheme = exec(SCHEME, value)?.[0];
+  const lower = scheme ? lowerCase(scheme) : "";
+  if (lower && lower !== "http:" && lower !== "https:") return value;
+  const url = parse(value, newUrl(encodeUrl(base), origin));
+  if (!url || originOf(url) !== origin) return value;
+  const real = decodeUrl(pathnameOf(url) + searchOf(url));
   if (real) {
-    real.hash = url.hash;
-    return real.href;
+    setUrlPart(real, "hash", hashOf(url));
+    return hrefOf(real);
   }
-  if (isReservedPath(url.pathname)) return value;
-  return new URL(url.pathname + url.search + url.hash, base.origin).href;
+  if (isReservedPath(pathnameOf(url))) return value;
+  return hrefOf(newUrl(pathnameOf(url) + searchOf(url) + hashOf(url), originOf(base)));
 }
 
 /**
@@ -104,7 +128,7 @@ function percentDecode(text: string): string {
 
 /** Follows the HTML srcset parsing rules, so URLs that contain commas survive. */
 export function rewriteSrcset(value: string, rewrite: (url: string) => string): string {
-  const candidates: string[] = [];
+  let result = "";
   let index = 0;
   while (index < value.length) {
     while (index < value.length && (isWhitespace(value[index]) || value[index] === ",")) index++;
@@ -112,57 +136,41 @@ export function rewriteSrcset(value: string, rewrite: (url: string) => string): 
 
     const start = index;
     while (index < value.length && !isWhitespace(value[index])) index++;
-    let url = value.slice(start, index);
+    let url = sliceOf(value, start, index);
     let descriptors = "";
-    if (url.endsWith(",")) {
-      url = url.replace(/,+$/, "");
+    if (endsWith(url, ",")) {
+      url = replaceAll(url, TRAILING_COMMAS, none);
     } else {
       const descriptorStart = index;
       let depth = 0;
       while (index < value.length) {
         const char = value[index];
         if (char === "(") depth++;
-        else if (char === ")") depth = Math.max(0, depth - 1);
+        else if (char === ")") depth = depth > 0 ? depth - 1 : 0;
         else if (char === "," && depth === 0) break;
         index++;
       }
-      descriptors = value
-        .slice(descriptorStart, index)
-        .trim()
-        .replace(/[\t\n\f\r ]+/g, " ");
+      descriptors = replaceAll(trim(sliceOf(value, descriptorStart, index)), INNER_WHITESPACE, space);
     }
-    if (url) candidates.push(descriptors ? `${rewrite(url)} ${descriptors}` : rewrite(url));
+    if (url) result += (result ? ", " : "") + (descriptors ? `${rewrite(url)} ${descriptors}` : rewrite(url));
   }
-  return candidates.join(", ");
+  return result;
 }
 
 /** Only proxy URLs stay on our origin; naming our UI, engine or admin paths from a page reaches the page's site. */
 function ownUrl(url: URL, base: URL, raw: string): string {
-  if (decodeUrl(url.pathname + url.search)) return raw;
-  return encodeUrl(new URL(url.pathname + url.search + url.hash, base.origin));
+  if (decodeUrl(pathnameOf(url) + searchOf(url))) return raw;
+  return encodeUrl(newUrl(pathnameOf(url) + searchOf(url) + hashOf(url), originOf(base)));
 }
 
 /** Too many "../" segments would climb out of the proxy prefix, so such URLs are rewritten too. */
 function resolvesInsideProxy(value: string, real: URL, base: URL, origin: string): boolean {
-  const viaProxy = parse(value, new URL(encodeUrl(base), origin));
-  if (!viaProxy || viaProxy.origin !== origin) return false;
-  const decoded = decodeUrl(viaProxy.pathname + viaProxy.search);
+  const viaProxy = parse(value, newUrl(encodeUrl(base), origin));
+  if (!viaProxy || originOf(viaProxy) !== origin) return false;
+  const decoded = decodeUrl(pathnameOf(viaProxy) + searchOf(viaProxy));
   if (!decoded) return false;
-  decoded.hash = viaProxy.hash;
-  return decoded.href === real.href;
-}
-
-function parse(value: string, base?: string | URL): URL | null {
-  try {
-    // Safari 17.4, which the engine supports, has no URL.parse.
-    return new URL(value, base);
-  } catch {
-    return null;
-  }
-}
-
-function isWeb(url: URL): boolean {
-  return url.protocol === "http:" || url.protocol === "https:";
+  setUrlPart(decoded, "hash", hashOf(viaProxy));
+  return hrefOf(decoded) === hrefOf(real);
 }
 
 function isWhitespace(char: string | undefined): boolean {

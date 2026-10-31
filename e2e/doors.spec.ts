@@ -56,6 +56,23 @@ test("gives every new same-origin window the runtime before page code can reach 
   expect(popupProbe).toEqual(closed);
 });
 
+test("keeps navigations in the proxy when page code replaces built-in methods", async ({ page }) => {
+  const siteB = /\/~\/https\/site-b\.test\/$/;
+  await openThroughUi(page, "https://site-a.test/doors-builtins");
+  const popup = page.waitForEvent("popup");
+  await page.click("#open");
+  await expect(await popup).toHaveURL(siteB);
+  await page.click("#frame-src");
+  await expect
+    .poll(() => page.frames().map((frame) => frame.url()))
+    .toContainEqual(expect.stringMatching(/\/~\/https\/site-b\.test\/frame$/));
+  await page.click("#link");
+  await expect(page).toHaveURL(siteB);
+  await page.goto("/~/https/site-a.test/doors-builtins");
+  await page.click("#assign");
+  await expect(page).toHaveURL(siteB);
+});
+
 test("runs srcdoc documents under the runtime from their first script", async ({ page, context }) => {
   await openThroughUi(page, "https://site-a.test/doors-srcdoc");
   await startBroadcast(context);
