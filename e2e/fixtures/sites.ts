@@ -886,6 +886,15 @@ const CROSS_POPUP = page(
 </script>`,
 );
 
+const FAILURE = `const failure = (read) => {
+    try {
+      read();
+      return "open";
+    } catch (error) {
+      return error.name;
+    }
+  };`;
+
 // Each change shows as [key, newValue, storageArea is this window's localStorage].
 const STORAGE_EVENTS = page(
   "Storage events",
@@ -894,6 +903,66 @@ const STORAGE_EVENTS = page(
   addEventListener("storage", (event) => {
     const line = JSON.stringify([event.key, event.newValue, event.storageArea === localStorage]);
     document.getElementById("events").textContent += line + "\\n";
+  });
+</script>`,
+);
+
+const XS_HOOKS = page(
+  "Cross-site hooks",
+  `<pre id="results"></pre><iframe id="blank"></iframe><iframe id="b" src="https://site-b.test/xs-child"></iframe>
+<script>
+  ${FAILURE}
+  addEventListener("message", (event) => {
+    if (!event.data || event.data.from !== "xs-child") return;
+    const frame = document.getElementById("b");
+    const blank = document.getElementById("blank").contentWindow;
+    document.getElementById("results").textContent = JSON.stringify({
+      contentDocument: frame.contentDocument === null,
+      svgDocument: typeof frame.getSVGDocument === "function" ? frame.getSVGDocument() === null : "absent",
+      sourceDocument: failure(() => event.source.document),
+      frameElement: event.data.frameElement,
+      history: failure(() => history.pushState.call(blank.history, null, "", location.href)),
+    });
+  });
+</script>`,
+);
+
+const XS_CHILD = page(
+  "Cross-site child",
+  `<script>parent.postMessage({ from: "xs-child", frameElement: window.frameElement === null }, "*");</script>`,
+);
+
+const XS_OPENER = page(
+  "Cross-site opener",
+  `<button id="open">open</button><button id="doc-open">document.open</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  let w;
+  document.getElementById("open").onclick = () => {
+    w = open("https://site-b.test/xs-opened");
+  };
+  document.getElementById("doc-open").onclick = () => {
+    w = document.open("https://site-b.test/xs-opened", "xs", "");
+  };
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      closed: w.closed,
+    });
+  };
+</script>`,
+);
+
+const XS_OPENED = page(
+  "Cross-site opened",
+  `<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  document.getElementById("results").textContent = JSON.stringify({
+    runtime: typeof window.__g$ === "object",
+    openerDocument: failure(() => opener.document),
+    openerClosed: opener.closed,
   });
 </script>`,
 );
@@ -1290,6 +1359,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/top-host": html(TOP_HOST),
     "/cross-popup": html(CROSS_POPUP),
     "/storage-events": html(STORAGE_EVENTS),
+    "/xs-hooks": html(XS_HOOKS),
+    "/xs-opener": html(XS_OPENER),
     "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
     "/reuse-same": html(REUSE_SAME),
@@ -1456,6 +1527,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-touch-child": html(PM_SOURCE_CHILD),
     "/top-probe": html(TOP_PROBE),
     "/storage-events": html(STORAGE_EVENTS),
+    "/xs-child": html(XS_CHILD),
+    "/xs-opened": html(XS_OPENED),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(

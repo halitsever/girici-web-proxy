@@ -39,6 +39,46 @@ test("refuses a cross-site frame's static top access", async ({ page }) => {
   await expect(page.locator("#top")).toHaveText("SecurityError");
 });
 
+test("hides another site's frame, sender and History behind the browser's own walls", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/xs-hooks");
+  await expect(page.locator("#results")).not.toBeEmpty();
+  const results = JSON.parse((await page.locator("#results").textContent()) ?? "{}") as Record<string, unknown>;
+  expect(results).toMatchObject({
+    contentDocument: true,
+    sourceDocument: "SecurityError",
+    frameElement: true,
+    history: "SecurityError",
+  });
+  // Firefox has no getSVGDocument on frames.
+  expect([true, "absent"]).toContain(results.svgDocument);
+});
+
+for (const [name, button] of [
+  ["window.open", "#open"],
+  ["document.open with three arguments", "#doc-open"],
+] as const) {
+  test(`restricts another site's popup opened through ${name}, and the popup its opener`, async ({ page }) => {
+    await openThroughUi(page, "https://site-a.test/xs-opener");
+    const popupEvent = page.waitForEvent("popup");
+    await page.click(button);
+    const popup = await popupEvent;
+    await popup.waitForLoadState();
+    expect(popup.url()).toContain("/~/https/site-b.test/xs-opened");
+    await expect(popup.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await popup.locator("#results").textContent()) ?? "{}")).toEqual({
+      runtime: true,
+      openerDocument: "SecurityError",
+      openerClosed: false,
+    });
+    await page.click("#check");
+    await expect(page.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+      document: "SecurityError",
+      closed: false,
+    });
+  });
+}
+
 test("shows a storage change only to windows of the site that made it", async ({ page, context }) => {
   await openThroughUi(page, "https://site-a.test/storage-events");
   const other = await context.newPage();
