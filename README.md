@@ -91,8 +91,8 @@ no longer publishes its own port.
 | `GIRICI_RATE_LIMIT` | `3000` | Proxy requests per client per minute, with bursts up to the same number. The signed-in admin is never limited. `0` turns it off. |
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, comma or space separated. Each entry also blocks its subdomains. The admin can add more in Settings. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all upstream traffic through this proxy: `http://`, `https://`, `socks5://` or `socks5h://`, with optional `user:password@`. |
-| `GIRICI_SESSION_SECRET` | unset | Overrides the stored session secret; set the same value on every replica. |
-| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters) instead of the random one printed at startup. |
+| `GIRICI_SESSION_SECRET` | unset | Overrides the stored session secret (32 or more characters); set the same value on every replica. |
+| `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `on` | Mint YouTube GVS poTokens server-side to help video playback. Set `off` to disable. |
 
 ## Admin and access
