@@ -6,6 +6,16 @@ import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
+describe("post", () => {
+  it("delivers a message for the sender's own origin ('/') only to a window of that origin", () => {
+    const sent: unknown[][] = [];
+    const send = (...args: unknown[]) => sent.push(args);
+    post(send, "https://a.test", "http://proxy.test", "same", "/", [], "https://a.test");
+    post(send, "https://b.test", "http://proxy.test", "other", "/", [], "https://a.test");
+    expect(sent).toEqual([["same", "http://proxy.test"]]);
+  });
+});
+
 describe("post with built-ins the page replaced", () => {
   const cases = () => {
     const sent: unknown[][] = [];

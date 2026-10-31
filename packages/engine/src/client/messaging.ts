@@ -14,7 +14,8 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, gu
   const native = win.postMessage;
   const send: Send = (...args) => invoke(native, win, args);
   win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
-    post(send, originOf(ctx.realUrl()), ctx.origin, message, targetOrigin, rest);
+    const own = originOf(ctx.realUrl());
+    post(send, own, ctx.origin, message, targetOrigin, rest, own);
   } as typeof win.postMessage;
 
   const proto = win.MessageEvent.prototype;
@@ -71,7 +72,7 @@ export function createMessageSender(
     const send: Send = (...args) => invoke(native, value, args);
     return {
       postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
-        post(send, realOrigin, ctx.origin, message, targetOrigin, rest),
+        post(send, realOrigin, ctx.origin, message, targetOrigin, rest, originOf(ctx.realUrl())),
     };
   };
 }
@@ -84,15 +85,18 @@ export function post(
   message: unknown,
   targetOrigin: unknown,
   rest: unknown[],
+  senderOrigin?: string,
 ): void {
+  // Only a transfer list follows the target, so it is passed by index rather than spread.
+  const deliver = (target: unknown) => (rest.length ? send(message, target, rest[0]) : send(message, target));
   if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
     const options = targetOrigin as { targetOrigin?: unknown };
-    const decision = resolveTarget(options.targetOrigin, realOrigin, proxyOrigin);
-    if (decision.deliver) send(message, { ...options, targetOrigin: decision.target }, ...rest);
+    const decision = resolveTarget(options.targetOrigin, realOrigin, proxyOrigin, senderOrigin);
+    if (decision.deliver) deliver({ ...options, targetOrigin: decision.target });
     return;
   }
-  const decision = resolveTarget(targetOrigin, realOrigin, proxyOrigin);
-  if (decision.deliver) send(message, decision.target, ...rest);
+  const decision = resolveTarget(targetOrigin, realOrigin, proxyOrigin, senderOrigin);
+  if (decision.deliver) deliver(decision.target);
 }
 
 /**
@@ -103,7 +107,12 @@ function resolveTarget(
   targetOrigin: unknown,
   realOrigin: string,
   proxyOrigin: string,
+  senderOrigin?: string,
 ): { deliver: boolean; target?: unknown } {
+  // "/" means the sender's own origin, which on our shared origin only the real origins can tell.
+  if (targetOrigin === "/" && senderOrigin !== undefined) {
+    return senderOrigin === realOrigin ? { deliver: true, target: proxyOrigin } : { deliver: false };
+  }
   if (typeof targetOrigin !== "string" || targetOrigin === "*" || targetOrigin === "/") {
     return { deliver: true, target: targetOrigin };
   }

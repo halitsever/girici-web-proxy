@@ -208,6 +208,7 @@ export function createWindowGuard(
           message,
           targetOrigin,
           rest,
+          selfOrigin(),
         ),
       close: () => methods.close && invoke(methods.close, target, []),
       focus: () => methods.focus && invoke(methods.focus, target, []),
