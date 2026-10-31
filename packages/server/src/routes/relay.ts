@@ -8,6 +8,7 @@ import { sendRelayError } from "../http/relay-error.ts";
 import type { Logger } from "../log.ts";
 import type { HostBlocklist } from "../upstream/blocklist.ts";
 import { RelayRequestError, relayErrorFor } from "../upstream/errors.ts";
+import { proxyFailureLog } from "../upstream/proxy-failure.ts";
 import { buildUpstreamHeaders } from "../upstream/request-headers.ts";
 import { splitUpstreamHeaders } from "../upstream/response-headers.ts";
 import { validateTarget } from "../upstream/ssrf.ts";
@@ -24,18 +25,9 @@ const TUNNELED_METHOD = /^[A-Z]+$/;
 const BLOCKED_METHODS = new Set(["CONNECT", "TRACE", "TRACK"]);
 const NULL_BODY_STATUSES = new Set([204, 304]);
 
-const PROXY_WARNING_MS = 60_000;
-
 export function relayRouter(options: RelayOptions): Router {
   const router = Router();
-  // A dead upstream proxy fails every request; one line a minute tells the operator without flooding the log.
-  let lastProxyWarning = -Infinity;
-  const onProxyFailure = () => {
-    const now = Date.now();
-    if (now - lastProxyWarning < PROXY_WARNING_MS) return;
-    lastProxyWarning = now;
-    options.logger.warn("Upstream proxy failed; check GIRICI_UPSTREAM_PROXY");
-  };
+  const onProxyFailure = proxyFailureLog(options.logger);
   // Mounted by prefix so Express never percent-decodes the target path.
   router.use("/_g/r", (req, res, next) => {
     relay(req, res, options, onProxyFailure).catch(next);
@@ -43,7 +35,12 @@ export function relayRouter(options: RelayOptions): Router {
   return router;
 }
 
-async function relay(req: Request, res: Response, options: RelayOptions, onProxyFailure: () => void): Promise<void> {
+async function relay(
+  req: Request,
+  res: Response,
+  options: RelayOptions,
+  onProxyFailure: (error: unknown) => void,
+): Promise<void> {
   if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") {
     res.setHeader("Allow", "GET, HEAD, POST");
     sendRelayError(res, "bad_request", 405);
@@ -112,7 +109,7 @@ async function relay(req: Request, res: Response, options: RelayOptions, onProxy
     if (controller.signal.aborted) return;
     const { code, status } = relayErrorFor(error);
     options.logger.debug(`relay ${code} ${target.host}`);
-    if (code === "proxy") onProxyFailure();
+    onProxyFailure(error);
     if (res.headersSent) {
       res.destroy();
       return;

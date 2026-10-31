@@ -94,7 +94,7 @@ const server = createHttpServer(
 );
 const wsLookup = createGuardedLookup();
 const testCa = config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined;
-attachWsRelay(server, {
+const wsRelay = attachWsRelay(server, {
   dial:
     config.testUpstreams.size > 0 && !config.upstreamProxy ? testUpstreamDial(config.testUpstreams, testCa) : undefined,
   allowedTestHosts: new Set(config.testUpstreams.keys()),
@@ -129,7 +129,10 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       process.exit(0);
     });
     server.closeIdleConnections();
-    // A hung request must not keep a container from stopping.
-    setTimeout(() => process.exit(1), 10_000).unref();
+    // Upgraded sockets count as open connections, so server.close waits for these too.
+    void wsRelay.close();
+    // Long downloads get a few seconds, then are cut so the stop finishes inside Docker's 10 second window.
+    setTimeout(() => server.closeAllConnections(), 5_000).unref();
+    setTimeout(() => process.exit(1), 9_000).unref();
   });
 }

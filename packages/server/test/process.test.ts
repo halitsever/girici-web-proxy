@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
+import { AuthStore } from "../src/auth/store.ts";
+import { openDb } from "../src/db/open.ts";
 
 const serverDir = fileURLToPath(new URL("..", import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), "girici-data-"));
@@ -58,6 +61,28 @@ describe("server process", () => {
     await waitForOutput(child, /listening/);
     const started = Date.now();
     child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+    expect(Date.now() - started).toBeLessThan(3000);
+  }, 15_000);
+
+  it("closes open WebSockets with 1001 on SIGTERM and still exits with code 0", async () => {
+    const publicDir = mkdtempSync(join(tmpdir(), "girici-data-"));
+    const store = new AuthStore(openDb(join(publicDir, "girici.db")));
+    store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    store.setPublicAccess(true);
+    store.close();
+    const port = await freePort();
+    const child = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "info", GIRICI_DATA_DIR: publicDir });
+    const exited = exitCode(child);
+    await waitForOutput(child, /listening/);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/_g/ws`, ["girici.v1"], {
+      headers: { origin: `http://127.0.0.1:${port}` },
+    });
+    await new Promise((resolve, reject) => ws.once("open", resolve).once("error", reject));
+    const closed = new Promise<number>((resolve) => ws.once("close", (code) => resolve(code)));
+    const started = Date.now();
+    child.kill("SIGTERM");
+    expect(await closed).toBe(1001);
     expect(await exited).toBe(0);
     expect(Date.now() - started).toBeLessThan(3000);
   }, 15_000);

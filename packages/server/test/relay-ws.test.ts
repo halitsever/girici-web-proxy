@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect as netConnect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
@@ -17,6 +17,7 @@ import {
   PerClientCount,
   tlsIdentity,
   validateWsTarget,
+  type WsRelayHandle,
   type WsRelayOptions,
 } from "../src/ws/relay-ws.ts";
 import { sealWsHandshake } from "../src/ws/seal.ts";
@@ -54,9 +55,16 @@ async function countingEchoUpstream(): Promise<{ port: number; connections(): nu
 }
 
 async function relayServer(upstreamPort: number, options: Partial<WsRelayOptions> = {}): Promise<string> {
+  return (await startRelay(upstreamPort, options)).url;
+}
+
+async function startRelay(
+  upstreamPort: number,
+  options: Partial<WsRelayOptions> = {},
+): Promise<{ url: string; relay: WsRelayHandle }> {
   const server: Server = createServer();
   cleanups.push(() => server.close());
-  attachWsRelay(server, {
+  const relay = attachWsRelay(server, {
     allowedTestHosts: new Set(["ws.test"]),
     lookup: noopLookup,
     logger,
@@ -67,7 +75,7 @@ async function relayServer(upstreamPort: number, options: Partial<WsRelayOptions
     ...options,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  return `ws://127.0.0.1:${(server.address() as AddressInfo).port}/_g/ws`;
+  return { url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}/_g/ws`, relay };
 }
 
 function connect(url: string, origin: string, cookie?: string, xff?: string): WebSocket {
@@ -293,6 +301,25 @@ describe("ws relay (integration)", () => {
     expect((await closed(ws)).code).toBe(1011);
     expect(proxy.targets).toHaveLength(1);
   });
+  it("warns the operator once when the upstream proxy fails, without its credentials", async () => {
+    const proxy = await startConnectProxy({ status: 407 });
+    cleanups.push(() => void proxy.close());
+    const tunnel = createTunnelDialer(
+      { ...httpProxy(proxy.port), username: "user", password: "secret" },
+      { lookup: noopLookup, testUpstreams: new Map([["ws.test", { host: "127.0.0.1", port: 1 }]]), timeout: 2000 },
+    );
+    const lines: string[] = [];
+    const url = await relayServer(1, { tunnel, logger: createLogger("warn", (line) => lines.push(line)) });
+    for (let i = 0; i < 2; i++) {
+      const ws = connect(url, originOf(url));
+      await opened(ws);
+      ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+      expect((await closed(ws)).code).toBe(1011);
+    }
+    expect(lines.filter((line) => line.includes("Upstream proxy failed"))).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain("secret");
+  });
+
   it("times out a tunneled upstream that never answers the handshake", async () => {
     const silent = await startSilent();
     const proxy = await startConnectProxy();
@@ -384,5 +411,62 @@ describe("malformed control frames", () => {
       client.send(JSON.stringify(frame));
       expect((await closed(client)).code, JSON.stringify(frame).slice(0, 40)).toBe(1008);
     }
+  });
+});
+
+describe("shutdown", () => {
+  it("closes open relays on both ends with 1001 and refuses new upgrades", async () => {
+    const wss = new WebSocketServer({ port: 0 });
+    cleanups.push(() => wss.close());
+    const upstreamClosed = new Promise<number>((resolve) =>
+      wss.on("connection", (socket) => socket.on("close", (code) => resolve(code))),
+    );
+    const port = await new Promise<number>((resolve) =>
+      wss.on("listening", () => resolve((wss.address() as AddressInfo).port)),
+    );
+    const { url, relay } = await startRelay(port);
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+
+    const done = relay.close();
+    expect(await closed(ws)).toEqual({ code: 1001, reason: "server shutting down" });
+    expect(await upstreamClosed).toBe(1001);
+    await done;
+    const late = connect(url, originOf(url));
+    await expect(opened(late)).rejects.toThrow();
+  });
+
+  it("cuts a client that never answers the close frame once the grace period ends", async () => {
+    const { url, relay } = await startRelay(await echoUpstream());
+    const { port } = new URL(url);
+    const raw = netConnect(Number(port), "127.0.0.1");
+    cleanups.push(() => raw.destroy());
+    raw.write(
+      [
+        "GET /_g/ws HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        `Origin: http://127.0.0.1:${port}`,
+        "Upgrade: websocket",
+        "Connection: Upgrade",
+        "Sec-WebSocket-Version: 13",
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+        "Sec-WebSocket-Protocol: girici.v1",
+        "",
+        "",
+      ].join("\r\n"),
+    );
+    await new Promise<void>((resolve) => raw.once("data", () => resolve()));
+    const rawClosed = new Promise<void>((resolve) => raw.once("close", () => resolve()));
+    const started = Date.now();
+    await relay.close(200);
+    await rawClosed;
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("resolves at once when nothing is open", async () => {
+    const { relay } = await startRelay(await echoUpstream());
+    await relay.close();
   });
 });
