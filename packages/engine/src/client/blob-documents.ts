@@ -1,4 +1,5 @@
 import { decodeText } from "../shared/charset.ts";
+import { append, apply, hrefOf, NativeMap, parseUrl, protocolOf } from "../shared/primordials.ts";
 import type { InheritedContext } from "../shared/protocol.ts";
 import type { Invoke } from "./invoke.ts";
 import { maskNative } from "./native-mask.ts";
@@ -40,11 +41,7 @@ const LINK_ATTRIBUTES = ["href", "xlink:href"];
 const LINK_BOOT_TTL = 60_000;
 
 // Taken at load: swaps and loads run inside page calls, after page code may have replaced these.
-const apply = Reflect.apply;
 const describe = Object.getOwnPropertyDescriptor;
-const NativeURL = URL;
-const protocolOf = describe(URL.prototype, "protocol")?.get as (this: URL) => string;
-const hrefOf = describe(URL.prototype, "href")?.get as (this: URL) => string;
 const then = Promise.prototype.then;
 const headersOf = describe(Response.prototype, "headers")?.get as (this: Response) => Headers;
 const headerOf = Headers.prototype.get;
@@ -141,14 +138,15 @@ export function installBlobDocuments(
     }
   };
   const natives: BlobLoadNatives = { fetch: win.fetch, write: win.Document.prototype.write, revoke, invoke };
-  const originals = new Map<string, string>();
+  const originals = new NativeMap<string, string>();
   let pending: Array<() => void> = [];
 
   const swap = (url: string): string => {
     const blob = parsedBlob(url);
     if (blob === null || apply(mapHas, originals, [blob])) return url;
     try {
-      const tag = tagFor({ origin: ctx.origin, base: apply(hrefOf, ctx.realBase(), []), blob });
+      const inherit = { __proto__: null, origin: ctx.origin, base: hrefOf(ctx.realBase()), blob } as InheritedContext;
+      const tag = tagFor(inherit);
       const options = { __proto__: null, type: "text/html" } as BlobPropertyBag;
       const boot = apply(createObjectURL, urls, [new Blob(blobParts(blobBootstrapHtml(tag)), options)]) as string;
       apply(mapSet, originals, [boot, url]);
@@ -170,11 +168,11 @@ export function installBlobDocuments(
       const boot = value === null ? value : swap(value);
       if (boot === null || boot === value) continue;
       apply(setAttribute, element, [name, boot]);
-      undo[undo.length] = () => {
+      append(undo, () => {
         if (apply(getAttribute, element, [name]) === boot) apply(setAttribute, element, [name, value]);
         // A link the browser never followed leaves its bootstrap unloaded, and so unrevoked.
         apply(timer, win, [() => revoke(boot), LINK_BOOT_TTL]);
-      };
+      });
     }
     if (!undo.length) return null;
     return () => {
@@ -191,7 +189,7 @@ export function installBlobDocuments(
       if (apply(hasAttribute, link, ["download"])) return;
       const restore = swapAttributes(link, LINK_ATTRIBUTES);
       if (!sticky) later(restore);
-      else if (restore) pending[pending.length] = restore;
+      else if (restore) append(pending, restore);
     } catch {
       // Not an element of this realm.
     }
@@ -294,12 +292,8 @@ function writeDocument(win: Realm, write: BlobLoadNatives["write"] | null, marku
 }
 
 function parsedBlob(value: string): string | null {
-  try {
-    const url = new NativeURL(value);
-    return apply(protocolOf, url, []) === "blob:" ? apply(hrefOf, url, []) : null;
-  } catch {
-    return null;
-  }
+  const url = parseUrl(value);
+  return url && protocolOf(url) === "blob:" ? hrefOf(url) : null;
 }
 
 /** The type before its parameters, lowercased and trimmed; a list of types is none, as the browser renders the last. */

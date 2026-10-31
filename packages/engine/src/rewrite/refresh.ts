@@ -1,3 +1,4 @@
+import { exec } from "../shared/primordials.ts";
 import { rewriteUrl } from "../shared/url-rewrite.ts";
 
 const REFRESH = /^\s*(\d+)\s*(?:[;,]\s*(?:url\s*=\s*)?(['"]?)(.*?)\2\s*)?$/i;
@@ -14,7 +15,7 @@ export function rewriteRefresh(
 
 /** Maps the URL of a refresh value; a value whose URL stays the same comes back exactly as written. */
 export function mapRefresh(value: string, map: (url: string) => string): string {
-  const match = REFRESH.exec(value);
+  const match = exec(REFRESH, value);
   const target = match?.[3];
   if (!match || !target) return value;
   const mapped = map(target);

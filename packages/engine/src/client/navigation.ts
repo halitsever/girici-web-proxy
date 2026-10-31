@@ -1,5 +1,15 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
-import { apply, hrefOf, isWebUrl, newUrl, originOf, pathnameOf, startsWith, toText } from "../shared/primordials.ts";
+import {
+  apply,
+  hrefOf,
+  isWebUrl,
+  listIncludes,
+  newUrl,
+  originOf,
+  pathnameOf,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import type { BlobDocuments } from "./blob-documents.ts";
 import type { CookieBridge } from "./cookies.ts";
@@ -74,13 +84,13 @@ export function installNavigation(
     for (const target of event.composedPath()) {
       if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
         fix(target, "href");
-        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
+        blobs.swapLink(target, listIncludes(LATER_EVENTS, event.type));
         return;
       }
       if (target instanceof win.SVGAElement) {
         fix(target, "href");
         fix(target, "xlink:href");
-        blobs.swapLink(target, LATER_EVENTS.includes(event.type));
+        blobs.swapLink(target, listIncludes(LATER_EVENTS, event.type));
         return;
       }
     }

@@ -71,10 +71,15 @@ function fakeWindow() {
 }
 
 const asIs: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} };
-const noBlobs = { swap: (url: string) => url, swapLink: () => {}, restoreLinks: () => {}, swapForm: () => {} };
+const noBlobs = {
+  swap: (url: string) => url,
+  swapLink: (() => {}) as (link: unknown, sticky?: boolean) => void,
+  restoreLinks: () => {},
+  swapForm: () => {},
+};
 const noCookies = { pendingWrites: () => null } as unknown as CookieBridge;
 
-function installed() {
+function installed(blobs: typeof noBlobs = noBlobs) {
   const fake = fakeWindow();
   const { win } = fake;
   const natives = [win.open, win.HTMLFormElement.prototype.submit, win.History.prototype.pushState];
@@ -85,7 +90,7 @@ function installed() {
     noCookies,
     (fn, self, args) => Reflect.apply(fn, self, args),
     asIs,
-    noBlobs,
+    blobs,
   );
   const location = createFakeLocation({
     real: ctx.realUrl,
@@ -111,7 +116,7 @@ function installed() {
   });
   const click = (link: FakeElement) => {
     for (const [type, listener] of fake.listeners) {
-      if (type === "click") listener({ composedPath: () => [link], defaultPrevented: false });
+      if (type === "click") listener({ type, composedPath: () => [link], defaultPrevented: false });
     }
   };
   return { ...fake, natives, location, nativeLocation, helpers, click };
@@ -151,5 +156,15 @@ describe("installNavigation", () => {
       history.pushState({}, "", "/pushed");
     });
     expect(natives.filter((native) => seen.includes(native))).toEqual([]);
+  });
+});
+
+describe("blob links", () => {
+  it("restores a clicked link's blob swap at once when Array.prototype.includes is replaced", () => {
+    const swaps: unknown[] = [];
+    const { win, click } = installed({ ...noBlobs, swapLink: (_link, sticky) => swaps.push(sticky) });
+    const link = new win.HTMLAnchorElement({ href: "blob:http://proxy.test/1" });
+    withReplaced(Array.prototype, "includes", { value: () => true }, () => click(link));
+    expect(swaps).toEqual([false]);
   });
 });

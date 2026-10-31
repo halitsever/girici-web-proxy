@@ -10,6 +10,7 @@ import {
 import type { InheritedContext } from "../src/shared/protocol.ts";
 import type { Invoke } from "../src/client/invoke.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 const origin = "http://p.test";
 const direct: Invoke = (fn, self, args) => Reflect.apply(fn, self, args);
@@ -108,6 +109,14 @@ describe("installBlobDocuments", () => {
     expect(blobs.swap(" blob:http://p.test/orig")).toBe(`blob:${origin}/boot-1`);
     expect(seen).toEqual([{ origin, base: "https://a.test/dir/page", blob: "blob:http://p.test/orig" }]);
     expect(made).toEqual([{ text: blobBootstrapHtml("<script>tag</script>"), type: "text/html" }]);
+  });
+
+  it("swaps blob URLs whatever global Map the page installed before the realm was adopted", () => {
+    const { win } = blobRealm();
+    const blobs = withReplaced(globalThis, "Map", { value: class {} }, () =>
+      installBlobDocuments(win, ctx, () => "", direct),
+    );
+    expect(blobs.swap("blob:http://p.test/orig")).toBe(`blob:${origin}/boot-1`);
   });
 
   it("leaves other URLs and its own bootstraps alone", () => {

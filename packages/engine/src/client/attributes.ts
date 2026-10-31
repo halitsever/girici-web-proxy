@@ -6,6 +6,7 @@ import {
   NativeWeakMap,
   parseUrl,
   setUrlPart,
+  setHas,
   sliceOf,
   toText,
   urlPart,
@@ -62,7 +63,6 @@ const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
-const setHas = Set.prototype.has;
 const RUNTIME_ATTRIBUTE = "data-girici=";
 
 /** What the page wrote for a srcdoc and the value that went into the DOM for it. */
@@ -91,7 +91,7 @@ export function installAttributes(
     return record && record.native === value ? record.original : value;
   };
   for (const [name, property] of URL_PROPERTIES) {
-    const opens = apply(setHas, DOCUMENT_PROPERTIES, [`${name}.${property}`]);
+    const opens = setHas(DOCUMENT_PROPERTIES, `${name}.${property}`);
     wrap(
       win,
       name,
@@ -264,7 +264,7 @@ export function installAttributes(
         return (apply(hookedGet, this, [attribute]) as string | null) ?? "";
       },
       set(this: Element, value: unknown) {
-        apply(hookedSet, this, [attribute, String(value)]);
+        apply(hookedSet, this, [attribute, toText(value)]);
       },
     });
   }
@@ -302,7 +302,7 @@ export function installAttributes(
     }
     if (!kind) return value;
     const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin);
-    return apply(setHas, DOCUMENT_ATTRIBUTES, [`${target.localName}.${attribute}`]) ? blobs.swap(rewritten) : rewritten;
+    return setHas(DOCUMENT_ATTRIBUTES, `${target.localName}.${attribute}`) ? blobs.swap(rewritten) : rewritten;
   }
 
   function restore(target: Element, name: string, value: string): string {

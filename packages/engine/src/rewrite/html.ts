@@ -1,5 +1,6 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
+import { lowerCase, setHas, trim } from "../shared/primordials.ts";
 import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
 import { rewriteCss } from "./css.ts";
 import { rewriteJs } from "./js.ts";
@@ -152,15 +153,15 @@ class HtmlRewriter {
 
   #removesElement(name: string, attribs: Record<string, string>): boolean {
     if (name === "link") return tokens(attribs.rel).some((rel) => DROPPED_LINK_RELS.has(rel));
-    if (name === "meta") return DROPPED_META.has((attribs["http-equiv"] ?? "").trim().toLowerCase());
-    if (name === "script") return (attribs.type ?? "").trim().toLowerCase() === "speculationrules";
+    if (name === "meta") return setHas(DROPPED_META, keyword(attribs["http-equiv"]));
+    if (name === "script") return keyword(attribs.type) === "speculationrules";
     return false;
   }
 
   #rewriteAttribute(tag: string, attribs: Record<string, string>, attribute: Attribute): void {
     const { name, value } = attribute;
     if (
-      DROPPED_ATTRIBUTES.has(name) ||
+      setHas(DROPPED_ATTRIBUTES, name) ||
       (tag === "iframe" && (name === "csp" || name === "credentialless")) ||
       (tag === "html" && name === "manifest")
     ) {
@@ -184,7 +185,7 @@ class HtmlRewriter {
       if (tokens(value).includes("allow-same-origin")) return value;
       return [value.trim(), "allow-same-origin"].filter(Boolean).join(" ");
     }
-    if (URL_ATTRIBUTES.has(name) || (name === "data" && tag === "object")) {
+    if (setHas(URL_ATTRIBUTES, name) || (name === "data" && tag === "object")) {
       if (tag === "link" && name === "href" && !tokens(attribs.rel).some((rel) => FETCHED_LINK_RELS.has(rel))) {
         return value;
       }
@@ -202,9 +203,9 @@ class HtmlRewriter {
         }
       }
       const { swapBlob } = this.#options;
-      return swapBlob && DOCUMENT_URLS.has(`${tag} ${name}`) ? swapBlob(rewritten) : rewritten;
+      return swapBlob && setHas(DOCUMENT_URLS, `${tag} ${name}`) ? swapBlob(rewritten) : rewritten;
     }
-    if (SRCSET_ATTRIBUTES.has(name)) {
+    if (setHas(SRCSET_ATTRIBUTES, name)) {
       let changed = false;
       const rewritten = rewriteSrcset(value, (url) => {
         const next = rewriteUrl(url, this.#base, origin);
@@ -227,7 +228,7 @@ class HtmlRewriter {
         swapBlob: this.#options.swapBlob,
       });
     }
-    if (tag === "meta" && name === "content" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh") {
+    if (tag === "meta" && name === "content" && keyword(attribs["http-equiv"]) === "refresh") {
       return rewriteRefresh(value, this.#base, origin, this.#options.swapBlob);
     }
     return value;
@@ -240,7 +241,7 @@ class HtmlRewriter {
   }
 
   #scriptKind(type: string | undefined): ScriptKind {
-    const value = (type ?? "").trim().toLowerCase();
+    const value = keyword(type);
     if (value === "importmap") return "importmap";
     if (!this.#scripts) return "none";
     if (value === "") return "classic";
@@ -292,6 +293,11 @@ function rewriteImportMap(text: string, base: URL, origin: string): string {
     );
   }
   return changed ? JSON.stringify(result) : text;
+}
+
+/** An attribute keyword as the browser compares it, through methods a page cannot replace. */
+export function keyword(value: string | undefined | null): string {
+  return lowerCase(trim(value ?? ""));
 }
 
 function tokens(value: string | undefined): string[] {

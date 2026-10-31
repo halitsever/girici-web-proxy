@@ -35,9 +35,10 @@ const objectDefine = Object.defineProperty;
 const hasOwn = Object.prototype.hasOwnProperty;
 const DESCRIPTOR_FIELDS = ["value", "writable", "get", "set", "enumerable", "configurable"];
 
-/** For tables made inside page calls, where a page's own WeakMap or WeakSet would break the captured methods. */
+/** For tables made inside page calls, where a page's own collection classes would break the captured methods. */
 export const NativeWeakMap = WeakMap;
 export const NativeWeakSet = WeakSet;
+export const NativeMap = Map;
 
 /** String(value), which runs the value's own conversion once and gives a primitive the checks can trust. */
 export const toText = NativeString as (value: unknown) => string;

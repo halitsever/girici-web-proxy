@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rewriteHtml } from "../src/rewrite/html.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 const TAG = '<script src="/_g/client.test.js"></script>';
 const rw = (html: string, inject = false) =>
@@ -248,5 +249,26 @@ describe("blob swaps", () => {
     );
     expect(rewrite('<a href="blob:http://proxy.test/1">x</a>')).toBe('<a href="blob:http://proxy.test/1">x</a>');
     expect(rewrite('<img src="blob:http://proxy.test/1">')).toBe('<img src="blob:http://proxy.test/1">');
+  });
+});
+
+describe("meta refresh with built-ins the page replaced", () => {
+  // toLowerCase is left out: htmlparser2 lowercases names with it, which no engine check can stand in for.
+  it("proxies the refresh target when String.prototype.trim is replaced", () => {
+    const out = withReplaced(String.prototype, "trim", { value: () => "" }, () =>
+      rw('<meta http-equiv="Refresh" content="0; url=https://other.test/">'),
+    );
+    expect(out).toBe('<meta http-equiv="Refresh" content="0; url=/~/https/other.test/">');
+  });
+
+  it("swaps a blob frame source when Set.prototype.has is replaced", () => {
+    const out = withReplaced(Set.prototype, "has", { value: () => false }, () =>
+      rewriteHtml('<iframe src="blob:http://proxy.test/1"></iframe>', {
+        url: new URL("https://site.test/"),
+        origin: "http://proxy.test",
+        swapBlob: () => "blob:boot",
+      }),
+    );
+    expect(out).toBe('<iframe src="blob:boot"></iframe>');
   });
 });

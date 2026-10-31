@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
-import { rewriteHtml } from "../rewrite/html.ts";
+import { keyword, rewriteHtml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { mapRefresh } from "../rewrite/refresh.ts";
 import { stripClientTag } from "../shared/client-tag.ts";
@@ -87,7 +87,7 @@ function unrewriteHtmlAttributes(
         const pending = attributes;
         attributes = [];
         if (implied) return;
-        const refresh = name === "meta" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh";
+        const refresh = name === "meta" && keyword(attribs["http-equiv"]) === "refresh";
         for (const attribute of pending) {
           let restored: string;
           if (refresh && attribute.name === "content") restored = mapRefresh(attribute.value, restoreUrl);
