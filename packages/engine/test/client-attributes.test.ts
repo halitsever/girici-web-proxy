@@ -188,6 +188,8 @@ describe("srcdoc through the DOM hooks", () => {
       realUrl: () => base,
       toProxy: (raw: string) => `/~/https/site.test/${raw}`,
       fromProxy: (value: string) => value,
+      opaque: () => false,
+      openSealed: () => null,
     };
     const bridge = createRewriteBridge(ctx, (b) => `<script src="/_g/c.js" data-girici="${b.href}"></script>`);
     const swaps = (url: string) => (url.startsWith("blob:page") ? "blob:boot" : url);

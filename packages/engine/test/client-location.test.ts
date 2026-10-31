@@ -92,4 +92,20 @@ describe("createFakeLocation", () => {
     location.assign({ toString: () => (reads++ === 1 ? "https://b.test/" : "javascript:alert(1)") } as never);
     expect(calls).toEqual(['assign javascript:__g$.J("void 0","https://site.test")', "assign /~/https/b.test/"]);
   });
+
+  it("navigates its own window through the address it is given", () => {
+    const calls: string[] = [];
+    const location = createFakeLocation({
+      real: () => new URL("https://site.test/p"),
+      navigate: (url, mode) => calls.push(`${mode} ${url}`),
+      reload: () => {},
+      setHash: (hash) => calls.push(`hash ${hash}`),
+      address: (url) => `S:${url.pathname}`,
+    });
+    location.assign("/other");
+    location.pathname = "/path";
+    location.hash = "x";
+    location.href = "#y";
+    expect(calls).toEqual(["assign S:/other", "assign S:/path", "hash #x", "hash #y"]);
+  });
 });

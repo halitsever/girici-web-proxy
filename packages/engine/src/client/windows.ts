@@ -9,8 +9,10 @@ import {
   NativeWeakSet,
   originOf,
   parseUrl,
+  pathnameOf,
   toText,
 } from "../shared/primordials.ts";
+import { isSealedPath } from "../shared/sealed-address.ts";
 import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
 import { realOriginOf, realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
@@ -101,7 +103,13 @@ export function createWindowGuard(
   const selfOrigin = () => originOf(ctx.realUrl());
   const addressOrigin = (target: object): string | null => {
     try {
-      const real = realUrlOf((target as { location: { href: string } }).location.href, ctx.origin);
+      const href = (target as { location: { href: string } }).location.href;
+      const address = parseUrl(href);
+      // A sealed address is the window's own page, whose runtime names the origin this realm cannot decode.
+      if (address && originOf(address) === ctx.origin && isSealedPath(pathnameOf(address))) {
+        return realOriginOf(target, ctx.origin);
+      }
+      const real = realUrlOf(href, ctx.origin);
       return real ? originOf(real) : null;
     } catch {
       return null;

@@ -21,6 +21,8 @@ export interface LocationEnv {
   setHash(hash: string): void;
   /** The real origin of the realm that navigates, which its javascript: URLs carry; defaults to `real()`'s. */
   owner?(): string;
+  /** The address a web target loads at in this window; a sealed page seals its own origin. Defaults to encodeUrl. */
+  address?(url: URL): string;
 }
 
 export type FakeLocation = Pick<
@@ -60,7 +62,7 @@ export function createFakeLocation(env: LocationEnv, proto: object = Object.prot
       env.setHash(hashOf(target));
       return;
     }
-    env.navigate(isWebUrl(target) ? encodeUrl(target) : hrefOf(target), mode);
+    env.navigate(isWebUrl(target) ? (env.address ? env.address(target) : encodeUrl(target)) : hrefOf(target), mode);
   };
 
   const properties: PropertyDescriptorMap = {

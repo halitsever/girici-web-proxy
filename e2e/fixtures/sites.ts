@@ -669,12 +669,54 @@ const SEALED_PAGE = page(
 <script type="module">import "./mod.js";</script>
 <a href="https://site-b.test/target">site-b</a>`,
 );
-const sealedPage: Route = (_req, res) => {
-  res.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
-    "set-cookie": "sealed=1; Path=/; Domain=site-a.test; SameSite=Lax",
-  });
-  res.end(SEALED_PAGE);
+const SEALED_SPA = page(
+  "Sealed SPA",
+  `<h1>SPA</h1>
+<button id="push">Push</button><pre id="href"></pre>
+<a id="to-bottom" href="#bottom">bottom</a> <a id="page2" href="?page=2">page 2</a>
+<form action="/sealed/search"><input name="q" aria-label="Search"><button id="search-go">Search</button></form>
+<button id="popup-go">Popup</button><pre id="popup"></pre>
+<iframe id="frame" src="https://www.site-a.test/sealed/cookie-echo"></iframe>
+<div style="height: 3000px"></div><p id="bottom">Bottom</p>
+<script>
+  window.marker = "kept";
+  document.getElementById("push").onclick = () => {
+    history.pushState({}, "", "next?a=1");
+    document.getElementById("href").textContent = location.href;
+  };
+  document.getElementById("popup-go").onclick = () => {
+    const popup = window.open("/sealed/next");
+    const poll = setInterval(() => {
+      try {
+        if (popup.location.pathname !== "/sealed/next") return;
+        document.getElementById("popup").textContent = popup.location.pathname;
+        clearInterval(poll);
+      } catch {}
+    }, 100);
+  };
+</script>`,
+);
+const SEALED_ECHO = `<pre id="href"></pre><pre id="search"></pre>
+<script>
+  document.getElementById("href").textContent = location.href;
+  document.getElementById("search").textContent = location.search;
+</script>`;
+
+/** Sets the cookie a same-site frame of the page should still carry. */
+const sealedCookie =
+  (body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "set-cookie": "sealed=1; Path=/; Domain=site-a.test; SameSite=Lax",
+    });
+    res.end(body);
+  };
+const sealedPage = sealedCookie(SEALED_PAGE);
+const sealedSearch: Route = (req, res) => {
+  const query = new URL(req.url ?? "/", "http://fixture").search;
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(page("Sealed search", `<pre id="query">${escapeHtml(query)}</pre>${SEALED_ECHO}`));
 };
 
 const search: Route = (req, res) => {
@@ -1947,11 +1989,15 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sealed/page": sealedPage,
     "/sealed/dot.png": png,
     "/sealed/mod.js": script('document.body.dataset.mod = "1";'),
+    "/sealed/spa": sealedCookie(SEALED_SPA),
+    "/sealed/next": html(page("Sealed next", SEALED_ECHO)),
+    "/sealed/search": sealedSearch,
   },
   "www.site-a.test": {
     "/landing": html(page("Landing", "<h1>Landing</h1>")),
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
+    "/sealed/cookie-echo": cookieEcho,
   },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {

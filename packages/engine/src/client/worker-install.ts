@@ -1,3 +1,4 @@
+import { encodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
 import {
   apply,
@@ -105,6 +106,10 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
       return startsWith(proxied, "/") ? origin + proxied : proxied;
     },
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
+    // A worker resolves against its real base and never navigates, so it has no sealed address to keep.
+    opaque: () => false,
+    documentAddress: (url) => encodeUrl(url),
+    openSealed: () => null,
     // A worker never loads a second document.
     inherit: () => {},
     accepts: () => false,

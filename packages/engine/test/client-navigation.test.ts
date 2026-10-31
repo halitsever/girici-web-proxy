@@ -5,6 +5,7 @@ import { createFakeLocation } from "../src/client/location.ts";
 import { installNavigation } from "../src/client/navigation.ts";
 import { createUrlContext, type Realm } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
+import { createOriginSealer, MasterSealer } from "../src/shared/sealed-address.ts";
 import { recordingCalls } from "./recording-calls.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
@@ -305,5 +306,32 @@ describe("installNavigation inside an adoption", () => {
     new fake.win.History().pushState({}, "", "/y");
     expect(fake.loads).toEqual(["open /~/https/b.test/x", "push /~/https/a.test/y"]);
     expect(fake.listeners.length).toBeGreaterThan(0);
+  });
+});
+
+describe("installNavigation on a sealed page", () => {
+  it("pushes sealed addresses for a sealed page", () => {
+    const seal = new MasterSealer(new Uint8Array(32).fill(4)).originSeal("https://a.test");
+    const own = createOriginSealer(seal)!;
+    const fake = fakeWindow();
+    fake.win.location.href = ORIGIN + own.seal(new URL("https://a.test/dir/page"));
+    const ctx = createUrlContext(fake.win as unknown as Realm, undefined, seal);
+    installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      noCookies,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      noBlobs,
+    );
+    const history = new fake.win.History();
+    history.pushState(null, "", "/next?a=1#f");
+    history.replaceState(null, "", "rel");
+    fake.win.open("/popup");
+    expect(fake.loads).toEqual([
+      `push ${own.seal(new URL("https://a.test/next?a=1#f"))}`,
+      `replace ${own.seal(new URL("https://a.test/dir/rel"))}`,
+      "open /~/https/a.test/popup",
+    ]);
   });
 });

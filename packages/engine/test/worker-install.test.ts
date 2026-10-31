@@ -186,6 +186,9 @@ describe("installWorker", () => {
       realBase: () => real,
       toProxy: (raw) => rewriteUrl(raw, real, ORIGIN),
       fromProxy: (value) => unrewriteUrl(value, real, ORIGIN),
+      opaque: () => false,
+      documentAddress: (url) => url.href,
+      openSealed: () => null,
       inherit: () => {},
       accepts: () => true,
     };
