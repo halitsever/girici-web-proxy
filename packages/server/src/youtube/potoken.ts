@@ -17,17 +17,24 @@ export class PoTokenMinter {
   #pending: Promise<PoSession> | null = null;
   readonly #createSession: CreateSession;
   readonly #now: () => number;
+  readonly #onError: (error: unknown) => void;
 
-  constructor(createSession: CreateSession, now: () => number = Date.now) {
+  constructor(
+    createSession: CreateSession,
+    now: () => number = Date.now,
+    onError: (error: unknown) => void = () => {},
+  ) {
     this.#createSession = createSession;
     this.#now = now;
+    this.#onError = onError;
   }
 
   async mint(contentBinding: string): Promise<string | null> {
     try {
       const session = await this.#session();
       return await session.mint(contentBinding);
-    } catch {
+    } catch (error) {
+      this.#onError(error);
       return null;
     }
   }

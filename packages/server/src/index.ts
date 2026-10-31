@@ -15,7 +15,7 @@ import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
 import { createGuardedLookup } from "./upstream/ssrf.ts";
-import { createPoTokenMinter } from "./youtube/botguard-session.ts";
+import { createPoTokenMinter } from "./youtube/minter.ts";
 import { attachWsRelay, testUpstreamDial } from "./ws/relay-ws.ts";
 
 let config: Config;
@@ -82,12 +82,12 @@ const server = createHttpServer(
       maxRequestBody: 50 * 1024 * 1024,
       blocklist,
     },
-    // Lazy: BotGuard only runs on the first poToken request, so this costs nothing at startup. It leaves through the
-    // relay's agent so tokens and media share one egress IP, with or without an upstream proxy.
+    // Minting leaves through the relay's agent so tokens and media share one egress IP, with or without a proxy.
     poToken: config.youtubePoToken
       ? createPoTokenMinter(
           (input, init) =>
             undiciFetch(input, { ...(init as object), dispatcher: agent }) as unknown as Promise<Response>,
+          logger,
         )
       : undefined,
   }),
