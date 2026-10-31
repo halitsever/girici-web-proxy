@@ -68,3 +68,27 @@ test("runs srcdoc documents under the runtime from their first script", async ({
     attribute: { hooked: true, probe: closed },
   });
 });
+
+test("runs HTML blob documents under the runtime and others inert", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/doors-blobs");
+  await startBroadcast(context);
+  await page.click("#start");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
+    html: { ran: true, href: "https://site-a.test/doors-blobs", probe: closed },
+    svgRan: false,
+    untypedRan: false,
+    popup: { ran: true, href: "https://site-a.test/doors-blobs", probe: closed },
+    svgReadable: false,
+  });
+  const download = page.waitForEvent("download");
+  await page.click("#dl");
+  expect((await download).suggestedFilename()).toBe("x.txt");
+});
+
+test("swaps blob URLs in every frame sink, location and followed link", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/doors-blob-sinks");
+  await page.click("#start");
+  await expect(page.locator("#results")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#results").textContent()) ?? "null")).toEqual([]);
+});

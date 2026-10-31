@@ -224,6 +224,16 @@ const COOKIE_SCRIPT = page(
     });
 </script>`,
 );
+// The click writes a cookie first, so the runtime holds the navigation until the write is stored.
+const COOKIE_CLICK = page(
+  "Cookie click",
+  `<a id="go" href="https://site-b.test/">site b</a>
+<script>
+  document.getElementById("go").addEventListener("click", () => {
+    document.cookie = "clicked=1; path=/";
+  });
+</script>`,
+);
 const COOKIE_API_PAGE = page(
   "Cookie API",
   `<pre id="after"></pre>
@@ -859,6 +869,122 @@ const DOORS_SRCDOC = page(
 <iframe srcdoc="${escapeHtml(srcdocReport("parsed"))}"></iframe>`,
 );
 
+/**
+ * A blob page that reports the address it sees and what its realm reaches; a popup names itself by its opener.
+ * WebKit gives blob documents a cache storage that refuses every call, so a refusal counts as reaching no cache.
+ */
+const blobReport = (id: string): string =>
+  `<!doctype html><p>${id}</p><script>${PROBE}
+(async () => {
+  const keys = () => Promise.resolve().then(() => caches.keys()).catch(() => []);
+  const scope = { indexedDB, BroadcastChannel, caches: { keys } };
+  const report = { id: opener ? "popup" : ${JSON.stringify(id)}, ran: true, href: location.href, probe: await girProbe(scope) };
+  (opener || parent).postMessage(JSON.stringify(report), "*");
+})();</script>`;
+
+const DOORS_BLOBS = page(
+  "Doors blobs",
+  `<button id="start">start</button><pre id="results"></pre>
+<a id="dl" download="x.txt">download</a>
+<script>
+  const docs = ${JSON.stringify({
+    html: blobReport("html"),
+    untyped: blobReport("untyped"),
+    svg: '<svg xmlns="http://www.w3.org/2000/svg"><script>parent.postMessage("svg ran", "*")</script></svg>',
+  }).replace(/<\//g, "<\\/")};
+  const blobUrl = (text, type) => URL.createObjectURL(type === undefined ? new Blob([text]) : new Blob([text], { type }));
+  document.getElementById("dl").href = blobUrl("hello", "text/plain");
+  const seen = {};
+  let svgRan = false;
+  addEventListener("message", (event) => {
+    if (event.data === "svg ran") svgRan = true;
+    else {
+      try {
+        const report = JSON.parse(event.data);
+        seen[report.id] = { ran: report.ran, href: report.href, probe: report.probe };
+      } catch {}
+    }
+  });
+  const frameOf = (set) => {
+    const frame = document.createElement("iframe");
+    set(frame);
+    document.body.appendChild(frame);
+    return frame;
+  };
+  // True when this page can read the SVG document, directly or inside the frame that shows it.
+  const readable = (frame) => {
+    try {
+      if (frame.contentDocument?.querySelector("svg")) return true;
+      const inner = frame.contentWindow.frames[0];
+      return Boolean(inner?.document.querySelector("svg"));
+    } catch {
+      return false;
+    }
+  };
+  document.getElementById("start").onclick = () => {
+    const htmlUrl = blobUrl(docs.html, "text/html");
+    const popup = open(htmlUrl);
+    frameOf((frame) => (frame.src = htmlUrl));
+    const svgFrame = frameOf((frame) => frame.setAttribute("src", blobUrl(docs.svg, "image/svg+xml")));
+    frameOf((frame) => (frame.src = blobUrl(docs.untyped)));
+    const started = Date.now();
+    // The two pages that should run report first; the others get two more seconds to show they stay inert.
+    const finish = () => {
+      if ((!seen.html || !seen.popup) && Date.now() - started < 10000) return void setTimeout(finish, 100);
+      setTimeout(() => {
+        popup?.close();
+        document.getElementById("results").textContent = JSON.stringify({
+          html: seen.html ?? null,
+          svgRan,
+          untypedRan: Boolean(seen.untyped),
+          popup: seen.popup ?? null,
+          svgReadable: readable(svgFrame),
+        });
+      }, 2000);
+    };
+    finish();
+  };
+</script>`,
+);
+
+// Each sink loads an SVG whose script would report its name; a swapped sink shows it sandboxed instead.
+const DOORS_BLOB_SINKS = page(
+  "Doors blob sinks",
+  `<button id="start">start</button><pre id="results"></pre><iframe name="target"></iframe><iframe id="nav"></iframe>
+<script>
+  const ran = [];
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("ran:")) ran.push(event.data.slice(4));
+  });
+  const svg = (id) =>
+    URL.createObjectURL(
+      new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>parent.postMessage("ran:' + id + '", "*")<\\/script></svg>'], {
+        type: "image/svg+xml",
+      }),
+    );
+  const add = (element) => document.body.appendChild(element);
+  document.getElementById("start").onclick = () => {
+    const byNode = document.createElement("iframe");
+    const node = document.createAttribute("src");
+    node.value = svg("attr");
+    byNode.setAttributeNode(node);
+    add(byNode);
+    const object = document.createElement("object");
+    object.data = svg("object");
+    add(object);
+    const embed = document.createElement("embed");
+    embed.src = svg("embed");
+    add(embed);
+    document.getElementById("nav").contentWindow.location.href = svg("location");
+    const link = document.createElement("a");
+    link.href = svg("link");
+    link.target = "target";
+    add(link).click();
+    setTimeout(() => (document.getElementById("results").textContent = JSON.stringify(ran.sort())), 3000);
+  };
+</script>`,
+);
+
 const ATTR_NODE = page(
   "Attr node",
   `<script>
@@ -999,6 +1125,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/echo": cookieEcho,
     "/old-channel": html(OLD_CHANNEL),
     "/cookie/script": html(COOKIE_SCRIPT),
+    "/cookie/click": html(COOKIE_CLICK),
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),
     "/network": html(NETWORK),
@@ -1156,6 +1283,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/doors-workers": html(DOORS_WORKERS),
     "/doors-frames": html(DOORS_FRAMES),
     "/doors-srcdoc": html(DOORS_SRCDOC),
+    "/doors-blobs": html(DOORS_BLOBS),
+    "/doors-blob-sinks": html(DOORS_BLOB_SINKS),
     "/attr-node": html(ATTR_NODE),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(

@@ -1,4 +1,5 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
+import type { BlobDocuments } from "./blob-documents.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
@@ -12,6 +13,7 @@ export function installNavigation(
   ctx: UrlContext,
   cookies: CookieBridge,
   invoke: Invoke,
+  blobs: Pick<BlobDocuments, "swap" | "swapLink">,
 ): DocumentListeners {
   const history = win.History.prototype;
   for (const method of ["pushState", "replaceState"] as const) {
@@ -32,7 +34,7 @@ export function installNavigation(
 
   const nativeOpen = win.open;
   win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
-    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(String(url));
+    const proxied = url === undefined || url === null || url === "" ? url : blobs.swap(ctx.toProxy(String(url)));
     return nativeOpen.call(this ?? win, proxied, target, features);
   };
 
@@ -41,7 +43,8 @@ export function installNavigation(
     .navigation;
   if (navigation && typeof navigation.navigate === "function") {
     const nativeNavigate = navigation.navigate.bind(navigation);
-    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(String(url)), options);
+    navigation.navigate = (url: string, options?: unknown) =>
+      nativeNavigate(blobs.swap(ctx.toProxy(String(url))), options);
   }
 
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
@@ -54,6 +57,8 @@ export function installNavigation(
     for (const target of event.composedPath()) {
       if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
         fix(target, "href");
+        // A context menu opens the link later, after the swap would be undone.
+        if (event.type !== "contextmenu") blobs.swapLink(target);
         return;
       }
       if (target instanceof win.SVGAElement) {
@@ -99,8 +104,8 @@ export function installNavigation(
       const url = resolve(link.getAttributeNode("href")?.value, ctx);
       if (!url) return;
       event.preventDefault();
-      // The next page must already see cookies this one has just written.
-      void writes.then(() => invoke(win.location.assign, win.location, [url]));
+      // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
+      void writes.then(() => invoke(win.location.assign, win.location, [ctx.toProxy(url)]));
     },
     false,
   ]);

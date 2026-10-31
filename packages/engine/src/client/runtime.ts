@@ -4,6 +4,7 @@ import { prefixFor } from "../shared/partition.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
+import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { installFrames, type FrameAdopter } from "./frames.ts";
@@ -63,6 +64,12 @@ export function install(
   // Taken before the network hooks wrap it.
   const nativeFetch = win.fetch;
   const ctx = createUrlContext(win, config.inherit);
+  const blobs = installBlobDocuments(
+    win,
+    ctx,
+    (inherit) => clientTag(clientUrl, { ...childConfig(), inherit }),
+    invoke,
+  );
   const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
   const readContainer = serviceWorkerContainer(win);
@@ -71,7 +78,7 @@ export function install(
   let awaiting = navigating || headedElsewhere(win);
   const container = () => (awaiting ? null : readContainer());
   const nativeLocation = win.location;
-  const ownLocation = locationCalls(nativeLocation, invoke);
+  const ownLocation = locationCalls(nativeLocation, invoke, blobs.swap);
   const steps = new DocumentSteps();
   const toolbarKeys = createToolbarKeys(win);
   const listeners: DocumentListeners[] = [toolbarKeys];
@@ -112,7 +119,7 @@ export function install(
     if (!fake) {
       fake = createFakeLocation(
         {
-          ...locationCalls(location, invoke),
+          ...locationCalls(location, invoke, blobs.swap),
           real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
         },
         win.Location.prototype,
@@ -170,7 +177,7 @@ export function install(
           steps,
         )),
     ],
-    ["attributes", () => installAttributes(win, ctx, rewrite)],
+    ["attributes", () => installAttributes(win, ctx, rewrite, blobs.swap)],
     [
       "html sinks",
       () =>
@@ -184,7 +191,7 @@ export function install(
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx, partition, ownAnnounce)],
     ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
-    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke))],
+    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke, blobs))],
     ["top site", () => listeners.push(installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
@@ -234,13 +241,21 @@ export function install(
       toolbarKeys,
     );
   });
+  steps.add("blob document", (next) => {
+    const blob = next.inherit?.blob;
+    if (typeof blob === "string" && isBlobUrl(blob)) void blobs.load(blob);
+  });
   steps.run(config);
 }
 
 /** Location calls take their source document from the calling realm, so they go through the invoker. */
-function locationCalls(location: Location, invoke: Invoke): Pick<LocationEnv, "navigate" | "reload" | "setHash"> {
+function locationCalls(
+  location: Location,
+  invoke: Invoke,
+  swapBlob: (url: string) => string,
+): Pick<LocationEnv, "navigate" | "reload" | "setHash"> {
   return {
-    navigate: (url, mode) => invoke(mode === "replace" ? location.replace : location.assign, location, [url]),
+    navigate: (url, mode) => invoke(mode === "replace" ? location.replace : location.assign, location, [swapBlob(url)]),
     reload: () => invoke(location.reload, location, []),
     setHash: (hash) => {
       // Location members are own properties of each instance, not of Location.prototype.

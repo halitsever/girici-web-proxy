@@ -124,7 +124,7 @@ function randomHex(): string {
  * One Blob part whose iteration reads only own properties, so a page that replaced the array iterator or its next
  * cannot hand the Blob a script of its own.
  */
-function blobParts(part: string): string[] {
+export function blobParts(part: string): string[] {
   const parts = [part];
   let given = false;
   const next = () => {

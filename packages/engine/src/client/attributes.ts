@@ -32,6 +32,14 @@ const INTEGRITY_PROPERTIES: Array<[string, string]> = [
   ["HTMLScriptElement", "integrity"],
   ["HTMLLinkElement", "integrity"],
 ];
+/** Sinks that load a document into a frame, where a blob URL must become a bootstrap blob. */
+const DOCUMENT_PROPERTIES = new Set([
+  "HTMLIFrameElement.src",
+  "HTMLFrameElement.src",
+  "HTMLObjectElement.data",
+  "HTMLEmbedElement.src",
+]);
+const DOCUMENT_ATTRIBUTES = new Set(["iframe.src", "frame.src", "object.data", "embed.src"]);
 const LINK_ELEMENTS = ["HTMLAnchorElement", "HTMLAreaElement"];
 const LINK_PARTS = ["protocol", "host", "hostname", "port", "pathname", "search", "hash"] as const;
 const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
@@ -42,6 +50,8 @@ const ownDescriptor = Object.getOwnPropertyDescriptor;
 const defineProperty = Object.defineProperty;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
+const setHas = Set.prototype.has;
+const lower = String.prototype.toLowerCase;
 
 /** The markup rewriters for a srcdoc document, which also carries the runtime tag. */
 export interface SrcdocBridge {
@@ -50,14 +60,20 @@ export interface SrcdocBridge {
 }
 
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
-export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBridge): void {
+export function installAttributes(
+  win: Realm,
+  ctx: UrlContext,
+  markup: SrcdocBridge,
+  swapBlob: (url: string) => string,
+): void {
   for (const [name, property] of URL_PROPERTIES) {
+    const opens = apply(setHas, DOCUMENT_PROPERTIES, [`${name}.${property}`]);
     wrap(
       win,
       name,
       property,
       (value) => (value ? ctx.fromProxy(value) : value),
-      (value) => ctx.toProxy(value),
+      (value) => (opens ? swapBlob(ctx.toProxy(value)) : ctx.toProxy(value)),
     );
   }
   for (const [name, property] of SRCSET_PROPERTIES) {
@@ -169,9 +185,10 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   }
 
   function rewrite(target: Element, name: string, value: string): string {
-    return attributeKind(target.localName, name)
-      ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.srcdoc)
-      : value;
+    if (!attributeKind(target.localName, name)) return value;
+    const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.srcdoc);
+    const sink = `${target.localName}.${apply(lower, name, []) as string}`;
+    return apply(setHas, DOCUMENT_ATTRIBUTES, [sink]) ? swapBlob(rewritten) : rewritten;
   }
 
   function restore(target: Element, name: string, value: string): string {

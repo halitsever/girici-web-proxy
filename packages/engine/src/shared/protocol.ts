@@ -68,6 +68,8 @@ export interface InheritedContext {
   origin: string;
   /** The real URL of the parent page. */
   base: string;
+  /** Set for a blob document's bootstrap: the blob the runtime loads once it is in place. */
+  blob?: string;
 }
 
 export interface ClientConfig {
