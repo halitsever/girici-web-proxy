@@ -51,8 +51,9 @@ proxy as the video traffic.
 
 ## Data directory
 
-The admin account and settings live in `${GIRICI_DATA_DIR}/girici.db`. Back up that file to keep the
-account and settings. In Docker, mount a volume at the data directory so it survives restarts; see
+The admin account and settings live in `${GIRICI_DATA_DIR}/girici.db`. SQLite runs in WAL mode, so
+recent changes can sit in `girici.db-wal` next to it while Girici runs. Back up the whole directory with
+Girici stopped, or use `sqlite3 girici.db ".backup backup.db"` while it runs. In Docker, mount a volume at the data directory so it survives restarts; see
 [Running with Docker](/guide/docker).
 
 ## Source link and AGPL
