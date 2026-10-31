@@ -79,6 +79,12 @@ describe("readPrefsMessage", () => {
     expect(readPrefsMessage({ ...valid, blockThirdPartyCookies: "no" }, ui, origin, known)).toBeNull();
   });
 
+  it("lets the UI turn the instance switch on but never off, which only the server's answer does", () => {
+    expect(readPrefsMessage({ ...valid, instanceSeal: false }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+    });
+  });
+
   it("ignores a window on a UI address that no UI navigation produced", () => {
     expect(readPrefsMessage(valid, { ...ui, id: "page-7" }, origin, known)).toBeNull();
   });

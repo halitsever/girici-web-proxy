@@ -147,6 +147,8 @@ self.addEventListener("message", (event) => {
       const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
       if (!update) return;
       await prefs.set(update);
+      // The UI cannot turn the admin's switch off, only have the worker ask the server again.
+      if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
       // The UI waits for this answer before navigating, so the next page already sees the new choice.
       answer?.postMessage({ ok: true });
     }),

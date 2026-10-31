@@ -97,5 +97,8 @@ export function readPrefsMessage(
   const fields = data as Record<string, unknown>;
   const { type, v, blockThirdPartyCookies } = fields;
   if (type !== PREFS_MESSAGE || v !== PROTOCOL_VERSION || typeof blockThirdPartyCookies !== "boolean") return null;
-  return booleanPrefs(fields);
+  const update = booleanPrefs(fields);
+  // Any UI window can post; only the server's answer turns the admin's switch off.
+  if (update.instanceSeal === false) delete update.instanceSeal;
+  return update;
 }
