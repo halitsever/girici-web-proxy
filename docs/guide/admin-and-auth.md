@@ -69,6 +69,21 @@ docker compose exec girici node reset-admin-password.js
 The tool reads the same data directory as the server (`GIRICI_DATA_DIR`), so point it at the right
 database if you overrode that.
 
+## Instance name and logo
+
+In **Settings**, an admin can give the instance its own name and logo. Saving needs the current password, like
+every admin change.
+
+- The name has 1 to 40 characters. Control characters and text-direction overrides are refused. Leaving it empty
+  goes back to "Girici".
+- The logo is a PNG, JPEG, WebP or SVG file of at most 256 KB. Girici checks the type from the file's bytes, not
+  from its name. Girici serves it with a sandbox policy, so a script inside an SVG never runs.
+- Every visitor sees them, signed in or not: in the header, on the sign-in and setup screens, in the tab title and
+  as the favicon. Error pages from the proxy engine keep the Girici name.
+- The "Source code · AGPL-3.0" link stays, and the sign-in and setup screens show it too.
+
+The name lives in the database and the logo in `<data dir>/brand/logo`.
+
 ## Blocked sites
 
 Under **Settings → Admin → Blocked sites**, list one site per line. Girici refuses those sites and all of

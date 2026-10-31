@@ -1,4 +1,5 @@
 import { ref } from "vue";
+import { writeError } from "./auth";
 
 export const DEFAULT_BRAND_NAME = "Girici";
 const LOGO_PREFIX = "/_g/brand/logo";
@@ -76,4 +77,38 @@ export function applyBrandToDocument(next: Brand, doc: BrandDocument): void {
   }
   for (const link of removed) doc.head.appendChild(link);
   removed = [];
+}
+
+export const LOGO_ERROR = "The logo must be a PNG, JPEG, WebP or SVG file of at most 256 KB.";
+const NAME_ERROR = "The name can have up to 40 characters, without control characters.";
+const LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml"];
+const MAX_LOGO_BYTES = 262_144;
+
+export async function readLogoFile(file: Blob): Promise<{ type: string; data: string }> {
+  if (!LOGO_TYPES.includes(file.type) || file.size > MAX_LOGO_BYTES) throw new Error(LOGO_ERROR);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  // Chunks keep the argument list of fromCharCode short.
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { type: file.type, data: btoa(binary) };
+}
+
+export async function saveBrand(
+  change: { name?: string | null; logo?: { type: string; data: string } | null },
+  currentPassword: string,
+): Promise<Brand> {
+  const res = await fetch("/_g/admin/brand", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ ...change, currentPassword }),
+  });
+  if (res.status === 400) {
+    const body = (await res.json().catch(() => ({}))) as { invalid?: string };
+    throw new Error(body.invalid === "name" ? NAME_ERROR : LOGO_ERROR);
+  }
+  if (res.status === 413) throw new Error(LOGO_ERROR);
+  if (!res.ok) throw writeError(res.status, "Could not save the instance.");
+  const saved = parseBrand(await res.json());
+  setBrand(saved);
+  return saved;
 }

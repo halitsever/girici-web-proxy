@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { applyBrandToDocument, fetchBrand, parseBrand, type BrandDocument, type BrandElement } from "../brand";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  applyBrandToDocument,
+  brand,
+  fetchBrand,
+  LOGO_ERROR,
+  parseBrand,
+  readLogoFile,
+  saveBrand,
+  type BrandDocument,
+  type BrandElement,
+} from "../brand";
+
+afterEach(() => vi.unstubAllGlobals());
 
 interface FakeLink extends BrandElement {
   rel: string;
@@ -67,5 +79,34 @@ describe("brand", () => {
     applyBrandToDocument({ name: "Girici", logo: null }, doc);
     expect(doc.title).toBe("Girici");
     expect(doc.links).toEqual(original);
+  });
+});
+
+describe("brand editor", () => {
+  it("refuses a logo the server would refuse", async () => {
+    await expect(readLogoFile(new Blob([new Uint8Array(262_145)], { type: "image/png" }))).rejects.toThrow(LOGO_ERROR);
+    await expect(readLogoFile(new Blob(["hi"], { type: "text/plain" }))).rejects.toThrow(LOGO_ERROR);
+    const svg = "<svg/>";
+    expect(await readLogoFile(new Blob([svg], { type: "image/svg+xml" }))).toEqual({
+      type: "image/svg+xml",
+      data: btoa(svg),
+    });
+  });
+
+  it("explains a refused save", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ invalid: "name" }, { status: 400 }));
+    await expect(saveBrand({ name: "x" }, "pw")).rejects.toThrow("The name can have up to 40 characters");
+    vi.stubGlobal("fetch", async () => Response.json({ invalid: "logo" }, { status: 400 }));
+    await expect(saveBrand({ logo: null }, "pw")).rejects.toThrow(LOGO_ERROR);
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 413 }));
+    await expect(saveBrand({ logo: null }, "pw")).rejects.toThrow(LOGO_ERROR);
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 403 }));
+    await expect(saveBrand({ name: "x" }, "pw")).rejects.toThrow("The current password is wrong");
+  });
+
+  it("shows the saved brand", async () => {
+    vi.stubGlobal("fetch", async () => Response.json({ name: "Yeni", logo: "/_g/brand/logo?v=abc" }));
+    expect(await saveBrand({ name: "Yeni" }, "pw")).toEqual({ name: "Yeni", logo: "/_g/brand/logo?v=abc" });
+    expect(brand.value.name).toBe("Yeni");
   });
 });
