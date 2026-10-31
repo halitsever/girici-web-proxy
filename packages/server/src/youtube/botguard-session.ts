@@ -2,7 +2,7 @@ import { JSDOM } from "jsdom";
 import { getChallenge, BotGuardClient } from "bgutils-js/botguard";
 import { WebPoMinter } from "bgutils-js/webpo";
 import { GOOG_BASE_URL, GOOG_API_KEY, USER_AGENT } from "bgutils-js/utils";
-import { PoTokenMinter, type PoSession } from "./potoken.ts";
+import type { PoSession } from "./potoken.ts";
 
 // YouTube's long-lived web BotGuard key; stable for years.
 const REQUEST_KEY = "O43z0dpjhgX20SCx4KAo";
@@ -79,8 +79,4 @@ export async function createBotGuardSession(fetchImpl: FetchLike = fetch): Promi
     expiresAt: Date.now() + Math.max(ttlMs - TTL_MARGIN_MS, 0),
     mint: (contentBinding) => minter.mintAsWebsafeString(contentBinding),
   };
-}
-
-export function createPoTokenMinter(fetchImpl?: FetchLike): PoTokenMinter {
-  return new PoTokenMinter(() => createBotGuardSession(fetchImpl));
 }

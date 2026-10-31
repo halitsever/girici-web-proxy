@@ -1,3 +1,5 @@
+import { normalizeSetupCode } from "./auth/setup-code.ts";
+import { compileTrust } from "./http/client-ip.ts";
 import { defaultDataDir } from "./paths.ts";
 import { parseHostList } from "./upstream/blocklist.ts";
 import { parseUpstreamProxy, type UpstreamProxy } from "./upstream/proxy-config.ts";
@@ -43,10 +45,10 @@ export function loadConfig(env: Env): Config {
     sourceUrl: readSourceUrl(env.SOURCE_URL),
     testUpstreams: testMode ? readTestUpstreams(env.GIRICI_TEST_UPSTREAMS) : new Map(),
     testCaPath: testMode ? env.GIRICI_TEST_CA?.trim() || undefined : undefined,
-    youtubePoToken: readBoolean(env.GIRICI_YT_POTOKEN, true),
+    youtubePoToken: readBoolean("GIRICI_YT_POTOKEN", env.GIRICI_YT_POTOKEN, true),
     dataDir: env.GIRICI_DATA_DIR?.trim() || defaultDataDir,
     trustProxy: readTrustProxy(env.GIRICI_TRUST_PROXY),
-    sessionSecret: env.GIRICI_SESSION_SECRET?.trim() || undefined,
+    sessionSecret: readSessionSecret(env.GIRICI_SESSION_SECRET),
     rateLimit: readRateLimit(env.GIRICI_RATE_LIMIT),
     blockedHosts: readBlockedHosts(env.GIRICI_BLOCKED_HOSTS),
     upstreamProxy: parseUpstreamProxy(env.GIRICI_UPSTREAM_PROXY),
@@ -63,6 +65,14 @@ function readTrustProxy(raw: string | undefined): boolean | number | string {
   const lower = value.toLowerCase();
   if (["true", "yes", "on"].includes(lower)) return true;
   if (["false", "no", "off"].includes(lower)) return false;
+  try {
+    compileTrust(value);
+  } catch {
+    throw new Error(
+      `GIRICI_TRUST_PROXY must be a number of proxies, true/false, or a comma-separated list of addresses, ` +
+        `subnets and the names loopback, linklocal or uniquelocal, got "${raw}"`,
+    );
+  }
   return value;
 }
 
@@ -75,20 +85,32 @@ export function trustProxyWarning(value: boolean | number | string): string | nu
   );
 }
 
-/** Accepts true/1/yes/on (and their negatives); falls back when unset or unrecognized. */
-function readBoolean(raw: string | undefined, fallback: boolean): boolean {
+/** Accepts true/1/yes/on and their negatives; a typo stops startup rather than silently picking the default. */
+function readBoolean(name: string, raw: string | undefined, fallback: boolean): boolean {
   const value = raw?.trim().toLowerCase();
   if (!value) return fallback;
   if (["true", "1", "yes", "on"].includes(value)) return true;
   if (["false", "0", "no", "off"].includes(value)) return false;
-  return fallback;
+  throw new Error(`${name} must be true/false, 1/0, yes/no or on/off, got "${raw}"`);
 }
 
-/** The message leaves the value out, since it is a secret. */
+/** Counted the way the setup page compares codes, so dashes and spaces cannot pad a weak one. Never echoed. */
 function readSetupToken(raw: string | undefined): string | undefined {
   const value = raw?.trim();
   if (!value) return undefined;
-  if (value.length < 8) throw new Error("GIRICI_SETUP_TOKEN must be at least 8 characters");
+  if (normalizeSetupCode(value).length < 8) {
+    throw new Error("GIRICI_SETUP_TOKEN must be at least 8 characters, not counting spaces and dashes");
+  }
+  return value;
+}
+
+/** It signs every admin session, so a short one could be guessed offline. Never echoed. */
+function readSessionSecret(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value.length < 32) {
+    throw new Error("GIRICI_SESSION_SECRET must be at least 32 characters; openssl rand -hex 32 makes one");
+  }
   return value;
 }
 

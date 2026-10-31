@@ -6,7 +6,8 @@
     [
       "@semantic-release/exec",
       {
-        "verifyReleaseCmd": "echo \"new_version=${nextRelease.version}\" >> \"$GITHUB_OUTPUT\""
+        "verifyReleaseCmd": "echo \"new_version=${nextRelease.version}\" >> \"$GITHUB_OUTPUT\"",
+        "prepareCmd": "bash .github/scripts/push-image.sh ${nextRelease.version}"
       }
     ],
     [

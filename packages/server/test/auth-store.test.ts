@@ -85,6 +85,24 @@ describe("AuthStore sessions", () => {
     expect(s.sessionsValidAfter()).toBeGreaterThan(5_000);
   });
 
+  it("keeps the old password and sessions when part of a password change fails", () => {
+    const db = openDb(":memory:");
+    const s = new AuthStore(db);
+    const info = s.createAdmin(admin);
+    s.revokeSessions(5_000);
+    const secret = s.sessionSecret();
+    db.exec("CREATE TRIGGER no_rotate BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+    expect(() => s.changePassword(info.id, "another-pw-1")).toThrow(/disk full/);
+    expect(s.verifyLogin("halit", admin.password)).not.toBeNull();
+    expect(s.verifyLogin("halit", "another-pw-1")).toBeNull();
+    expect(s.sessionsValidAfter()).toBe(5_000);
+    expect(s.sessionSecret()).toBe(secret);
+    // The store stays usable: no transaction is left open.
+    db.exec("DROP TRIGGER no_rotate");
+    s.changePassword(info.id, "another-pw-1");
+    expect(s.verifyLogin("halit", "another-pw-1")).not.toBeNull();
+  });
+
   it("checks an admin's current password", () => {
     const s = store();
     const info = s.createAdmin(admin);

@@ -18,16 +18,32 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     environment:
       LOG_LEVEL: info
       GIRICI_DATA_DIR: /data
+      GIRICI_TRUST_PROXY: ${GIRICI_TRUST_PROXY:-}
+      GIRICI_SETUP_TOKEN: ${GIRICI_SETUP_TOKEN:-}
     volumes:
       - girici_data:/data
 
 volumes:
   girici_data:
 ```
+
+The container's file system is read-only apart from the `/data` volume and a `/tmp` in memory, it has no Linux
+capabilities, and it cannot gain privileges. The port is published on `127.0.0.1` only, so nothing outside the
+machine reaches Girici except through a reverse proxy such as the Caddy profile below. To serve it directly on
+your network instead, change the mapping to `"3000:3000"`.
+
+Compose reads `GIRICI_DOMAIN`, `GIRICI_TRUST_PROXY` and `GIRICI_SETUP_TOKEN` from a `.env` file next to it.
+Copy `.env.example` to `.env` to start.
 
 ::: tip
 `latest` is v2 (v2.0.0 and newer); the last v1 image stays available as `halitsever/girici-web-proxy:v1`.
@@ -39,7 +55,7 @@ Keep `build: .` to run v2 from this repository instead of the published image.
 Give the container a volume for `/data` so its database persists:
 
 ```bash
-docker run -d -p 3000:3000 -v girici_data:/data girici-web-proxy
+docker run -d -p 3000:3000 -v girici_data:/data halitsever/girici-web-proxy:latest
 ```
 
 The setup screen asks for a code that Girici prints to the container log at startup:
@@ -60,8 +76,8 @@ GIRICI_DOMAIN=proxy.example GIRICI_TRUST_PROXY=1 docker compose --profile https 
 Edit `deploy/Caddyfile` for your domain and certificate setup.
 
 `GIRICI_TRUST_PROXY=1` tells Girici that one proxy (Caddy) sits in front of it, so the rate limits and the WebSocket
-cap count each visitor instead of lumping everyone under Caddy's address. Remove the `ports` mapping of the `girici`
-service when you do this, so nobody can reach Girici directly with a forged `X-Forwarded-For`.
+cap count each visitor instead of lumping everyone under Caddy's address. Keep the `girici` port on `127.0.0.1`
+(or remove the mapping) when you do this, so nobody can reach Girici directly with a forged `X-Forwarded-For`.
 
 ## Resetting the admin password in a container
 

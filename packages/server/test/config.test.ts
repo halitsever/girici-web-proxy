@@ -26,7 +26,22 @@ describe("loadConfig", () => {
     expect(loadConfig({ GIRICI_TRUST_PROXY: "true" }).trustProxy).toBe(true);
     expect(loadConfig({ GIRICI_TRUST_PROXY: "2" }).trustProxy).toBe(2);
     expect(loadConfig({ GIRICI_TRUST_PROXY: "loopback" }).trustProxy).toBe("loopback");
-    expect(loadConfig({ GIRICI_SESSION_SECRET: "  hex  " }).sessionSecret).toBe("hex");
+    const secret = "0123456789abcdef0123456789abcdef";
+    expect(loadConfig({ GIRICI_SESSION_SECRET: `  ${secret}  ` }).sessionSecret).toBe(secret);
+  });
+
+  it("rejects a session secret under 32 characters without echoing it", () => {
+    expect(() => loadConfig({ GIRICI_SESSION_SECRET: "too-short-secret" })).toThrow(
+      /GIRICI_SESSION_SECRET must be at least 32 characters/,
+    );
+    expect(() => loadConfig({ GIRICI_SESSION_SECRET: "too-short-secret" })).not.toThrow(/too-short-secret/);
+  });
+
+  it("rejects a trust proxy value Express cannot compile, naming the variable", () => {
+    for (const value of ["abc", "10.0.0.0/99", "loopback,,", "-1", "1.5"]) {
+      expect(() => loadConfig({ GIRICI_TRUST_PROXY: value })).toThrow(/GIRICI_TRUST_PROXY/);
+    }
+    expect(loadConfig({ GIRICI_TRUST_PROXY: "10.0.0.0/8, loopback" }).trustProxy).toBe("10.0.0.0/8, loopback");
   });
 
   it("reads digits as a hop count, so 1 trusts exactly one proxy", () => {
@@ -42,6 +57,12 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ GIRICI_SETUP_TOKEN: "short" })).not.toThrow(/short"/);
   });
 
+  it("measures GIRICI_SETUP_TOKEN as the setup page compares it, without spaces and dashes", () => {
+    expect(() => loadConfig({ GIRICI_SETUP_TOKEN: "ab-cd ef-g" })).toThrow(/GIRICI_SETUP_TOKEN must be at least 8/);
+    expect(() => loadConfig({ GIRICI_SETUP_TOKEN: "--------" })).toThrow(/GIRICI_SETUP_TOKEN/);
+    expect(loadConfig({ GIRICI_SETUP_TOKEN: "ABCD-EFGH" }).setupToken).toBe("ABCD-EFGH");
+  });
+
   it("warns only when every forwarding hop is trusted", () => {
     expect(trustProxyWarning(true)).toContain("GIRICI_TRUST_PROXY");
     for (const value of [false, 0, 1, 2, "loopback"]) expect(trustProxyWarning(value)).toBeNull();
@@ -50,6 +71,10 @@ describe("loadConfig", () => {
   it("turns the YouTube poToken minter off with GIRICI_YT_POTOKEN", () => {
     expect(loadConfig({ GIRICI_YT_POTOKEN: "off" }).youtubePoToken).toBe(false);
     expect(loadConfig({ GIRICI_YT_POTOKEN: "1" }).youtubePoToken).toBe(true);
+  });
+
+  it("rejects a boolean it does not recognise instead of falling back", () => {
+    expect(() => loadConfig({ GIRICI_YT_POTOKEN: "of" })).toThrow(/GIRICI_YT_POTOKEN must be .*got "of"/);
   });
 
   it("reads test upstreams only in test mode", () => {

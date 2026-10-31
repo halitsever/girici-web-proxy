@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { LOGIN_PATH, SETUP_PATH } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
 import { sessionAdmin } from "../auth/gate.ts";
@@ -11,7 +11,18 @@ const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH];
 
 export function uiRouter(webDistDir: string, store: AuthStore): Router {
   const router = Router();
-  router.use("/_g/ui", express.static(join(webDistDir, "_g/ui"), { immutable: true, maxAge: "1y", index: false }));
+  router.use(
+    "/_g/ui",
+    express.static(join(webDistDir, "_g/ui"), {
+      immutable: true,
+      maxAge: "1y",
+      index: false,
+      // Revalidated like the engine's license file, since the name is not hashed.
+      setHeaders: (res, path) => {
+        if (basename(path) === "THIRD_PARTY_LICENSES.txt") res.setHeader("Cache-Control", "no-cache");
+      },
+    }),
+  );
   const shell = (req: Request, res: Response) => {
     const redirect = shellRedirect(store, req.path, authed(store, req));
     if (redirect) {
