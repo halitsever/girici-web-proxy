@@ -3,7 +3,7 @@
   "version": "2.0.0-dev",
   "private": true,
   "type": "module",
-  "description": "A web proxy for unblocking websites",
+  "description": "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
   "author": "Halit Sever",
   "license": "AGPL-3.0-only",
   "engines": {

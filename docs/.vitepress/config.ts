@@ -72,7 +72,7 @@ async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
 export default defineConfig({
   lang: "en-US",
   title: "Girici",
-  description: "A self-hosted web proxy built on its own service worker engine.",
+  description: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
   // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
   base: process.env.DOCS_BASE || "/",
   // The app is dark-only; drop the toggle so the docs match it.
@@ -86,7 +86,10 @@ export default defineConfig({
     ["meta", { property: "og:title", content: "Girici" }],
     [
       "meta",
-      { property: "og:description", content: "A self-hosted web proxy built on its own service worker engine." },
+      {
+        property: "og:description",
+        content: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
+      },
     ],
   ],
   themeConfig: {
