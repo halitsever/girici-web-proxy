@@ -1,7 +1,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
-import { connect as tlsConnect } from "node:tls";
+import { rootCertificates, connect as tlsConnect } from "node:tls";
 import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from "ws";
 import { isAdminCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
@@ -140,6 +140,36 @@ function defaultDial(tunnel: TunnelDialer | undefined): Dial {
       maxPayload: init.maxPayload,
       ...(tunnel ? { createConnection: tunneledConnection(tunnel, target) } : { lookup: init.lookup }),
     });
+}
+
+/**
+ * Test mode only: fixture names point at local servers while TLS still checks the original name, as the HTTP agent
+ * does for its requests.
+ */
+export function testUpstreamDial(
+  testUpstreams: ReadonlyMap<string, { host: string; port: number }>,
+  testCa: string | undefined,
+): Dial {
+  return (target, init) => {
+    const mapped = testUpstreams.get(target.hostname);
+    const connection: ClientOptions["createConnection"] | undefined = mapped
+      ? () =>
+          tlsConnect({
+            host: mapped.host,
+            port: mapped.port,
+            servername: target.hostname,
+            ALPNProtocols: ["http/1.1"],
+            ...(testCa ? { ca: [...rootCertificates, testCa] } : {}),
+          })
+      : undefined;
+    return new WebSocket(target.href, init.protocols, {
+      headers: init.headers,
+      followRedirects: false,
+      handshakeTimeout: init.handshakeTimeout,
+      maxPayload: init.maxPayload,
+      ...(connection ? { createConnection: connection } : { lookup: init.lookup }),
+    });
+  };
 }
 
 /** ws passes this to http.request, which waits for the callback, so the tunnel may open asynchronously. */

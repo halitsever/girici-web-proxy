@@ -184,6 +184,32 @@ const WORKER = page(
 </script>`,
 );
 
+// Reports how a binary frame reached it, to its parent when it is a frame.
+const WS_BINARY = page(
+  "Binary socket",
+  `<pre id="type"></pre>
+<script>
+  const socket = new WebSocket("wss://site-b.test/binary-socket");
+  socket.onmessage = (event) => {
+    const type = event.data instanceof Blob ? "blob" : Object.prototype.toString.call(event.data);
+    document.getElementById("type").textContent = type;
+    if (parent !== window) parent.postMessage("socket:" + type, "*");
+  };
+</script>`,
+);
+
+const WS_FRAME = page(
+  "Binary socket frame",
+  `<pre id="type"></pre><iframe src="/ws-binary"></iframe>
+<script>
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("socket:")) {
+      document.getElementById("type").textContent = event.data.slice(7);
+    }
+  });
+</script>`,
+);
+
 const REALTIME = page(
   "Realtime",
   `<pre id="results"></pre>
@@ -1686,6 +1712,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-opener": html(XS_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
+    "/ws-binary": html(WS_BINARY),
+    "/ws-frame": html(WS_FRAME),
     "/served-blob-frame": servedBlob("frame"),
     "/served-blob-meta": servedBlob("meta"),
     "/served-blob-header": servedBlob("header"),
