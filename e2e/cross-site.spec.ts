@@ -33,3 +33,8 @@ test("keeps the sender of a cross-site frame's messages when the page touched it
     pingOrigin: "https://site-a.test",
   });
 });
+
+test("refuses a cross-site frame's static top access", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/top-host");
+  await expect(page.locator("#top")).toHaveText("SecurityError");
+});

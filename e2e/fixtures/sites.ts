@@ -726,6 +726,29 @@ const PM_TOUCH = page(
 </script>`,
 );
 
+const TOP_HOST = page(
+  "Top host",
+  `<p id="top"></p><iframe src="https://site-b.test/top-probe"></iframe>
+<script>
+  window.addEventListener("message", (event) => {
+    document.getElementById("top").textContent = String(event.data);
+  });
+</script>`,
+);
+
+const TOP_PROBE = page(
+  "Top probe",
+  `<script>
+  let result = "open";
+  try {
+    top.document.title;
+  } catch (error) {
+    result = error.name;
+  }
+  parent.postMessage(result, "*");
+</script>`,
+);
+
 const CROSS_POPUP = page(
   "Cross popup",
   `<button id="open">open</button><button id="check">check</button><pre id="results"></pre>
@@ -1093,6 +1116,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
     "/pm-touch": html(PM_TOUCH),
+    "/top-host": html(TOP_HOST),
     "/cross-popup": html(CROSS_POPUP),
     "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
@@ -1257,6 +1281,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
     "/pm-touch-child": html(PM_SOURCE_CHILD),
+    "/top-probe": html(TOP_PROBE),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(
