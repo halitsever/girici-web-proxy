@@ -1131,6 +1131,42 @@ const XS_OPENER = page(
 </script>`,
 );
 
+// A popup the page could script while it showed this site; once it shows another, every held reference loses it.
+const XS_HELD = page(
+  "Held popup",
+  `<button id="blank">blank</button><button id="same">same</button><button id="hold">hold</button>
+<button id="away">away</button><button id="check">check</button><pre id="results"></pre>
+<script>
+  ${FAILURE}
+  let w;
+  let global;
+  let before;
+  const hold = () => {
+    global = w.globalThis;
+    before = failure(() => w.document.title);
+  };
+  document.getElementById("blank").onclick = () => {
+    w = open();
+    hold();
+  };
+  document.getElementById("same").onclick = () => {
+    w = open("https://site-a.test/");
+  };
+  document.getElementById("hold").onclick = hold;
+  document.getElementById("away").onclick = () => {
+    w.location = "https://site-b.test/xs-opened";
+  };
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = JSON.stringify({
+      before,
+      document: failure(() => w.document),
+      global: failure(() => global.document),
+      closed: w.closed,
+    });
+  };
+</script>`,
+);
+
 const XS_OPENED = page(
   "Cross-site opened",
   `<pre id="results"></pre>
@@ -1778,6 +1814,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/blob-frame": html(BLOB_FRAME),
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
+    "/xs-held": html(XS_HELD),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
     "/refresh-quote": html(REFRESH_QUOTE),

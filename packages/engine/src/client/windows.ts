@@ -121,12 +121,16 @@ export function createWindowGuard(
     typeof value === "object" && value !== null && apply(setHas, ownWrappers, [value]);
   const ownWrappers = new NativeWeakSet<object>();
 
+  /** Another tab can move to another site while page code still holds it, so it never goes out as is. */
+  const isOtherTab = (value: object): boolean =>
+    value !== win && read(value, "parent") === value && value !== read(win, "top");
+
   const wrap = (value: unknown, headedTo?: string): unknown => {
     if (!isWindow(value) || isWrapper(value) || apply(setHas, given, [value])) return value;
     const cached = apply(mapGet, wrappers, [value]) as object | undefined;
     if (cached) return cached;
-    // A window handed out as is stays so: whoever got it keeps it anyway, and one window must stay one object.
-    if (sameOrigin(value) && (headedTo === undefined || headedTo === selfOrigin())) {
+    // A frame handed out as is stays so: whoever got it keeps it anyway, and one window must stay one object.
+    if (sameOrigin(value) && (headedTo === undefined || headedTo === selfOrigin()) && !isOtherTab(value)) {
       apply(setAdd, given, [value]);
       return value;
     }
@@ -229,7 +233,10 @@ export function createWindowGuard(
       typeof property === "string" && (property in CROSS_ORIGIN_KEYS || isIndex(property));
     const passthrough = (property: string | symbol): unknown => {
       const value: unknown = reflectGet(target, property, target);
-      if (typeof value !== "function") return value;
+      // The window itself, as `globalThis` names it, stays behind this wrapper.
+      if (typeof value === "object") return isWindow(value) ? wrap(value) : value;
+      // Constructors stay themselves, so `new` and instanceof work across the wrapper.
+      if (typeof value !== "function" || ownDescriptor(value, "prototype")) return value;
       // Methods run on the window itself, not on the wrapper.
       let method = apply(mapGet, bound, [value]) as unknown;
       if (!method) {
