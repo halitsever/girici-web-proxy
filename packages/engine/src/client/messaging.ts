@@ -1,5 +1,6 @@
 import { apply, define, isWebUrl, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import type { Invoke } from "./invoke.ts";
+import { maskNative } from "./native-mask.ts";
 import { realOriginOf, type Realm, type UrlContext } from "./url-context.ts";
 import type { WindowGuard } from "./windows.ts";
 
@@ -24,9 +25,9 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, gu
   if (sourceDescriptor && nativeSource) {
     define(proto, "source", {
       ...sourceDescriptor,
-      get(this: MessageEvent) {
+      get: maskNative(function (this: MessageEvent) {
         return guard.wrap(apply(nativeSource, this, []));
-      },
+      }, nativeSource),
     });
   }
 
@@ -35,12 +36,12 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, gu
   if (!nativeOrigin) return;
   define(proto, "origin", {
     ...descriptor,
-    get(this: MessageEvent) {
+    get: maskNative(function (this: MessageEvent) {
       const origin = toText(apply(nativeOrigin, this, []));
       if (origin !== ctx.origin) return origin;
       // The sender is on our origin too. Its address, or else its own runtime, tells its real origin.
       return realOriginOf(sourceOf(this), ctx.origin) ?? origin;
-    },
+    }, nativeOrigin),
   });
 }
 
@@ -57,15 +58,16 @@ export function createMessageSender(
   // Captured before installMessaging replaces it; window methods live on the window itself, not on Window.prototype.
   const native = win.postMessage;
   return (value) => {
-    let realOrigin: string;
     try {
       // A restricted window's own postMessage already translates.
       if (!isWindow(value) || isWrapper(value)) return value;
-      realOrigin = toText(value.origin);
+      void value.location.href;
     } catch {
-      // A cross-origin window hides its origin, and its own postMessage needs no translation.
+      // A cross-origin window hides its address, and its own postMessage needs no translation.
       return value;
     }
+    // Its page can redefine `origin`, so the address or its runtime says where it really is.
+    const realOrigin = realOriginOf(value, ctx.origin) ?? "null";
     const send: Send = (...args) => invoke(native, value, args);
     return {
       postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>

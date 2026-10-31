@@ -62,6 +62,18 @@ export function realOriginOf(other: unknown, proxyOrigin: string): string | null
   }
 }
 
+/** The site `other`'s own runtime holds, or undefined when this realm cannot ask it. */
+export function engineSiteOf(other: unknown): string | undefined {
+  try {
+    const helpers = (other as { __g$?: { site?: unknown } }).__g$;
+    const site: unknown = typeof helpers?.site === "function" ? apply(helpers.site, helpers, []) : undefined;
+    return typeof site === "string" ? site : undefined;
+  } catch {
+    // A window of an opaque origin cannot be asked.
+    return undefined;
+  }
+}
+
 /** Must be created before the hooks so it keeps reading the browser's own proxy URLs. */
 export function createUrlContext(win: Realm, initial?: InheritedContext): UrlContext {
   const origin = initial?.origin ?? win.location.origin;

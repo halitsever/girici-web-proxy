@@ -38,3 +38,16 @@ test("refuses a cross-site frame's static top access", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/top-host");
   await expect(page.locator("#top")).toHaveText("SecurityError");
 });
+
+test("shows a storage change only to windows of the site that made it", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/storage-events");
+  const other = await context.newPage();
+  await other.goto("/~/https/site-b.test/storage-events");
+  const writer = await context.newPage();
+  await writer.goto("/~/https/site-a.test/storage?set=v1");
+  await expect(page.locator("#events")).toHaveText('["k","v1",true]');
+  // A storage event reaches every window of the origin in the same task, so the other site's has had its chance.
+  await writer.goto("/~/https/site-a.test/storage?set=v2");
+  await expect(page.locator("#events")).toContainText('["k","v2",true]');
+  await expect(other.locator("#events")).toHaveText("");
+});

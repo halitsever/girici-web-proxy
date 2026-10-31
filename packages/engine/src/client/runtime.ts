@@ -1,6 +1,7 @@
 import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import {
+  append,
   brandOf,
   define,
   hashOf,
@@ -40,7 +41,7 @@ import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
-import { createUrlContext, realOriginOf, type Realm } from "./url-context.ts";
+import { createUrlContext, engineSiteOf, realOriginOf, type Realm } from "./url-context.ts";
 import { createWindowGuard, installWindowLinks } from "./windows.ts";
 
 // Taken at load: install also runs when a page inserts a frame, after page code may have replaced these.
@@ -159,6 +160,7 @@ export function install(
       isTop: top === win,
       topUrl: topOrigin ? parseUrl(topOrigin) : null,
       site: current.site,
+      topSite: top === win ? undefined : engineSiteOf(top),
     });
   };
   const helpers = createHelpers({
@@ -179,6 +181,7 @@ export function install(
     messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper),
     wrapWindow: guard.wrap,
     realOrigin: () => originOf(ctx.realUrl()),
+    site: () => current.site,
     renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit)),
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
@@ -223,7 +226,7 @@ export function install(
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
     ["network", () => installNetwork(win, ctx, cookies)],
-    ["storage", () => installStorage(win, partition)],
+    ["storage", () => append(listeners, installStorage(win, partition))],
     ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
     ["messaging", () => installMessaging(win, ctx, invoke, guard)],
     ["windows", () => installWindowLinks(win, ctx, guard)],

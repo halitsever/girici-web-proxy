@@ -30,6 +30,7 @@ function setup() {
     messageTarget: (value) => value,
     wrapWindow: (value) => (value === frame ? { wrapped: value } : value),
     realOrigin: () => "https://site.test",
+    site: () => "https://site.test",
     renew: () => false,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
@@ -80,6 +81,7 @@ describe("createHelpers", () => {
     expect(helpers.W(win)).toBe(win);
     expect(helpers.W(5)).toBe(5);
     expect(helpers.realOrigin()).toBe("https://site.test");
+    expect(helpers.site()).toBe("https://site.test");
   });
 
   it("wraps window links read through destructuring when Reflect.get is replaced", () => {
@@ -141,6 +143,7 @@ describe("createHelpers", () => {
       messageTarget: (value) => ({ standIn: value }),
       wrapWindow: (value) => value,
       realOrigin: () => "https://site.test",
+      site: () => "https://site.test",
       renew: () => true,
     });
     expect(helpers.E("location")).toBe("/*rw*/location");

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createPartitionedStorage, partitionFor } from "../src/client/storage.ts";
+import { createPartitionedStorage, installStorage, partitionFor } from "../src/client/storage.ts";
+import type { Realm } from "../src/client/url-context.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 
 class MemoryStorage implements Storage {
@@ -132,6 +133,19 @@ describe("partitionFor", () => {
     );
   });
 
+  it("does not take a frame's claimed site for first-party storage unless its host and its top agree", () => {
+    const frame = (origin: string, site: string, topSite?: string) =>
+      partitionFor({ origin, isTop: false, topUrl: new URL("https://www.a.test/"), site, topSite });
+    // A b.test frame in an a.test top that claims a.test is still third-party.
+    expect(frame("https://b.test", "https://a.test")).toBe("__g^|https://www.a.test|https://b.test|");
+    // The top's own runtime names another site.
+    expect(frame("https://login.a.test", "https://a.test", "https://c.test")).toBe(
+      "__g^|https://www.a.test|https://login.a.test|",
+    );
+    expect(frame("https://login.a.test", "https://a.test", "https://a.test")).toBe("__g|https://login.a.test|");
+    expect(frame("https://login.a.test", "https://a.test")).toBe("__g|https://login.a.test|");
+  });
+
   it("partitions a frame whose top or site is unknown", () => {
     expect(partitionFor({ origin: "https://a.test", isTop: false, topUrl: null, site: "https://a.test" })).toBe(
       "__g^|null|https://a.test|",
@@ -139,5 +153,96 @@ describe("partitionFor", () => {
     expect(
       partitionFor({ origin: "https://a.test", isTop: false, topUrl: new URL("https://a.test/"), site: undefined }),
     ).toBe("__g^|https://a.test|https://a.test|");
+  });
+});
+
+describe("storage events", () => {
+  function setup() {
+    const local = new MemoryStorage();
+    const session = new MemoryStorage();
+    const listeners: Array<[string, (event: unknown) => void, unknown]> = [];
+    interface RawEvent {
+      key: string | null;
+      oldValue: string | null;
+      newValue: string | null;
+      area: Storage;
+    }
+    class StorageEvent {
+      readonly isTrusted: boolean;
+      readonly raw: RawEvent;
+      stopped = false;
+      constructor(raw: RawEvent, trusted = true) {
+        this.raw = raw;
+        this.isTrusted = trusted;
+      }
+      get key() {
+        return this.raw.key;
+      }
+      get oldValue() {
+        return this.raw.oldValue;
+      }
+      get newValue() {
+        return this.raw.newValue;
+      }
+      get storageArea() {
+        return this.raw.area;
+      }
+    }
+    const win = {
+      Storage: { prototype: MemoryStorage.prototype },
+      StorageEvent,
+      Event: {
+        prototype: {
+          stopImmediatePropagation(this: { stopped: boolean }) {
+            this.stopped = true;
+          },
+        },
+      },
+      addEventListener(type: string, listener: (event: unknown) => void, capture: unknown) {
+        listeners.push([type, listener, capture]);
+      },
+    } as unknown as Realm & Record<string, Storage>;
+    Object.defineProperty(win, "localStorage", { configurable: true, get: () => local });
+    Object.defineProperty(win, "sessionStorage", { configurable: true, get: () => session });
+    const events = installStorage(win, () => prefixFor("https://a.test"));
+    events.listen();
+    const event = (key: string | null, trusted = true) =>
+      new StorageEvent({ key, oldValue: "old", newValue: "new", area: local }, trusted) as unknown as {
+        key: string | null;
+        oldValue: string | null;
+        newValue: string | null;
+        storageArea: unknown;
+        stopped: boolean;
+      };
+    const dispatch = (target: ReturnType<typeof event>) => {
+      for (const [type, listener] of listeners) if (type === "storage") listener(target);
+      return target.stopped;
+    };
+    return { win, event, dispatch, listeners };
+  }
+
+  it("shows a change in the window's own partition without the prefix", () => {
+    const { win, event, dispatch } = setup();
+    const own = event("__g|https://a.test|k");
+    expect(dispatch(own)).toBe(false);
+    expect([own.key, own.oldValue, own.newValue]).toEqual(["k", "old", "new"]);
+    expect(own.storageArea).toBe(win.localStorage);
+  });
+
+  it("drops another partition's change before page listeners and hides its key and values", () => {
+    const { event, dispatch, listeners } = setup();
+    expect(listeners.map(([type, , capture]) => [type, capture])).toEqual([["storage", true]]);
+    for (const key of ["__g|https://b.test|k", "__g^|https://b.test|https://a.test|k", null]) {
+      const foreign = event(key);
+      expect(dispatch(foreign)).toBe(true);
+      expect([foreign.key, foreign.oldValue, foreign.newValue]).toEqual([null, null, null]);
+    }
+  });
+
+  it("leaves an event the page made itself as it made it", () => {
+    const { event, dispatch } = setup();
+    const made = event("k", false);
+    expect(dispatch(made)).toBe(false);
+    expect([made.key, made.newValue]).toEqual(["k", "new"]);
   });
 });

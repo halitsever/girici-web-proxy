@@ -98,6 +98,7 @@ function installed() {
     messageTarget: (value) => value,
     wrapWindow: (value) => value,
     realOrigin: () => "https://a.test",
+    site: () => undefined,
     renew: () => false,
   });
   const click = (link: FakeElement) => {

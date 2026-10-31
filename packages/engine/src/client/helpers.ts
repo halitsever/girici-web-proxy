@@ -15,6 +15,8 @@ export interface HelperEnv {
   wrapWindow(value: unknown): unknown;
   /** This window's real origin, which other windows read here because a page can redefine `origin`. */
   realOrigin(): string;
+  /** The registrable site this window's runtime was given, which frames compare their own claimed site against. */
+  site(): string | undefined;
   renew(): boolean;
 }
 
@@ -33,6 +35,7 @@ export interface GiriciHelpers {
   J(code: unknown): string | undefined;
   W(value: unknown): unknown;
   realOrigin(): string;
+  site(): string | undefined;
   /** The engine script of a document that reuses this window calls this instead of installing again. */
   renew(): boolean;
 }
@@ -102,6 +105,7 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     },
     W: (value) => env.wrapWindow(value),
     realOrigin: () => env.realOrigin(),
+    site: () => env.site(),
     renew: () => env.renew(),
   };
 }

@@ -137,6 +137,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     messageTarget: (value) => value,
     wrapWindow: (value) => value,
     realOrigin: () => originOf(ctx.realBase()),
+    site: () => undefined,
     // A worker never loads a second document.
     renew: () => false,
   });

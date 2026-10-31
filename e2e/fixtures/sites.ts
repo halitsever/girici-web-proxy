@@ -886,6 +886,18 @@ const CROSS_POPUP = page(
 </script>`,
 );
 
+// Each change shows as [key, newValue, storageArea is this window's localStorage].
+const STORAGE_EVENTS = page(
+  "Storage events",
+  `<pre id="events"></pre>
+<script>
+  addEventListener("storage", (event) => {
+    const line = JSON.stringify([event.key, event.newValue, event.storageArea === localStorage]);
+    document.getElementById("events").textContent += line + "\\n";
+  });
+</script>`,
+);
+
 const EMBED_STORAGE = page(
   "Embed storage",
   `<iframe id="b" src="https://site-b.test/storage"></iframe>
@@ -1277,6 +1289,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-touch": html(PM_TOUCH),
     "/top-host": html(TOP_HOST),
     "/cross-popup": html(CROSS_POPUP),
+    "/storage-events": html(STORAGE_EVENTS),
     "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
     "/reuse-same": html(REUSE_SAME),
@@ -1442,6 +1455,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/pm-source-child": html(PM_SOURCE_CHILD),
     "/pm-touch-child": html(PM_SOURCE_CHILD),
     "/top-probe": html(TOP_PROBE),
+    "/storage-events": html(STORAGE_EVENTS),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(

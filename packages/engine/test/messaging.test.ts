@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
 import { createMessageSender, installMessaging, post } from "../src/client/messaging.ts";
+import { installToStringMask } from "../src/client/native-mask.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
@@ -104,6 +105,28 @@ describe("installMessaging", () => {
     expect(event.origin).toBe("https://site-b.test");
   });
 
+  it("masks its event getters as the natives they replace", () => {
+    const proto = {
+      get source() {
+        return null;
+      },
+      get origin() {
+        return "";
+      },
+    };
+    const natives = ["source", "origin"].map((name) => Object.getOwnPropertyDescriptor(proto, name)?.get);
+    const win = { ...fakeMessagingWin([], "http://proxy.test"), MessageEvent: { prototype: proto } } as Realm;
+    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"), direct, asIs);
+    const fake = { Function: { prototype: { toString: Function.prototype.toString } } } as unknown as Realm;
+    installToStringMask(fake);
+    const masked = fake.Function.prototype.toString;
+    const hooked = ["source", "origin"].map((name) => Object.getOwnPropertyDescriptor(proto, name)?.get);
+    expect(hooked).not.toEqual(natives);
+    expect(hooked.map((get) => Reflect.apply(masked, get, []))).toEqual(
+      natives.map((get) => Function.prototype.toString.call(get)),
+    );
+  });
+
   it("sends through the invoker", () => {
     const win = fakeMessagingWin([], "http://proxy.test");
     const invoked: Array<{ self: unknown; args: readonly unknown[] }> = [];
@@ -121,6 +144,22 @@ describe("installMessaging", () => {
 });
 
 describe("createMessageSender", () => {
+  it("addresses a window by its real origin, not the origin its page claims", () => {
+    const calls: unknown[][] = [];
+    const win = {
+      postMessage(this: unknown, ...args: unknown[]) {
+        calls.push(args);
+      },
+    } as unknown as Realm;
+    const sender = createMessageSender(win, ctxFor("https://site-a.test", "http://proxy.test"), direct);
+    const target = fakeWindow("https://site-b.test");
+    target.origin = "https://site-c.test";
+    const standIn = sender(target) as { postMessage(...args: unknown[]): void };
+    standIn.postMessage("to c", "https://site-c.test");
+    standIn.postMessage("to b", "https://site-b.test");
+    expect(calls).toEqual([["to b", "http://proxy.test"]]);
+  });
+
   it("posts to another window from this realm, translating the target origin", () => {
     const calls: unknown[][] = [];
     const win = {
