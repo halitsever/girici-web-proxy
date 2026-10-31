@@ -2,7 +2,6 @@ import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import {
   append,
-  brandOf,
   define,
   hashOf,
   hrefOf,
@@ -48,6 +47,8 @@ import { createWindowGuard, installWindowLinks } from "./windows.ts";
 // Taken at load: install also runs when a page inserts a frame, after page code may have replaced these.
 const apply = Reflect.apply;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
+const warn = console.warn;
+const nativeConsole = console;
 const freeze = Object.freeze;
 
 /**
@@ -93,6 +94,7 @@ export function install(
   let awaiting = navigating || headedElsewhere(win, config.inherit?.origin ?? win.location.origin);
   const container = () => (awaiting ? null : readContainer());
   const nativeLocation = win.location;
+  const isLocation = locationCheck(nativeLocation);
   const ownLocation = locationCalls(nativeLocation, invoke, blobs.swap);
   const steps = new DocumentSteps();
   if (awaiting) {
@@ -262,12 +264,15 @@ export function install(
     // Last, so every hook installed above is registered before tamper checks can read a masked toString.
     ["native mask", () => installToStringMask(win)],
   ];
-  for (const [name, step] of installSteps) {
+  // Indexed, without destructuring: adopting a frame runs this inside a page call, after the page may have replaced
+  // the array iterator.
+  for (let index = 0; index < installSteps.length; index++) {
+    const entry = installSteps[index] as [string, () => void];
     try {
-      step();
+      entry[1]();
     } catch (error) {
       // One browser difference should cost one hook, not the whole page.
-      console.warn("Girici:", name, error);
+      apply(warn, nativeConsole, ["Girici:", entry[0], error]);
     }
   }
 
@@ -359,19 +364,29 @@ function serviceWorkerContainer(win: Realm): () => ServiceWorkerContainer | null
   };
 }
 
-function isLocation(value: unknown): boolean {
-  try {
-    return brandOf(value) === "[object Location]";
-  } catch {
-    return false;
-  }
+/**
+ * A Location's own href getter throws for anything that is not a Location. `@@toStringTag` would not do: a page can
+ * delete it from Location.prototype.
+ */
+export function locationCheck(location: object): (value: unknown) => boolean {
+  const href = ownDescriptor(location, "href")?.get;
+  return (value) => {
+    if (typeof value !== "object" || value === null || !href) return false;
+    try {
+      apply(href, value, []);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 /** Other same-origin windows have their own runtime and stand-in, reached through their __g$. */
 function fakeFor(win: Realm, location: object): object | null {
   const candidates: Array<Window | null> = [win.parent, win.top, win.opener as Window | null];
-  for (let index = 0; index < win.frames.length; index++) candidates.push(win.frames[index] ?? null);
-  for (const candidate of candidates) {
+  for (let index = 0; index < win.frames.length; index++) append(candidates, win.frames[index] ?? null);
+  for (let index = 0; index < candidates.length; index++) {
+    const candidate = candidates[index];
     try {
       if (candidate && candidate !== win && candidate.location === location) {
         const helpers = (candidate as unknown as { __g$?: { L(value: unknown): unknown } }).__g$;

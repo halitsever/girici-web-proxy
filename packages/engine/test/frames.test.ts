@@ -4,7 +4,7 @@ import { DocumentSteps } from "../src/client/renewal.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
-import { DESCRIPTOR_ADDITIONS, withPrototypeAdditions } from "./replaced-builtins.ts";
+import { DESCRIPTOR_ADDITIONS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 describe("createFrameWalker", () => {
   it("walks only when a mutation changed the number of child windows", () => {
@@ -139,22 +139,25 @@ function fakeRealm() {
 function setup(
   guard: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} },
   toProxy = (raw: string) => `/~/${raw}`,
+  around: <T>(install: () => T) => T = (install) => install(),
 ) {
   const realm = fakeRealm();
   const installed: Array<{ child: unknown; navigating: boolean | undefined }> = [];
   const steps = new DocumentSteps();
   const ctx = { origin: "http://proxy.test", toProxy } as unknown as UrlContext;
-  const adopter = installFrames(
-    realm.win,
-    ctx,
-    () => ({ v: PROTOCOL_VERSION, cookies: [] }),
-    (child, _config, _url, navigating) => {
-      Object.defineProperty(child, "__g$", { value: {} });
-      installed.push({ child, navigating });
-    },
-    "",
-    steps,
-    guard,
+  const adopter = around(() =>
+    installFrames(
+      realm.win,
+      ctx,
+      () => ({ v: PROTOCOL_VERSION, cookies: [] }),
+      (child, _config, _url, navigating) => {
+        Object.defineProperty(child, "__g$", { value: {} });
+        installed.push({ child, navigating });
+      },
+      "",
+      steps,
+      guard,
+    ),
   );
   return { ...realm, installed, adopter, steps };
 }
@@ -179,6 +182,15 @@ describe("installFrames", () => {
     const count = MUTATION_HOOKS.reduce((sum, [, methods]) => sum + methods.length, 0) + setters.length;
     expect(installed.map((entry) => entry.child)).toEqual(top.children);
     expect(installed).toHaveLength(count);
+  });
+
+  it("hooks every insertion method when the page replaced the array iterator before adoption", () => {
+    const { ctors, top, node, installed } = setup(undefined, undefined, (install) =>
+      withReplaced(Array.prototype, Symbol.iterator, { value: function* () {} }, install),
+    );
+    (ctors.Node!.prototype.appendChild as (this: unknown) => void).call(node(top));
+    expect(installed.map((entry) => entry.child)).toEqual(top.children);
+    expect(installed.length).toBeGreaterThan(0);
   });
 
   it("hands every inserted node to the backstop before the native insertion", () => {

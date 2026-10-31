@@ -106,7 +106,12 @@ export function installAttributes(
     const record = apply(mapGet, carried, [node]) as SrcdocRecord | undefined;
     return record && record.native === value ? record.original : value;
   };
-  for (const [name, property] of URL_PROPERTIES) {
+  // Every loop here is indexed, without destructuring: adopting a frame installs these inside a page call, after the
+  // page may have replaced the array iterator.
+  for (let index = 0; index < URL_PROPERTIES.length; index++) {
+    const entry = URL_PROPERTIES[index] as [string, string];
+    const name = entry[0];
+    const property = entry[1];
     const opens = setHas(DOCUMENT_PROPERTIES, `${name}.${property}`);
     wrap(
       win,
@@ -116,29 +121,35 @@ export function installAttributes(
       (value) => (opens ? blobs.swap(ctx.toProxy(value)) : ctx.toProxy(value)),
     );
   }
-  for (const [name, property] of SRCSET_PROPERTIES) {
+  for (let index = 0; index < SRCSET_PROPERTIES.length; index++) {
+    const entry = SRCSET_PROPERTIES[index] as [string, string];
     wrap(
       win,
-      name,
-      property,
+      entry[0],
+      entry[1],
       (value) => restoreAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
       (value) => rewriteAttribute("img", "srcset", value, ctx.realBase(), ctx.origin),
     );
   }
-  for (const [name, property] of INTEGRITY_PROPERTIES) {
+  for (let index = 0; index < INTEGRITY_PROPERTIES.length; index++) {
+    const entry = INTEGRITY_PROPERTIES[index] as [string, string];
+    const property = entry[1];
     wrap(
       win,
-      name,
+      entry[0],
       property,
       (value) => value,
       (value) => rewriteAttribute("script", property, value, ctx.realBase(), ctx.origin),
     );
   }
   installSrcdoc();
-  for (const name of LINK_ELEMENTS) installLinkParts(win, name);
+  for (let index = 0; index < LINK_ELEMENTS.length; index++) installLinkParts(win, LINK_ELEMENTS[index] as string);
 
   const element = win.Element.prototype;
   const { setAttribute, getAttribute, setAttributeNS, getAttributeNS } = element;
+  const localNameOf = ownDescriptor(element, "localName")?.get;
+  const tagOf = (target: unknown): string =>
+    localNameOf ? (apply(localNameOf, target, []) as string) : (target as Element).localName;
   element.setAttribute = function (this: Element, name: string, value: string) {
     apply(setAttribute, this, [name, rewrite(this, name, toText(value))]);
     settle(this);
@@ -156,9 +167,20 @@ export function installAttributes(
     return value === null ? value : restore(this, attributeName(namespace, name), value);
   };
 
+  // Taken here: a page that changed these accessors could make a frame's value skip the rewrite.
+  const attrNameGet = ownDescriptor(win.Attr.prototype, "name")?.get;
+  const attrOwnerGet = ownDescriptor(win.Attr.prototype, "ownerElement")?.get;
+  const attrNamespaceOf = ownDescriptor(win.Attr.prototype, "namespaceURI")?.get;
+  const attrNameOf = (node: unknown): string =>
+    attrNameGet ? (apply(attrNameGet, node, []) as string) : (node as Attr).name;
+  const ownerOf = (node: unknown): Element | null =>
+    attrOwnerGet ? (apply(attrOwnerGet, node, []) as Element | null) : (node as Attr).ownerElement;
+
   // Reading an Attr node directly (getAttributeNode, the attributes map, nodeValue, textContent) must show the real URL.
   const nativeValue = findAccessor(win.Attr.prototype, "value");
-  for (const name of ["value", "nodeValue", "textContent"] as const) {
+  const attrProperties = ["value", "nodeValue", "textContent"] as const;
+  for (let index = 0; index < attrProperties.length; index++) {
+    const name = attrProperties[index] as (typeof attrProperties)[number];
     const descriptor = findAccessor(win.Attr.prototype, name);
     if (!descriptor?.get || !descriptor.set) continue;
     const { get, set } = descriptor;
@@ -167,13 +189,13 @@ export function installAttributes(
       enumerable: descriptor.enumerable ?? true,
       get(this: Attr) {
         const value: unknown = apply(get, this, []);
-        const owner = this.ownerElement;
+        const owner = ownerOf(this);
         if (typeof value !== "string") return value;
-        return owner ? restore(owner, this.name, value) : original(this, value);
+        return owner ? restore(owner, attrNameOf(this), value) : original(this, value);
       },
       set(this: Attr, value: unknown) {
-        const owner = this.ownerElement;
-        apply(set, this, [owner ? rewrite(owner, this.name, toText(value)) : toText(value)]);
+        const owner = ownerOf(this);
+        apply(set, this, [owner ? rewrite(owner, attrNameOf(this), toText(value)) : toText(value)]);
         if (owner) settle(owner);
       },
     });
@@ -186,7 +208,8 @@ export function installAttributes(
     try {
       const value = apply(attrValue.get, node, []);
       if (typeof value !== "string") return;
-      const { namespaceURI, name } = node as Attr;
+      const namespaceURI = attrNamespaceOf ? (apply(attrNamespaceOf, node, []) as string | null) : null;
+      const name = attrNameOf(node);
       const known = apply(mapGet, carried, [node]) as SrcdocRecord | undefined;
       if (known && known.native === value) {
         // Its own earlier output: rewriting it again would only lose the page's string.
@@ -201,7 +224,9 @@ export function installAttributes(
       // The native call reports a node that is not an Attr.
     }
   };
-  for (const name of ["setAttributeNode", "setAttributeNodeNS"] as const) {
+  const nodeSetters = ["setAttributeNode", "setAttributeNodeNS"] as const;
+  for (let index = 0; index < nodeSetters.length; index++) {
+    const name = nodeSetters[index] as (typeof nodeSetters)[number];
     const native = element[name] as (...args: unknown[]) => unknown;
     element[name] = maskNative(function (this: Element, node: Attr) {
       prepare(this, node);
@@ -230,7 +255,9 @@ export function installAttributes(
   }
   const mapProto = win.NamedNodeMap?.prototype;
   if (mapProto) {
-    for (const name of ["setNamedItem", "setNamedItemNS"] as const) {
+    const mapSetters = ["setNamedItem", "setNamedItemNS"] as const;
+    for (let index = 0; index < mapSetters.length; index++) {
+      const name = mapSetters[index] as (typeof mapSetters)[number];
       const native = mapProto[name] as (...args: unknown[]) => unknown;
       mapProto[name] = maskNative(function (this: NamedNodeMap, node: Attr) {
         const owner = apply(mapGet, owners, [this]);
@@ -266,10 +293,13 @@ export function installAttributes(
 
   // The browser reads a refresh when the meta goes in, so its content is kept rewritten whichever was set first.
   const metaProto = win.HTMLMetaElement?.prototype;
-  for (const [property, attribute] of [
+  const metaProperties = [
     ["content", "content"],
     ["httpEquiv", "http-equiv"],
-  ] as const) {
+  ] as const;
+  for (let index = 0; index < metaProperties.length; index++) {
+    const property = (metaProperties[index] as (typeof metaProperties)[number])[0];
+    const attribute = (metaProperties[index] as (typeof metaProperties)[number])[1];
     const descriptor = metaProto && ownDescriptor(metaProto, property);
     if (!metaProto || !descriptor?.set) continue;
     const hookedGet = element.getAttribute;
@@ -285,7 +315,6 @@ export function installAttributes(
     });
   }
 
-  const localNameOf = ownDescriptor(win.Element.prototype, "localName")?.get;
   const nodeListLength = win.NodeList ? ownDescriptor(win.NodeList.prototype, "length")?.get : undefined;
   const queries = [
     element.querySelectorAll,
@@ -336,8 +365,7 @@ export function installAttributes(
 
   function isRefresh(target: Element): boolean {
     return (
-      target.localName === "meta" &&
-      lowerTrim(apply(getAttribute, target, ["http-equiv"]) as string | null) === "refresh"
+      tagOf(target) === "meta" && lowerTrim(apply(getAttribute, target, ["http-equiv"]) as string | null) === "refresh"
     );
   }
 
@@ -357,7 +385,7 @@ export function installAttributes(
     if (attribute === "content" && isRefresh(target)) {
       return rewriteRefresh(value, ctx.realBase(), ctx.origin, blobs.swap, owner());
     }
-    const kind = attributeKind(target.localName, name);
+    const kind = attributeKind(tagOf(target), name);
     if (kind === "html") {
       const next = markup.srcdoc(value);
       // A value that already carries the runtime tag was rewritten before; its plain form is the best original left.
@@ -366,8 +394,8 @@ export function installAttributes(
       return next;
     }
     if (!kind) return value;
-    const rewritten = rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, undefined, owner());
-    return setHas(DOCUMENT_ATTRIBUTES, `${target.localName}.${attribute}`) ? blobs.swap(rewritten) : rewritten;
+    const rewritten = rewriteAttribute(tagOf(target), name, value, ctx.realBase(), ctx.origin, undefined, owner());
+    return setHas(DOCUMENT_ATTRIBUTES, `${tagOf(target)}.${attribute}`) ? blobs.swap(rewritten) : rewritten;
   }
 
   function restore(target: Element, name: string, value: string): string {
@@ -375,13 +403,13 @@ export function installAttributes(
     if (lowerTrim(name) === "content" && isRefresh(target)) {
       return mapRefresh(value, (url) => blobs.original(restoreAttribute("a", "href", url, base, ctx.origin)));
     }
-    const kind = attributeKind(target.localName, name);
+    const kind = attributeKind(tagOf(target), name);
     if (kind === "html") {
       const record = apply(mapGet, written, [target]) as SrcdocRecord | undefined;
       if (record && record.native === value) return record.original;
     }
     return kind
-      ? blobs.original(restoreAttribute(target.localName, name, value, base, ctx.origin, markup.unsrcdoc))
+      ? blobs.original(restoreAttribute(tagOf(target), name, value, base, ctx.origin, markup.unsrcdoc))
       : value;
   }
 
@@ -427,7 +455,8 @@ function installLinkParts(win: Realm, constructorName: string): void {
       return url ? urlPart(url, "origin") : "";
     },
   });
-  for (const part of LINK_PARTS) {
+  for (let index = 0; index < LINK_PARTS.length; index++) {
+    const part = LINK_PARTS[index] as (typeof LINK_PARTS)[number];
     define(proto, part, {
       configurable: true,
       enumerable: true,

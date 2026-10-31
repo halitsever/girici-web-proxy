@@ -21,6 +21,8 @@ import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { openedOrigin, type WindowGuard } from "./windows.ts";
 
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
 /** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
 const LATER_EVENTS = ["contextmenu", "dragstart"];
@@ -88,25 +90,65 @@ export function installNavigation(
     });
   }
 
+  // Taken here, since the listeners below decide on every user click and submit after page code has run. Frames
+  // adopted from a parent run this code too, so nothing below may test values with this realm's own classes.
+  const elementProto = win.Element.prototype;
+  const { getAttributeNode, getAttribute, hasAttribute } = elementProto;
+  const localNameOf = ownDescriptor(elementProto, "localName")?.get;
+  const namespaceOf = ownDescriptor(elementProto, "namespaceURI")?.get;
+  const attrValue = win.Attr ? ownDescriptor(win.Attr.prototype, "value") : undefined;
+  const eventProto = win.Event?.prototype;
+  const composedPathOf = eventProto?.composedPath;
+  const eventGetter = (name: string) => (eventProto ? ownDescriptor(eventProto, name)?.get : undefined);
+  const typeOf = eventGetter("type");
+  const targetOf = eventGetter("target");
+  const preventedOf = eventGetter("defaultPrevented");
+  const preventDefault = eventProto?.preventDefault;
+  const submitterOf = win.SubmitEvent ? ownDescriptor(win.SubmitEvent.prototype, "submitter")?.get : undefined;
+  const plainClick = clickCheck(win);
+  const read = (get: (() => unknown) | undefined, object: unknown, key: string): unknown =>
+    get ? apply(get, object, []) : (object as Record<string, unknown>)[key];
+  const kindOf = (target: unknown): "link" | "svg link" | "form" | null => {
+    try {
+      const name = read(localNameOf, target, "localName");
+      const namespace = read(namespaceOf, target, "namespaceURI");
+      if (namespace === SVG_NAMESPACE) return name === "a" ? "svg link" : null;
+      if (namespace !== HTML_NAMESPACE) return null;
+      return name === "a" || name === "area" ? "link" : name === "form" ? "form" : null;
+    } catch {
+      return null;
+    }
+  };
+  const pathOf = (event: Event): unknown[] => {
+    try {
+      return (composedPathOf ? apply(composedPathOf, event, []) : event.composedPath()) as unknown[];
+    } catch {
+      return [];
+    }
+  };
+  const attributeOf = (element: unknown, name: string): string | null =>
+    apply(getAttribute, element, [name]) as string | null;
+
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
-  const fix = (element: Element, name: string) => {
-    const attribute = element.getAttributeNode(name);
-    if (attribute && escapes(attribute.value, ctx)) attribute.value = ctx.toProxy(attribute.value);
+  const fix = (element: unknown, name: string) => {
+    const attribute = apply(getAttributeNode, element, [name]) as Attr | null;
+    if (!attribute) return;
+    const value = toText(read(attrValue?.get, attribute, "value"));
+    if (!escapes(value, ctx)) return;
+    if (attrValue?.set) apply(attrValue.set, attribute, [ctx.toProxy(value)]);
+    else attribute.value = ctx.toProxy(value);
   };
   const listeners: Array<[string, (event: Event) => void, boolean]> = [];
   const fixLink = (event: Event) => {
-    for (const target of event.composedPath()) {
-      if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
-        fix(target, "href");
-        blobs.swapLink(target, listIncludes(LATER_EVENTS, event.type));
-        return;
-      }
-      if (target instanceof win.SVGAElement) {
-        fix(target, "href");
-        fix(target, "xlink:href");
-        blobs.swapLink(target, listIncludes(LATER_EVENTS, event.type));
-        return;
-      }
+    const path = pathOf(event);
+    for (let index = 0; index < path.length; index++) {
+      const target = path[index];
+      const kind = kindOf(target);
+      if (kind !== "link" && kind !== "svg link") continue;
+      fix(target, "href");
+      if (kind === "svg link") fix(target, "xlink:href");
+      blobs.swapLink(target, listIncludes(LATER_EVENTS, read(typeOf, event, "type") as string));
+      return;
     }
   };
   for (const type of LINK_EVENTS) append(listeners, [type, fixLink, true]);
@@ -114,10 +156,11 @@ export function installNavigation(
   append(listeners, [
     "submit",
     (event) => {
-      const submitter = (event as SubmitEvent).submitter;
-      if (event.target instanceof win.HTMLFormElement) {
-        fix(event.target, "action");
-        blobs.swapForm(event.target, submitter);
+      const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
+      const target = read(targetOf, event, "target");
+      if (kindOf(target) === "form") {
+        fix(target, "action");
+        blobs.swapForm(target, submitter);
       }
       if (submitter) fix(submitter, "formaction");
     },
@@ -142,14 +185,18 @@ export function installNavigation(
     "click",
     (event) => {
       const writes = cookies.pendingWrites();
-      if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
-      const link = event
-        .composedPath()
-        .find((target) => target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement);
-      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
-      const url = resolve(link.getAttributeNode("href")?.value, ctx);
+      if (!writes || read(preventedOf, event, "defaultPrevented") || !plainClick(event)) return;
+      const path = pathOf(event);
+      let link: unknown = null;
+      for (let index = 0; index < path.length && !link; index++) if (kindOf(path[index]) === "link") link = path[index];
+      if (!link) return;
+      const target = attributeOf(link, "target");
+      if ((target && target !== "_self") || apply(hasAttribute, link, ["download"])) return;
+      const attribute = apply(getAttributeNode, link, ["href"]) as Attr | null;
+      const url = resolve(attribute ? toText(read(attrValue?.get, attribute, "value")) : undefined, ctx);
       if (!url) return;
-      event.preventDefault();
+      if (preventDefault) apply(preventDefault, event, []);
+      else event.preventDefault();
       // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
       void writes.then(() => invoke(win.location.assign, win.location, [ctx.toProxy(url)]));
     },
@@ -159,11 +206,13 @@ export function installNavigation(
     "submit",
     (event) => {
       const writes = cookies.pendingWrites();
-      const target = event.target;
-      if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
-      const submitter = (event as SubmitEvent).submitter;
-      if ((target.target && target.target !== "_self") || overridesForm(submitter)) return;
-      event.preventDefault();
+      const target = read(targetOf, event, "target") as HTMLFormElement;
+      if (!writes || read(preventedOf, event, "defaultPrevented") || kindOf(target) !== "form") return;
+      const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
+      const formTarget = attributeOf(target, "target");
+      if ((formTarget && formTarget !== "_self") || overridesForm(submitter)) return;
+      if (preventDefault) apply(preventDefault, event, []);
+      else event.preventDefault();
       void writes.then(() => {
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
@@ -188,15 +237,28 @@ export function installNavigation(
   return { listen, open: hookedOpen };
 }
 
-function isPlainClick(event: Event): boolean {
-  return (
-    event instanceof MouseEvent &&
-    event.button === 0 &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.altKey
-  );
+/**
+ * A primary click with no modifier keys. MouseEvent's own getters throw for anything else, so the check holds for
+ * events of an adopted frame too, where this realm's MouseEvent is not theirs.
+ */
+function clickCheck(win: Realm): (event: unknown) => boolean {
+  const proto = win.MouseEvent?.prototype;
+  const getter = (name: string) => (proto ? ownDescriptor(proto, name)?.get : undefined);
+  const button = getter("button");
+  const keys = [getter("metaKey"), getter("ctrlKey"), getter("shiftKey"), getter("altKey")];
+  return (event) => {
+    if (!button) return false;
+    try {
+      if (apply(button, event, []) !== 0) return false;
+      for (let index = 0; index < keys.length; index++) {
+        const key = keys[index];
+        if (key && apply(key, event, [])) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function resolve(raw: string | undefined, ctx: UrlContext): string | null {

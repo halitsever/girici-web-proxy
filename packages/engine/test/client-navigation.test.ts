@@ -17,8 +17,22 @@ class FakeNode {
   }
 }
 
+const HTML = "http://www.w3.org/1999/xhtml";
+
 class FakeElement extends FakeNode {
   readonly attributes = new Map<string, { value: string }>();
+  // One getter on the base prototype reads a field the subclasses set, as the DOM's single accessor does.
+  tag = "div";
+  space = HTML;
+  get localName(): string {
+    return this.tag;
+  }
+  get namespaceURI(): string {
+    return this.space;
+  }
+  getAttribute(name: string): string | null {
+    return this.attributes.get(name)?.value ?? null;
+  }
   constructor(attributes: Record<string, string> = {}) {
     super();
     for (const [name, value] of Object.entries(attributes)) this.attributes.set(name, { value });
@@ -43,7 +57,33 @@ function fakeWindow() {
       loads.push(`replace ${url}`);
     }
   }
+  /** Event members are accessors on the prototype, as in the DOM. */
+  class Event {
+    readonly #type: string;
+    readonly #path: unknown[];
+    #prevented = false;
+    constructor(type: string, path: unknown[]) {
+      this.#type = type;
+      this.#path = path;
+    }
+    get type(): string {
+      return this.#type;
+    }
+    get target(): unknown {
+      return this.#path[0];
+    }
+    get defaultPrevented(): boolean {
+      return this.#prevented;
+    }
+    composedPath(): unknown[] {
+      return this.#path;
+    }
+    preventDefault(): void {
+      this.#prevented = true;
+    }
+  }
   class HTMLFormElement extends FakeElement {
+    override tag = "form";
     submit(): void {
       loads.push(`submit ${this.getAttributeNode("action")?.value}`);
     }
@@ -56,9 +96,18 @@ function fakeWindow() {
     document: new FakeNode(),
     Node: FakeNode,
     History,
-    HTMLAnchorElement: class extends FakeElement {},
-    HTMLAreaElement: class extends FakeElement {},
-    SVGAElement: class extends FakeElement {},
+    Element: FakeElement,
+    Event,
+    HTMLAnchorElement: class extends FakeElement {
+      override tag = "a";
+    },
+    HTMLAreaElement: class extends FakeElement {
+      override tag = "area";
+    },
+    SVGAElement: class extends FakeElement {
+      override tag = "a";
+      override space = "http://www.w3.org/2000/svg";
+    },
     HTMLFormElement,
     DOMException: Error,
     open: (url: string) => {
@@ -116,7 +165,7 @@ function installed(blobs: typeof noBlobs = noBlobs) {
   });
   const click = (link: FakeElement) => {
     for (const [type, listener] of fake.listeners) {
-      if (type === "click") listener({ type, composedPath: () => [link], defaultPrevented: false });
+      if (type === "click") listener(new fake.win.Event(type, [link]));
     }
   };
   return { ...fake, natives, location, nativeLocation, helpers, click };
@@ -216,5 +265,19 @@ describe("Navigation API", () => {
     Reflect.apply(Object.getPrototypeOf(navigation).navigate, navigation, ["https://b.test/x"]);
     navigation.navigate("/y");
     expect(calls).toEqual(["blob:boot", "/~/https/b.test/x", "/~/https/a.test/y"]);
+  });
+});
+
+describe("link fix-ups", () => {
+  it("still fixes a clicked link after the page replaced the classes and event methods it would test", () => {
+    const { win, click } = installed();
+    const link = new win.HTMLAnchorElement({ href: "https://b.test/link" });
+    const replaced = withReplaced(win, "HTMLAnchorElement", { value: class {} }, () =>
+      withReplaced(win.Event.prototype, "composedPath", { value: () => [] }, () => {
+        click(link);
+        return link.getAttributeNode("href")?.value;
+      }),
+    );
+    expect(replaced).toBe("/~/https/b.test/link");
   });
 });

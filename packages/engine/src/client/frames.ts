@@ -1,4 +1,4 @@
-import { define, hrefOf, NativeWeakSet } from "../shared/primordials.ts";
+import { append, define, hrefOf, NativeWeakSet } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
@@ -74,7 +74,8 @@ export function createFrameWalker(env: {
   const children = (count: number): readonly unknown[] => {
     if (count === 0) return NO_CHILDREN;
     const list: unknown[] = [];
-    for (let index = 0; index < count; index++) list[index] = env.child(index);
+    // append defines each entry, so an index setter a page put on Array.prototype never sees a window.
+    for (let index = 0; index < count; index++) append(list, env.child(index));
     return list;
   };
   const walk = () => {
@@ -209,11 +210,17 @@ export function installFrames(
 
   // Markup from XML parsers and XHR documents never went through the HTML sinks; the attribute hooks check it here.
   let backstop: (node: unknown) => void = () => {};
-  for (const [name, methods] of MUTATION_HOOKS) {
+  // Indexed, without destructuring: adopting a frame runs this inside a page call, after the page may have replaced
+  // the array iterator.
+  for (let hook = 0; hook < MUTATION_HOOKS.length; hook++) {
+    const entry = MUTATION_HOOKS[hook] as readonly [string, readonly string[]];
+    const name = entry[0];
+    const methods = entry[1];
     const proto = protoOf(name);
     if (!proto) continue;
     const targetView = name === "Range" ? viewOfRange : viewOf;
-    for (const method of methods) {
+    for (let index = 0; index < methods.length; index++) {
+      const method = methods[index] as string;
       const descriptor = ownDescriptor(proto, method);
       const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
       if (typeof native !== "function") continue;
@@ -224,10 +231,13 @@ export function installFrames(
       define(proto, method, { ...descriptor, value: maskNative(hooked, native) });
     }
   }
-  for (const [name, properties] of SETTER_HOOKS) {
-    const proto = protoOf(name);
+  for (let hook = 0; hook < SETTER_HOOKS.length; hook++) {
+    const entry = SETTER_HOOKS[hook] as readonly [string, readonly string[]];
+    const proto = protoOf(entry[0]);
     if (!proto) continue;
-    for (const property of properties) {
+    const properties = entry[1];
+    for (let index = 0; index < properties.length; index++) {
+      const property = properties[index] as string;
       const descriptor = ownDescriptor(proto, property);
       const set = descriptor?.set;
       if (!set) continue;
@@ -257,19 +267,23 @@ export function installFrames(
       return null;
     }
   };
-  for (const name of FRAME_ELEMENTS) {
-    const proto = protoOf(name);
+  const frameGetters: ReadonlyArray<readonly [string, (value: unknown) => unknown]> = [
+    [
+      "contentWindow",
+      (value: unknown) => {
+        adopt(value);
+        return guard.wrap(value);
+      },
+    ],
+    ["contentDocument", visibleDocument],
+  ];
+  for (let element = 0; element < FRAME_ELEMENTS.length; element++) {
+    const proto = protoOf(FRAME_ELEMENTS[element] as string);
     if (!proto) continue;
-    for (const [property, settle] of [
-      [
-        "contentWindow",
-        (value: unknown) => {
-          adopt(value);
-          return guard.wrap(value);
-        },
-      ],
-      ["contentDocument", visibleDocument],
-    ] as const) {
+    for (let index = 0; index < frameGetters.length; index++) {
+      const entry = frameGetters[index] as readonly [string, (value: unknown) => unknown];
+      const property = entry[0];
+      const settle = entry[1];
       const descriptor = ownDescriptor(proto, property);
       const get = descriptor?.get;
       if (!get) continue;
@@ -279,8 +293,8 @@ export function installFrames(
       define(proto, property, { ...descriptor, get: maskNative(hooked, get) });
     }
   }
-  for (const name of SVG_DOCUMENT_ELEMENTS) {
-    const proto = protoOf(name);
+  for (let element = 0; element < SVG_DOCUMENT_ELEMENTS.length; element++) {
+    const proto = protoOf(SVG_DOCUMENT_ELEMENTS[element] as string);
     const descriptor = proto && ownDescriptor(proto, "getSVGDocument");
     const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
     if (!proto || typeof native !== "function") continue;
@@ -421,7 +435,9 @@ function hookPictureInPicture(win: Realm, adopt: (child: unknown) => void): void
   }
   const event = (win as unknown as Record<string, { prototype?: object } | undefined>).DocumentPictureInPictureEvent
     ?.prototype;
-  for (const proto of [pip, event]) {
+  const protos = [pip, event];
+  for (let index = 0; index < protos.length; index++) {
+    const proto = protos[index];
     const current = proto && ownDescriptor(proto, "window");
     const get = current?.get;
     if (!proto || !get) continue;

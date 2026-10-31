@@ -3,6 +3,7 @@ import { attributeKind, restoreAttribute, rewriteAttribute } from "../src/client
 import { installAttributes } from "../src/client/attributes.ts";
 import { createRewriteBridge } from "../src/client/rewrite-bridge.ts";
 import type { Realm } from "../src/client/url-context.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 const base = new URL("https://site.test/dir/page.html");
 const origin = "http://proxy.test";
@@ -49,12 +50,22 @@ describe("srcdoc", () => {
 describe("srcdoc through the DOM hooks", () => {
   function fakeDom() {
     class FakeAttr {
-      ownerElement: FakeElement | null = null;
-      name: string;
+      owner: FakeElement | null = null;
+      attrName: string;
       raw: string;
       constructor(name: string, raw = "") {
-        this.name = name;
+        this.attrName = name;
         this.raw = raw;
+      }
+      // Accessors on the prototype, as in the DOM.
+      get ownerElement(): FakeElement | null {
+        return this.owner;
+      }
+      set ownerElement(value: FakeElement | null) {
+        this.owner = value;
+      }
+      get name(): string {
+        return this.attrName;
       }
       namespaceURI: string | null = null;
       get value(): string {
@@ -170,6 +181,27 @@ describe("srcdoc through the DOM hooks", () => {
     return { iframe: new FakeIframe(), FakeAttr, FakeIframe, hooks };
   }
   const code = "<script>go(location)</script>";
+
+  it("rewrites a frame's values through accessors taken at install, whatever the page replaced later", () => {
+    const { iframe, FakeAttr } = setup();
+    const elementProto = Object.getPrototypeOf(Object.getPrototypeOf(iframe)) as object;
+    withReplaced(elementProto, "localName", { get: () => "div" }, () => iframe.setAttribute("srcdoc", code));
+    expect(iframe.map.get("srcdoc")?.raw).toContain("data-girici");
+    const node = new FakeAttr("srcdoc", "");
+    iframe.setAttributeNode(node);
+    withReplaced(FakeAttr.prototype, "ownerElement", { get: () => null }, () => {
+      node.value = code;
+    });
+    expect(node.raw).toContain("data-girici");
+  });
+
+  it("installs every hook when the page replaced the array iterator before the frame was adopted", () => {
+    const { iframe } = withReplaced(Array.prototype, Symbol.iterator, { value: function* () {} }, () => setup());
+    iframe.srcdoc = code;
+    expect(iframe.map.get("srcdoc")?.raw).toContain("data-girici");
+    iframe.setAttribute("src", "https://b.test/");
+    expect(iframe.map.get("src")?.raw).toBe("/~/https/b.test/");
+  });
 
   it("rewrites the values of a frame a parser outside the hooks made, once", () => {
     const { iframe, hooks } = setup();
