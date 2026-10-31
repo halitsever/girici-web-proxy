@@ -1340,6 +1340,17 @@ const DOORS_BLOB_SINKS = page(
     requested.target = "t-request";
     requested.requestSubmit();
 
+    // Each runs in a frame of its own, since it navigates the window it runs in.
+    window.svgBlob = svg;
+    const frameRun = (code) => {
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<script>" + code + "<\\/script>";
+      add(frame);
+    };
+    frameRun("location = parent.svgBlob('location-assign')");
+    frameRun("location &&= parent.svgBlob('location-and')");
+    frameRun("[location] = [parent.svgBlob('location-pattern')]");
+
     const refresh = (id) => byId(id).contentDocument;
     const byAttribute = refresh("meta-attr").createElement("meta");
     byAttribute.setAttribute("http-equiv", "refresh");

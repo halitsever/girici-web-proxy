@@ -105,7 +105,7 @@ function installed(blobs: typeof noBlobs = noBlobs) {
     isLocation: (value) => value === nativeLocation,
     fakeFor: () => null,
     isWindowOrDocument: () => false,
-    toProxy: ctx.toProxy,
+    navigationUrl: ctx.toProxy,
     rewrite: {} as never,
     indirectEval: (code) => code,
     messageTarget: (value) => value,

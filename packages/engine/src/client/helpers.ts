@@ -7,7 +7,8 @@ export interface HelperEnv {
   isLocation(value: unknown): boolean;
   fakeFor(location: object): object | null;
   isWindowOrDocument(value: unknown): boolean;
-  toProxy(raw: string): string;
+  /** A navigation's URL as the browser must see it: proxied, and a blob swapped for its bootstrap. */
+  navigationUrl(raw: string): string;
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
   messageTarget(value: unknown): unknown;
@@ -23,7 +24,8 @@ export interface HelperEnv {
 export interface GiriciHelpers {
   L(value: unknown): unknown;
   N(target: unknown, value: unknown): unknown;
-  S(object: unknown, key: string, value: unknown): unknown;
+  /** `op` is the logical assignment operator, when the page wrote one. */
+  S(object: unknown, key: string, value: unknown, op?: string): unknown;
   D(object: unknown): unknown;
   E(code: unknown): unknown;
   ev(code: unknown): unknown;
@@ -64,18 +66,23 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
 
   return {
     L,
-    N: (target, value) => (isRealLocation(target) ? env.toProxy(toText(value)) : value),
-    S: (object, key, value) => {
+    N: (target, value) => (isRealLocation(target) ? env.navigationUrl(toText(value)) : value),
+    S: (object, key, value, op) => {
       if (env.isWindowOrDocument(object)) {
         const location = (object as { location: { href: string } }).location;
         const fake = L(location) as { href: string };
+        // A Location is always truthy: `||=` and `??=` never assign, `&&=` always does.
+        if (op === "||=" || op === "??=") return fake;
         // A window whose stand-in cannot be found still must not navigate outside the proxy.
-        if (fake === location) location.href = env.toProxy(toText(value));
+        if (fake === location) location.href = env.navigationUrl(toText(value));
         else fake.href = toText(value);
-      } else {
-        (object as Record<string, unknown>)[key] = value;
+        return value;
       }
-      return value;
+      const target = object as Record<string, unknown>;
+      if (op === "&&=") return target[key] && (target[key] = value);
+      if (op === "||=") return target[key] || (target[key] = value);
+      if (op === "??=") return target[key] ?? (target[key] = value);
+      return (target[key] = value);
     },
     D: (object) => {
       if (!env.isWindowOrDocument(object)) return object;

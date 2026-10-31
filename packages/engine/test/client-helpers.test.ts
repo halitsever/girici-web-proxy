@@ -15,7 +15,7 @@ function setup() {
     isLocation: (value) => value === nativeLocation || value === frameLocation,
     fakeFor: (location) => (location === frameLocation ? frameFake : null),
     isWindowOrDocument: (value) => value === win || value === win.document || value === frame,
-    toProxy: (raw) => `/~/proxied/${raw}`,
+    navigationUrl: (raw) => (raw.startsWith("blob:") ? `blob:boot/${raw}` : `/~/proxied/${raw}`),
     rewrite: {
       js: (c) => c,
       jsBody: (c) => c,
@@ -52,6 +52,24 @@ describe("createHelpers", () => {
     expect(helpers.N(nativeLocation, "https://x.test/")).toBe("/~/proxied/https://x.test/");
     expect(helpers.N(nativeLocation, { toString: () => "u" })).toBe("/~/proxied/u");
     expect(helpers.N(5, 7)).toBe(7);
+  });
+
+  it("N swaps a blob URL for its bootstrap, as every other navigation sink does", () => {
+    const { helpers, nativeLocation } = setup();
+    expect(helpers.N(nativeLocation, "blob:http://p.test/1")).toBe("blob:boot/blob:http://p.test/1");
+  });
+
+  it("S keeps logical assignment semantics, with a Location always truthy", () => {
+    const { helpers, fake, win } = setup();
+    helpers.S(win, "location", "a", "||=");
+    helpers.S(win, "location", "b", "??=");
+    expect(fake.href).toBe("https://site.test/");
+    helpers.S(win, "location", "c", "&&=");
+    expect(fake.href).toBe("c");
+    const plain: Record<string, unknown> = { location: 0 };
+    expect(helpers.S(plain, "location", 1, "&&=")).toBe(0);
+    expect(helpers.S(plain, "location", 2, "||=")).toBe(2);
+    expect(helpers.S(plain, "location", 3, "??=")).toBe(2);
   });
 
   it("S navigates windows and documents and assigns everything else", () => {
@@ -125,7 +143,7 @@ describe("createHelpers", () => {
       isLocation: (value) => value === nativeLocation,
       fakeFor: () => null,
       isWindowOrDocument: () => false,
-      toProxy: (raw) => `/~/proxied/${raw}`,
+      navigationUrl: (raw) => `/~/proxied/${raw}`,
       rewrite: {
         js: (c) => `/*rw*/${c}`,
         jsBody: (c) => `/*rw*/${c}`,

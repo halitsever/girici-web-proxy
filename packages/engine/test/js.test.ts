@@ -2,6 +2,33 @@ import { parseScript } from "meriyah";
 import { describe, expect, it } from "vitest";
 import { MAX_REWRITE_LENGTH, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/js.ts";
 
+const SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
+
+describe("location as an assignment target", () => {
+  it.each([
+    ["location &&= u", "location &&= __g$.N(location, (u))"],
+    ["location ||= u", "location ||= __g$.N(location, (u))"],
+    ["location ??= u", "location ??= __g$.N(location, (u))"],
+    ["self.location &&= u", '__g$.S(self, "location", (u), "&&=")'],
+    ["top.location ||= u", '__g$.S(__g$.W(top), "location", (u), "||=")'],
+    ["[location] = [u]", `[${SETTER}] = [u]`],
+    ["({ a: location } = o)", `({ a: ${SETTER} } = o)`],
+    ["({ location } = o)", `({ location: ${SETTER} } = __g$.D(o))`],
+    ["({ location = d } = o)", `({ location: ${SETTER} = d } = __g$.D(o))`],
+    ["for (location of [u]);", `for (${SETTER} of [u]);`],
+    ["for (location in o);", `for (${SETTER} in o);`],
+    ["[w.location] = [u]", '[({ set v(__g$v) { __g$.S(w, "location", __g$v); } }).v] = [u]'],
+  ])("routes %s through the helpers", (input, output) => {
+    expect(rewriteJs(input)).toBe(output);
+    expect(() => parseScript(rewriteJs(input), { next: true })).not.toThrow();
+  });
+
+  it("keeps a local binding named location working through the setter", () => {
+    const run = new Function("__g$", rewriteJs("let location = 1; [location] = [2]; return location;"));
+    expect(run({ N: (_target: unknown, value: unknown) => value })).toBe(2);
+  });
+});
+
 describe("rewriteJs", () => {
   it.each([
     ["location.href", "__g$.L(location).href"],

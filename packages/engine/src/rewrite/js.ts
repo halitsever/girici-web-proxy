@@ -6,14 +6,15 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
 // Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v,p){return p==="&&="?o[k]&&(o[k]=v):p==="||="?o[k]||(o[k]=v):p==="??="?(o[k]!=null?o[k]:o[k]=v):o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
   standalone?: boolean;
 }
 
-type Role = "read" | "target" | "binding" | "callee";
+/** `assign` is a destructuring or for-in/of target, where `location` gets a setter that converts the URL. */
+type Role = "read" | "target" | "assign" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
 const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M", "P", "W"]);
@@ -31,6 +32,9 @@ const WINDOW_LIKE = new Set([
   "defaultView",
 ]);
 const WRAPPED_NAME = /location|top|parent|opener|frames/;
+const PLAIN_OR_LOGICAL = new Set(["=", "&&=", "||=", "??="]);
+// A setter keeps a local binding named `location` working, while a real Location gets the converted URL.
+const LOCATION_SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
@@ -87,6 +91,7 @@ function parse(source: string, kind: NonNullable<JsRewriteOptions["kind"]>): EST
 class LocationRewriter {
   readonly #source: string;
   readonly #output: MagicString;
+  #shorthand = false;
 
   constructor(source: string, output: MagicString) {
     this.#source = source;
@@ -97,7 +102,10 @@ class LocationRewriter {
     if (!node) return;
     switch (node.type) {
       case "Identifier":
-        if (role === "read" && node.name === "location") this.#wrap(node);
+        if (role === "assign" && node.name === "location") {
+          const prefix = this.#shorthand ? "location: " : "";
+          this.#output.overwrite(start(node), end(node), prefix + LOCATION_SETTER);
+        } else if (role === "read" && node.name === "location") this.#wrap(node);
         else if (role === "read" && WINDOW_REFS.has(node.name)) this.#call("__g$.W(", ")", node);
         // A bare `eval` read is indirect eval; the wrapper rewrites the code before running it.
         else if (role === "read" && node.name === "eval") this.#output.overwrite(start(node), end(node), "__g$.ev");
@@ -176,7 +184,7 @@ class LocationRewriter {
         return;
       case "ForInStatement":
       case "ForOfStatement":
-        this.visit(node.left, node.left.type === "VariableDeclaration" ? "read" : "target", false);
+        this.visit(node.left, node.left.type === "VariableDeclaration" ? "read" : "assign", false);
         this.visit(node.right, "read", false);
         this.visit(node.body, "read", false);
         return;
@@ -206,7 +214,10 @@ class LocationRewriter {
         return;
       case "Property":
         if (node.computed) this.visit(node.key, "read", false);
+        // `{ location } = o` is shorthand, so the key has to be written out before the value changes.
+        this.#shorthand = role === "assign" && node.shorthand;
         this.visit(node.value, role, false);
+        this.#shorthand = false;
         return;
       case "ObjectPattern":
         for (const property of node.properties) this.visit(property, role, false);
@@ -260,6 +271,13 @@ class LocationRewriter {
   }
 
   #member(node: ESTree.MemberExpression, role: Role, inChain: boolean): void {
+    if (role === "assign" && isLocationMember(node)) {
+      const operator = this.#source.lastIndexOf(node.computed ? "[" : ".", start(node.property));
+      this.#output.appendRight(start(node), "({ set v(__g$v) { __g$.S(");
+      this.#output.overwrite(operator, end(node), ', "location", __g$v); } }).v');
+      this.visit(node.object, "read", false);
+      return;
+    }
     if (role === "read" && isImportMetaUrl(node)) {
       this.#call("__g$.M(", ")", node);
       return;
@@ -281,22 +299,24 @@ class LocationRewriter {
 
   #assignment(node: ESTree.AssignmentExpression): void {
     const { left, right } = node;
+    // Logical assignment converts only when it assigns, so the operator stays and only the value goes through N.
+    const converts = PLAIN_OR_LOGICAL.has(node.operator);
     if (left.type === "Identifier") {
-      if (left.name === "location" && node.operator === "=" && !isHelperCall(right)) {
+      if (left.name === "location" && converts && !isHelperCall(right)) {
         this.#call("__g$.N(location, (", "))", right);
       }
-    } else if (left.type === "MemberExpression" && node.operator === "=" && isLocationMember(left)) {
+    } else if (left.type === "MemberExpression" && converts && isLocationMember(left)) {
       // Only the text between the object and the value changes, so rewrites nested in either survive.
       const operator = this.#source.lastIndexOf(left.computed ? "[" : ".", start(left.property));
       this.#output.appendRight(start(node), "__g$.S(");
       this.#output.overwrite(operator, start(right), ', "location", (');
-      this.#output.appendLeft(end(right), "))");
+      this.#output.appendLeft(end(right), node.operator === "=" ? "))" : `), "${node.operator}")`);
       this.visit(left.object, "read", false);
     } else {
       if (left.type === "ObjectPattern" && hasWrappedKey(left) && !isHelperCall(right)) {
         this.#call("__g$.D(", ")", right);
       }
-      this.visit(left, "target", false);
+      this.visit(left, left.type === "MemberExpression" ? "target" : "assign", false);
     }
     this.visit(right, "read", false);
   }

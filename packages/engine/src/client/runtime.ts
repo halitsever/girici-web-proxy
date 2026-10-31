@@ -186,7 +186,7 @@ export function install(
         return false;
       }
     },
-    toProxy: (raw) => ctx.toProxy(raw),
+    navigationUrl: (raw) => blobs.swap(ctx.toProxy(raw)),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
     messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper),
