@@ -74,6 +74,21 @@ describe("engine, bootstrap and legacy routes", () => {
     );
   });
 
+  it("answers nested document loads with an inert page instead of the bootstrap", async () => {
+    for (const dest of ["iframe", "frame", "object", "embed"]) {
+      const res = await fetch(`${base}/~/https/example.com/`, {
+        headers: { "sec-fetch-dest": dest, accept: "text/html" },
+      });
+      expect(res.status, dest).toBe(404);
+      expect(res.headers.get("content-type"), dest).toMatch(/^text\/plain/);
+      expect(res.headers.get("content-security-policy"), dest).toBe("sandbox; default-src 'none'");
+      expect(res.headers.get("x-content-type-options"), dest).toBe("nosniff");
+      expect(await res.text(), dest).not.toContain("boot.js");
+    }
+    // Without Sec-Fetch-Dest, a browser that accepts HTML still gets the bootstrap page.
+    expect((await fetch(`${base}/~/https/example.com/`, { headers: { accept: "text/html" } })).status).toBe(200);
+  });
+
   it("redirects v1 links to the new scheme", async () => {
     const old = await fetch(`${base}/proxy/https://example.com/a?b=1`, { redirect: "manual" });
     expect(old.status).toBe(301);

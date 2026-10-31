@@ -1,3 +1,4 @@
+import { append, define } from "../shared/primordials.ts";
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
   COOKIE_MESSAGE,
@@ -28,9 +29,10 @@ export function installCookies(
   win: Realm,
   ctx: UrlContext,
   config: ClientConfig,
-  container: ServiceWorkerContainer | null,
+  container: () => ServiceWorkerContainer | null,
+  reload: () => void,
 ): CookieBridge {
-  let mirror = [...config.cookies];
+  let mirror = copyCookies(config.cookies);
   let blocked = config.cookiesBlocked === true;
   let seq = 0;
   // Answers to the previous document's writes must not land in the renewed document's mirror.
@@ -71,7 +73,7 @@ export function installCookies(
       .then(async (response) => {
         if (response.status === 409) {
           // The worker updated under this page; one reload brings a matching runtime.
-          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) win.location.reload();
+          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
           return;
         }
         const body = (await response.json()) as { cookies?: CookieSnapshot[] };
@@ -86,7 +88,7 @@ export function installCookies(
     pending = pending ? Promise.all([pending, request]).then(() => {}) : request;
   };
 
-  Object.defineProperty(win.Document.prototype, "cookie", {
+  define(win.Document.prototype, "cookie", {
     configurable: true,
     enumerable: true,
     get: () => cookieString(mirror, ctx.realUrl(), Date.now()),
@@ -98,10 +100,11 @@ export function installCookies(
     if (type === COOKIE_MESSAGE && v === PROTOCOL_VERSION && Array.isArray(changes)) apply(changes as CookieSnapshot[]);
   };
   const listen = () => {
-    if (!container) return;
-    container.addEventListener("message", onMessage);
+    const current = container();
+    if (!current) return;
+    current.addEventListener("message", onMessage);
     // Messages wait in a queue until this runs.
-    container.startMessages();
+    current.startMessages();
   };
   listen();
 
@@ -118,11 +121,31 @@ export function installCookies(
       }
     },
     reset: (next) => {
-      mirror = [...next.cookies];
+      mirror = copyCookies(next.cookies);
       blocked = next.cookiesBlocked === true;
       seq = 0;
       generation++;
     },
-    snapshot: () => [...mirror],
+    snapshot: () => copyCookies(mirror),
   };
+}
+
+/** Indexed copies with null prototypes: snapshots go into frames' configs, which page code must not steer. */
+function copyCookies(cookies: readonly CookieSnapshot[]): CookieSnapshot[] {
+  const copy: CookieSnapshot[] = [];
+  for (let index = 0; index < cookies.length; index++) {
+    const cookie = cookies[index] as CookieSnapshot;
+    append(copy, {
+      __proto__: null,
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain,
+      path: cookie.path,
+      hostOnly: cookie.hostOnly,
+      secure: cookie.secure,
+      expires: cookie.expires,
+      creation: cookie.creation,
+    } as CookieSnapshot);
+  }
+  return copy;
 }

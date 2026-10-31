@@ -50,6 +50,14 @@ test("keeps cookies on a nested worker's requests to its own site", async ({ pag
   await expect(page.locator("#nested")).toHaveText("sid=abc; theme=dark");
 });
 
+test("keeps cookies on the requests of a worker a blank frame started", async ({ page, browserName }) => {
+  test.skip(browserName === "chromium", "Chromium leaves blank frames and their workers outside the service worker");
+  await openThroughUi(page, "https://site-a.test/cookie/login");
+  await expect(page.locator("#server")).toHaveText("sid=abc; theme=dark");
+  await page.goto("/~/https/site-a.test/blank-worker");
+  await expect(page.locator("#worker")).toHaveText("sid=abc; theme=dark");
+});
+
 test("a worker cannot borrow another site's cookies with a forged referrer", async ({ page }) => {
   await setThirdPartyCookie(page);
   await page.goto("/~/https/site-a.test/worker-forge?proxy=http://127.0.0.1:41000");

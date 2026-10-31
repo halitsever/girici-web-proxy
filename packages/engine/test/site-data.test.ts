@@ -85,6 +85,16 @@ describe("site partitions", () => {
     expect(e.dbs()).toEqual(["__g|https://d.test|store", "__girici"]);
   });
 
+  it("clears a site's data in other sites' partitions and their partitions under it", async () => {
+    const e = fakeEnv({
+      local: ["__g^|https://x.test|https://a.test|k", "__g^|https://a.test|https://x.test|k", "__g|https://x.test|k"],
+      dbs: ["__g^|https://www.a.test|https://x.test|db", "__g^|https://x.test|https://y.test|db"],
+    });
+    await clearPartitions(e, "a.test");
+    expect(e.localKeys()).toEqual(["__g|https://x.test|k"]);
+    expect(e.dbs()).toEqual(["__g^|https://x.test|https://y.test|db"]);
+  });
+
   it("never touches Girici's own stores, even when clearing everything", async () => {
     const e = env();
     await clearPartitions(e, null);

@@ -1,13 +1,14 @@
+import { apply, joined, sliceOf, startsWith, toText } from "../shared/primordials.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
-// Taken at load, so a replaced Function.prototype.call or String never receives a native or the name.
-const apply = Reflect.apply;
-const toText = String;
-
 /** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
 export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
-  const strip = (name: string): string | null => (name.startsWith(partition()) ? name.slice(partition().length) : null);
+  const strip = (name: string): string | null => {
+    const prefix = partition();
+    // Names of other partitions pass through here, and a third-party name tells which site embedded which.
+    return startsWith(name, prefix) ? sliceOf(name, prefix.length) : null;
+  };
 
   prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], partition);
   wrap(
@@ -27,7 +28,12 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     (native) =>
       async function (this: unknown) {
         const all = (await apply(native, this, [])) as string[];
-        return all.map(strip).filter((name): name is string => name !== null);
+        const own: string[] = [];
+        for (let index = 0; index < all.length; index++) {
+          const name = strip(all[index] as string);
+          if (name !== null) own[own.length] = name;
+        }
+        return own;
       },
   );
   // match() with no cacheName searches every cache on the origin, so it is confined to this site's own caches.
@@ -42,7 +48,9 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
           return apply(native, this, [request, { ...options, cacheName: partition() + options.cacheName }]);
         }
         return (async () => {
-          for (const name of await caches.keys()) {
+          const names = await caches.keys();
+          for (let index = 0; index < names.length; index++) {
+            const name = names[index] as string;
             const hit = await (await caches.open(name)).match(request as RequestInfo, options);
             if (hit) return hit;
           }
@@ -64,10 +72,9 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
   );
 
   if (win.BroadcastChannel) {
-    win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) => [
-      partition() + toText(input[0]),
-      ...input.slice(1),
-    ]);
+    win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) =>
+      joined([partition() + toText(input[0])], input, 1),
+    );
   }
 
   installCookieStore(win, ctx);
@@ -80,24 +87,26 @@ interface NamedLock {
 function stripLocks(locks: NamedLock[] | undefined, strip: (name: string) => string | null): NamedLock[] {
   if (!locks) return [];
   const out: NamedLock[] = [];
-  for (const lock of locks) {
+  for (let index = 0; index < locks.length; index++) {
+    const lock = locks[index] as NamedLock;
     const name = lock.name === undefined ? undefined : strip(lock.name);
     if (lock.name !== undefined && name === null) continue;
-    out.push({ ...lock, name: name ?? undefined });
+    out[out.length] = { ...lock, name: name ?? undefined };
   }
   return out;
 }
 
 type Method = (this: unknown, ...args: unknown[]) => unknown;
 
+/** Indexed, without spreads: adopting a frame runs this inside a page call, after the page may have replaced them. */
 function prefixFirstArg(proto: object | undefined, methods: string[], prefix: () => string): void {
-  for (const method of methods) {
+  for (let index = 0; index < methods.length; index++) {
     wrap(
       proto,
-      method,
+      methods[index] as string,
       (native) =>
         function (this: unknown, name: unknown, ...rest: unknown[]) {
-          return apply(native, this, [prefix() + toText(name), ...rest]);
+          return apply(native, this, joined([prefix() + toText(name)], rest));
         },
     );
   }

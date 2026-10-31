@@ -3,6 +3,7 @@ import { installStorageIsolation } from "../src/client/storage-isolation.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { recordingCalls } from "./recording-calls.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 function ctxFor(origin: string): UrlContext {
   return { realUrl: () => new URL(`${origin}/`) } as unknown as UrlContext;
@@ -119,6 +120,38 @@ describe("installStorageIsolation", () => {
     expect(await win.indexedDB.databases()).toEqual([{ name: "db1" }]);
   });
 
+  it("lists only its own names after page code replaced String and Array methods", async () => {
+    const own = "__g^|https://top.test|https://a.test|";
+    const names = [`${own}db1`, "__g^|https://other.test|https://a.test|db2"];
+    const win = fakeStorageWin([], names, [...names]);
+    installStorageIsolation(win, ctxFor("https://a.test"), () => own);
+    const startsWith = String.prototype.startsWith;
+    const map = Array.prototype.map;
+    const iterator = Array.prototype[Symbol.iterator];
+    const seen: unknown[] = [];
+    let listed: unknown[];
+    String.prototype.startsWith = () => true;
+    try {
+      // Replaced once the fakes have answered, since they use these methods themselves.
+      const pending = [win.indexedDB.databases(), win.caches.keys()];
+      Array.prototype.map = function (this: unknown[]) {
+        seen.push(this);
+        return [];
+      };
+      Array.prototype[Symbol.iterator] = function (this: unknown[]) {
+        seen.push(this);
+        return Reflect.apply(iterator, this, []) as ArrayIterator<unknown>;
+      };
+      listed = [await pending[0], await pending[1]];
+    } finally {
+      String.prototype.startsWith = startsWith;
+      Array.prototype.map = map;
+      Array.prototype[Symbol.iterator] = iterator;
+    }
+    expect(listed).toEqual([[{ name: "db1" }], ["db1"]]);
+    expect(seen.filter((value) => Array.isArray(value) && value.length === 2)).toEqual([]);
+  });
+
   it("never hands its natives to a replaced Function.prototype.call", () => {
     const opened: string[] = [];
     const win = fakeStorageWin(opened, [], []);
@@ -144,5 +177,18 @@ describe("installStorageIsolation", () => {
       "cache-match:__g|https://a.test|c",
       "lock:__g|https://a.test|l",
     ]);
+  });
+});
+
+describe("installStorageIsolation inside an adoption", () => {
+  it("prefixes every name when the page replaced the array iterator before the frame was adopted", () => {
+    const opened: string[] = [];
+    const win = fakeStorageWin(opened, [], []);
+    const partition = () => prefixFor("https://a.test");
+    withReplaced(Array.prototype, Symbol.iterator, { value: function* () {} }, () =>
+      installStorageIsolation(win, ctxFor("https://a.test"), partition),
+    );
+    win.indexedDB.open("__girici");
+    expect(opened).toEqual([`idb:${prefixFor("https://a.test")}__girici`]);
   });
 });

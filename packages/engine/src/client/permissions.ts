@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import type { Realm } from "./url-context.ts";
 
 /** Permission prompts would appear under our origin, not the real site, so notifications and push are refused outright. */
@@ -7,7 +8,7 @@ export function installPermissions(win: Realm): void {
     const blocked = function () {
       // Constructing one shows nothing; scripts that check permission see it denied.
     } as unknown as { permission: string; requestPermission: () => Promise<string> };
-    Object.defineProperty(blocked, "permission", { value: "denied" });
+    define(blocked, "permission", { value: "denied" });
     blocked.requestPermission = () => Promise.resolve("denied");
     (win as unknown as Record<string, unknown>).Notification = blocked;
   }
