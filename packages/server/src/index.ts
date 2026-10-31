@@ -15,8 +15,8 @@ import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
 import { createGuardedLookup } from "./upstream/ssrf.ts";
-import { createPoTokenMinter } from "./youtube/botguard-session.ts";
-import { attachWsRelay } from "./ws/relay-ws.ts";
+import { createPoTokenMinter } from "./youtube/minter.ts";
+import { attachWsRelay, testUpstreamDial } from "./ws/relay-ws.ts";
 
 let config: Config;
 try {
@@ -28,7 +28,8 @@ try {
 
 const logger = createLogger(config.logLevel);
 const trustWarning = trustProxyWarning(config.trustProxy);
-if (trustWarning) logger.warn(trustWarning);
+// Its own warn-level logger, so LOG_LEVEL=error cannot hide a setting that lets clients forge their address.
+if (trustWarning) createLogger("warn").warn(trustWarning);
 
 let authStore: AuthStore;
 try {
@@ -81,18 +82,21 @@ const server = createHttpServer(
       maxRequestBody: 50 * 1024 * 1024,
       blocklist,
     },
-    // Lazy: BotGuard only runs on the first poToken request, so this costs nothing at startup. It leaves through the
-    // relay's agent so tokens and media share one egress IP, with or without an upstream proxy.
+    // Minting leaves through the relay's agent so tokens and media share one egress IP, with or without a proxy.
     poToken: config.youtubePoToken
       ? createPoTokenMinter(
           (input, init) =>
             undiciFetch(input, { ...(init as object), dispatcher: agent }) as unknown as Promise<Response>,
+          logger,
         )
       : undefined,
   }),
 );
 const wsLookup = createGuardedLookup();
-attachWsRelay(server, {
+const testCa = config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined;
+const wsRelay = attachWsRelay(server, {
+  dial:
+    config.testUpstreams.size > 0 && !config.upstreamProxy ? testUpstreamDial(config.testUpstreams, testCa) : undefined,
   allowedTestHosts: new Set(config.testUpstreams.keys()),
   lookup: wsLookup,
   tunnel: config.upstreamProxy
@@ -125,7 +129,10 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
       process.exit(0);
     });
     server.closeIdleConnections();
-    // A hung request must not keep a container from stopping.
-    setTimeout(() => process.exit(1), 10_000).unref();
+    // Upgraded sockets count as open connections, so server.close waits for these too.
+    void wsRelay.close();
+    // Long downloads get a few seconds, then are cut so the stop finishes inside Docker's 10 second window.
+    setTimeout(() => server.closeAllConnections(), 5_000).unref();
+    setTimeout(() => process.exit(1), 9_000).unref();
   });
 }

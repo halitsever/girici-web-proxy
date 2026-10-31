@@ -12,9 +12,9 @@ export function generateSetupCode(): string {
 /** Ignores case, spaces and dashes; digests give timingSafeEqual equal lengths whatever was typed. */
 export function setupCodeMatches(given: unknown, expected: string): boolean {
   if (typeof given !== "string") return false;
-  const typed = normalize(given);
+  const typed = normalizeSetupCode(given);
   if (!typed) return false;
-  return timingSafeEqual(digest(typed), digest(normalize(expected)));
+  return timingSafeEqual(digest(typed), digest(normalizeSetupCode(expected)));
 }
 
 /** Printed outside the logger, so LOG_LEVEL cannot hide it; a code from the environment is never echoed. */
@@ -23,7 +23,7 @@ export function setupBanner(code: string, fromEnv: boolean): string {
   return `Girici setup code: ${code}\nOpen Girici in a browser and enter this code to create the admin account.\n`;
 }
 
-function normalize(value: string): string {
+export function normalizeSetupCode(value: string): string {
   return value.toUpperCase().replace(/[\s-]/g, "");
 }
 

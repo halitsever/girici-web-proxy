@@ -74,4 +74,22 @@ describe("createFakeLocation", () => {
       location.href = "http://[bad";
     }).toThrow();
   });
+
+  it("hands javascript: URLs to the target window's runtime", () => {
+    const { location, calls } = setup();
+    location.href = "javascript:'<p>x</p>'";
+    location.replace("javascript:void 0");
+    expect(calls).toEqual([
+      `assign javascript:__g$.J("'<p>x</p>'","https://site.test")`,
+      'replace javascript:__g$.J("void 0","https://site.test")',
+    ]);
+  });
+
+  it("reads a URL object once, so a later conversion cannot turn it into javascript:", () => {
+    const { location, calls } = setup();
+    let reads = 0;
+    location.assign({ toString: () => (reads++ === 0 ? "javascript:void 0" : "https://b.test/") } as never);
+    location.assign({ toString: () => (reads++ === 1 ? "https://b.test/" : "javascript:alert(1)") } as never);
+    expect(calls).toEqual(['assign javascript:__g$.J("void 0","https://site.test")', "assign /~/https/b.test/"]);
+  });
 });

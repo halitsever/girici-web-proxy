@@ -2,15 +2,95 @@ import { parseScript } from "meriyah";
 import { describe, expect, it } from "vitest";
 import { MAX_REWRITE_LENGTH, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/js.ts";
 
+const SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
+
+describe("location as an assignment target", () => {
+  it.each([
+    ["location &&= u", "location &&= __g$.N(location, (u))"],
+    ["location ||= u", "location ||= __g$.N(location, (u))"],
+    ["location ??= u", "location ??= __g$.N(location, (u))"],
+    ["self.location &&= u", "__g$.A(self).v &&= u"],
+    ["top.location ||= u", "__g$.A(__g$.W(top)).v ||= u"],
+    ["[location] = [u]", `[${SETTER}] = [u]`],
+    ["({ a: location } = o)", `({ a: ${SETTER} } = o)`],
+    ["({ location } = o)", `({ location: ${SETTER} } = __g$.D(o))`],
+    ["({ location = d } = o)", `({ location: ${SETTER} = d } = __g$.D(o))`],
+    ["for (location of [u]);", `for (${SETTER} of [u]);`],
+    ["for (location in o);", `for (${SETTER} in o);`],
+    ["[w.location] = [u]", "[__g$.A(w).v] = [u]"],
+  ])("routes %s through the helpers", (input, output) => {
+    expect(rewriteJs(input)).toBe(output);
+    expect(() => parseScript(rewriteJs(input), { next: true })).not.toThrow();
+  });
+
+  it.each([
+    ["({ location: this.location } = d)", "({ location: __g$.A(this).v } = __g$.D(d))"],
+    ["[this.location] = [u]", "[__g$.A(this).v] = [u]"],
+    ["for (this.location of a);", "for (__g$.A(this).v of a);"],
+    ["async function f() { [(await g()).location] = [u]; }", "async function f() { [__g$.A((await g())).v] = [u]; }"],
+    ["function* f() { [(yield).location] = [u]; }", "function* f() { [__g$.A((yield)).v] = [u]; }"],
+    ["x.location &&= u", "__g$.A(x).v &&= u"],
+    ["this.location ??= u", "__g$.A(this).v ??= u"],
+    ["x.location += u", "__g$.A(x).v += u"],
+    ["location += u", "location = __g$.N(location, __g$.L(location) + (u))"],
+  ])("evaluates the object of %s where the page wrote it", (input, output) => {
+    expect(rewriteJs(input)).toBe(output);
+    expect(() => parseScript(rewriteJs(input), { next: true })).not.toThrow();
+  });
+
+  it("writes through the object the page named, with its own this", () => {
+    const set: unknown[] = [];
+    const helpers = {
+      A: (object: unknown) => ({
+        set v(value: unknown) {
+          set.push([object, value]);
+        },
+      }),
+      D: (value: unknown) => value,
+    };
+    const run = new Function(
+      "__g$",
+      rewriteJs("[this.location] = ['u']; ({ location: this.location } = { location: 'w' });"),
+    );
+    const self = { name: "self" };
+    run.call(self, helpers);
+    expect(set).toEqual([
+      [self, "u"],
+      [self, "w"],
+    ]);
+  });
+
+  it("keeps a shorthand default from turning a later target into a property", () => {
+    const output = rewriteJs("({ a = [location] = x } = o)");
+    expect(() => parseScript(output, { next: true })).not.toThrow();
+    expect(output).not.toContain("[location: ");
+  });
+
+  it("keeps a local binding named location working through the setter", () => {
+    const run = new Function("__g$", rewriteJs("let location = 1; [location] = [2]; return location;"));
+    expect(run({ N: (_target: unknown, value: unknown) => value })).toBe(2);
+  });
+});
+
 describe("rewriteJs", () => {
   it.each([
     ["location.href", "__g$.L(location).href"],
+    ["top.document", "__g$.W(top).document"],
+    ["window.parent.postMessage(m, o)", "__g$.P(__g$.W(window.parent)).postMessage(m, o)"],
+    ["typeof top", "typeof top"],
+    ["o = { parent }", "o = { parent: __g$.W(parent) }"],
+    ["const { opener } = window;", "const { opener } = __g$.D(window);"],
+    ["rect.top + node.parent", "rect.top + node.parent"],
+    ["frame.contentWindow.parent.x", "__g$.W(frame.contentWindow.parent).x"],
+    ["window['top'].x", "__g$.W(window['top']).x"],
+    ["let parent = a; parent = b;", "let parent = a; parent = b;"],
+    ["self.frames[0]", "__g$.W(self.frames)[0]"],
     ["var u = location;", "var u = __g$.L(location);"],
     ['location = "https://x.test/"', 'location = __g$.N(location, ("https://x.test/"))'],
     ["window.location.href = u", "__g$.L(window.location).href = u"],
     ["document.location = u", '__g$.S(document, "location", (u))'],
     ['w["location"] = u', '__g$.S(w, "location", (u))'],
-    ['top["location"].replace(u)', '__g$.L(top["location"]).replace(u)'],
+    ['top["location"].replace(u)', '__g$.L(__g$.W(top)["location"]).replace(u)'],
     ["const { location } = window;", "const { location } = __g$.D(window);"],
     ["({ location: loc } = self);", "({ location: loc } = __g$.D(self));"],
     ["o = { location }", "o = { location: __g$.L(location) }"],
@@ -29,7 +109,7 @@ describe("rewriteJs", () => {
     ["[eval][0](x)", "[__g$.ev][0](x)"],
     ["import(spec)", "import(__g$.I(spec))"],
     ["import(spec, { with: { type: 'json' } })", "import(__g$.I(spec), { with: { type: 'json' } })"],
-    ['parent.postMessage(m, "*")', '__g$.P(parent).postMessage(m, "*")'],
+    ['parent.postMessage(m, "*")', '__g$.P(__g$.W(parent)).postMessage(m, "*")'],
     ["a.b.postMessage(location.href, o, [p])", "__g$.P(a.b).postMessage(__g$.L(location).href, o, [p])"],
     ['w["postMessage"](m, o)', '__g$.P(w)["postMessage"](m, o)'],
     ["(a || b).postMessage(m)", "(__g$.P(a || b)).postMessage(m)"],
@@ -45,8 +125,6 @@ describe("rewriteJs", () => {
     "o = { location: 1 }",
     "class A { location() {} get location() { return 1 } }",
     "location: for (;;) break location;",
-    "window.location += '#a'",
-    "location += '#a'",
     'var s = "location";',
     "x = __g$.L(location).href",
     "postMessage(m)",
@@ -81,6 +159,7 @@ describe("rewriteJs", () => {
     expect(STANDALONE_SHIM).toContain("I:");
     expect(STANDALONE_SHIM).toContain("H:");
     expect(STANDALONE_SHIM).toContain("M:");
+    expect(STANDALONE_SHIM).toContain("W:function(v){return v}");
     expect(STANDALONE_SHIM).toContain("P:");
   });
 

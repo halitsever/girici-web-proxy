@@ -48,7 +48,6 @@ test("an admin signs in, blocks a site, and proxied pages cannot use the admin A
   await expect(page.locator("#result")).not.toBeEmpty();
   const probe = JSON.parse((await page.locator("#result").textContent()) ?? "{}");
   expect(probe.hooked).toBe("404 not found");
-  expect(probe.rawPost).toBe(403);
-  // Chromium leaves blank frames outside the service worker; 6.1b gives them the runtime.
-  if (browserName !== "chromium") expect(probe.rawGet).toBe(403);
+  expect(probe.rawPost).toBe(404);
+  expect(probe.rawGet).toBe(404);
 });

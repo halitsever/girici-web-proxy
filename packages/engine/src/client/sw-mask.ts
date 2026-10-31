@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import type { Realm } from "./url-context.ts";
 
 /** A proxied page must neither install its own worker nor see or unregister ours. */
@@ -18,7 +19,7 @@ export function installServiceWorkerMask(win: Realm): void {
     removeEventListener: events.removeEventListener.bind(events),
     dispatchEvent: events.dispatchEvent.bind(events),
   };
-  Object.defineProperty(win.Navigator.prototype, "serviceWorker", {
+  define(win.Navigator.prototype, "serviceWorker", {
     configurable: true,
     enumerable: true,
     get: () => container,

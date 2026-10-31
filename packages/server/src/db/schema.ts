@@ -1,5 +1,9 @@
-/** One admin row today; the table carries username so it scales to many later. */
-export const SCHEMA = `
+/**
+ * Migration n brings the database to user_version n + 1. Append only. Migration 1 uses IF NOT EXISTS because
+ * databases from before user_version already hold its tables and must come out at version 1 untouched.
+ */
+export const MIGRATIONS: readonly string[] = [
+  `
 CREATE TABLE IF NOT EXISTS admins (
   id INTEGER PRIMARY KEY,
   username TEXT UNIQUE NOT NULL,
@@ -14,4 +18,5 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 ) STRICT;
-`;
+`,
+];

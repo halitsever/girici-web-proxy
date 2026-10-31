@@ -6,18 +6,35 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
 // Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},A:function(o){var k="location";return{get v(){return o[k]},set v(x){o[k]=x}}},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
 
 export interface JsRewriteOptions {
   kind?: "classic" | "module" | "handler";
   standalone?: boolean;
 }
 
-type Role = "read" | "target" | "binding" | "callee";
+/** `assign` is a destructuring or for-in/of target, where `location` gets a setter that converts the URL. */
+type Role = "read" | "target" | "assign" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
-const HELPERS = new Set(["L", "N", "S", "D", "E", "ev", "I", "H", "M", "P"]);
+const HELPERS = new Set(["L", "N", "S", "A", "D", "E", "ev", "I", "H", "M", "P", "W"]);
 const GLOBAL_NAMES = new Set(["window", "globalThis", "self"]);
+const WINDOW_REFS = new Set(["top", "parent", "opener", "frames"]);
+const WINDOW_LIKE = new Set([
+  "window",
+  "self",
+  "globalThis",
+  "top",
+  "parent",
+  "opener",
+  "frames",
+  "contentWindow",
+  "defaultView",
+]);
+const WRAPPED_NAME = /location|top|parent|opener|frames/;
+const LOGICAL = new Set(["&&=", "||=", "??="]);
+// A setter keeps a local binding named `location` working, while a real Location gets the converted URL.
+const LOCATION_SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
@@ -26,7 +43,8 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
     !source.includes("location") &&
     !source.includes("eval") &&
     !source.includes("import") &&
-    !source.includes("postMessage")
+    !source.includes("postMessage") &&
+    !WRAPPED_NAME.test(source)
   ) {
     return source;
   }
@@ -83,7 +101,10 @@ class LocationRewriter {
     if (!node) return;
     switch (node.type) {
       case "Identifier":
-        if (role === "read" && node.name === "location") this.#wrap(node);
+        if (role === "assign" && node.name === "location") {
+          this.#output.overwrite(start(node), end(node), LOCATION_SETTER);
+        } else if (role === "read" && node.name === "location") this.#wrap(node);
+        else if (role === "read" && WINDOW_REFS.has(node.name)) this.#call("__g$.W(", ")", node);
         // A bare `eval` read is indirect eval; the wrapper rewrites the code before running it.
         else if (role === "read" && node.name === "eval") this.#output.overwrite(start(node), end(node), "__g$.ev");
         return;
@@ -135,7 +156,7 @@ class LocationRewriter {
         return;
       case "NewExpression":
         // `new __g$.L(x).y()` would construct the helper, so a callee that gets wrapped is parenthesised first.
-        if (this.#source.slice(start(node.callee), end(node.callee)).includes("location")) {
+        if (this.#source.slice(start(node.callee), end(node.callee)).match(WRAPPED_NAME)) {
           this.#output.appendRight(start(node.callee), "(");
           this.#output.appendLeft(end(node.callee), ")");
         }
@@ -153,17 +174,21 @@ class LocationRewriter {
         this.visit(node.argument, "target", false);
         return;
       case "UnaryExpression":
+        // An undeclared name stays safe under typeof only while it is left bare.
+        if (node.operator === "typeof" && node.argument.type === "Identifier" && WINDOW_REFS.has(node.argument.name)) {
+          return;
+        }
         this.visit(node.argument, node.operator === "delete" ? "target" : "read", false);
         return;
       case "ForInStatement":
       case "ForOfStatement":
-        this.visit(node.left, node.left.type === "VariableDeclaration" ? "read" : "target", false);
+        this.visit(node.left, node.left.type === "VariableDeclaration" ? "read" : "assign", false);
         this.visit(node.right, "read", false);
         this.visit(node.body, "read", false);
         return;
       case "VariableDeclarator":
         this.visit(node.id, "binding", false);
-        if (node.init && node.id.type === "ObjectPattern" && hasLocationKey(node.id) && !isHelperCall(node.init)) {
+        if (node.init && node.id.type === "ObjectPattern" && hasWrappedKey(node.id) && !isHelperCall(node.init)) {
           this.#call("__g$.D(", ")", node.init);
         }
         this.visit(node.init, "read", false);
@@ -172,6 +197,14 @@ class LocationRewriter {
         for (const property of node.properties) {
           if (property.type === "Property" && property.shorthand && isLocationIdentifier(property.value)) {
             this.#output.overwrite(start(property), end(property), "location: __g$.L(location)");
+          } else if (
+            property.type === "Property" &&
+            property.shorthand &&
+            property.value.type === "Identifier" &&
+            WINDOW_REFS.has(property.value.name)
+          ) {
+            const name = property.value.name;
+            this.#output.overwrite(start(property), end(property), `${name}: __g$.W(${name})`);
           } else {
             this.visit(property, "read", false);
           }
@@ -179,6 +212,15 @@ class LocationRewriter {
         return;
       case "Property":
         if (node.computed) this.visit(node.key, "read", false);
+        if (role === "assign" && node.shorthand) {
+          // `{ location } = o` is shorthand, so the key has to be written out before the value changes.
+          const target = node.value.type === "AssignmentPattern" ? node.value.left : node.value;
+          if (isLocationIdentifier(target)) {
+            this.#output.overwrite(start(target), end(target), `location: ${LOCATION_SETTER}`);
+            if (node.value.type === "AssignmentPattern") this.visit(node.value.right, "read", false);
+            return;
+          }
+        }
         this.visit(node.value, role, false);
         return;
       case "ObjectPattern":
@@ -233,13 +275,23 @@ class LocationRewriter {
   }
 
   #member(node: ESTree.MemberExpression, role: Role, inChain: boolean): void {
+    if (role === "assign" && isLocationMember(node)) {
+      this.#locationTarget(node);
+      return;
+    }
     if (role === "read" && isImportMetaUrl(node)) {
       this.#call("__g$.M(", ")", node);
       return;
     }
     if (role === "read" && isLocationMember(node)) this.#wrap(node);
+    else if (role === "read" && isWindowRefMember(node)) this.#call("__g$.W(", ")", node);
     // A wrapped link would stop an optional chain from short-circuiting, so the next access becomes optional too.
-    if (inChain && !node.optional && isLocationMember(node.object) && hasOptionalLink(node.object)) {
+    if (
+      inChain &&
+      !node.optional &&
+      (isLocationMember(node.object) || isWindowRefMember(node.object)) &&
+      hasOptionalLink(node.object)
+    ) {
       this.#output.appendRight(this.#nextToken(end(node.object)), node.computed ? "?." : "?");
     }
     this.visit(node.object, "read", inChain);
@@ -249,8 +301,14 @@ class LocationRewriter {
   #assignment(node: ESTree.AssignmentExpression): void {
     const { left, right } = node;
     if (left.type === "Identifier") {
-      if (left.name === "location" && node.operator === "=" && !isHelperCall(right)) {
-        this.#call("__g$.N(location, (", "))", right);
+      if (left.name === "location" && !isHelperCall(right)) {
+        // Logical assignment converts only when it assigns, so its operator stays and only the value goes through N.
+        if (node.operator === "=" || LOGICAL.has(node.operator)) this.#call("__g$.N(location, (", "))", right);
+        else {
+          const operator = this.#source.indexOf(node.operator, end(left));
+          this.#output.overwrite(operator, operator + node.operator.length, "=");
+          this.#call(`__g$.N(location, __g$.L(location) ${node.operator.slice(0, -1)} (`, "))", right);
+        }
       }
     } else if (left.type === "MemberExpression" && node.operator === "=" && isLocationMember(left)) {
       // Only the text between the object and the value changes, so rewrites nested in either survive.
@@ -259,13 +317,24 @@ class LocationRewriter {
       this.#output.overwrite(operator, start(right), ', "location", (');
       this.#output.appendLeft(end(right), "))");
       this.visit(left.object, "read", false);
+    } else if (left.type === "MemberExpression" && isLocationMember(left)) {
+      // The operator stays, so the value is evaluated only when the page's own operator would evaluate it.
+      this.#locationTarget(left);
     } else {
-      if (left.type === "ObjectPattern" && hasLocationKey(left) && !isHelperCall(right)) {
+      if (left.type === "ObjectPattern" && hasWrappedKey(left) && !isHelperCall(right)) {
         this.#call("__g$.D(", ")", right);
       }
-      this.visit(left, "target", false);
+      this.visit(left, (left as ESTree.Node).type === "MemberExpression" ? "target" : "assign", false);
     }
     this.visit(right, "read", false);
+  }
+
+  /** `obj.location` as a target: the object is evaluated in place, and its `v` reads and writes through S. */
+  #locationTarget(node: ESTree.MemberExpression): void {
+    const operator = this.#source.lastIndexOf(node.computed ? "[" : ".", start(node.property));
+    this.#output.appendRight(start(node), "__g$.A(");
+    this.#output.overwrite(operator, end(node), ").v");
+    this.visit(node.object, "read", false);
   }
 
   #wrap(node: ESTree.Node): void {
@@ -346,12 +415,41 @@ function isImportMetaUrl(node: ESTree.MemberExpression): boolean {
   );
 }
 
+/** Only literal keys are known here; a key built at run time reaches the native Location, a documented limit. */
 function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
   if (node.type !== "MemberExpression") return false;
   const { property } = node;
   return node.computed
     ? property.type === "Literal" && property.value === "location"
     : property.type === "Identifier" && property.name === "location";
+}
+
+function isWindowRefMember(node: ESTree.Node): node is ESTree.MemberExpression {
+  if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
+  const { object, property } = node;
+  const name = node.computed
+    ? property.type === "Literal" && typeof property.value === "string"
+      ? property.value
+      : undefined
+    : property.type === "Identifier"
+      ? property.name
+      : undefined;
+  if (name === undefined || !WINDOW_REFS.has(name)) return false;
+  if (object.type === "Identifier") return WINDOW_LIKE.has(object.name);
+  if (object.type === "MemberExpression") return isWindowLikeMember(object);
+  return object.type === "CallExpression" && isHelperCall(object) && isWrapperCall(object);
+}
+
+function isWindowLikeMember(node: ESTree.MemberExpression): boolean {
+  const { property } = node;
+  if (node.computed)
+    return property.type === "Literal" && typeof property.value === "string" && WINDOW_LIKE.has(property.value);
+  return property.type === "Identifier" && WINDOW_LIKE.has(property.name);
+}
+
+function isWrapperCall(node: ESTree.CallExpression): boolean {
+  const callee = node.callee;
+  return callee.type === "MemberExpression" && callee.property.type === "Identifier" && callee.property.name === "W";
 }
 
 function isPostMessageCallee(node: ESTree.Node): node is ESTree.MemberExpression {
@@ -362,14 +460,20 @@ function isPostMessageCallee(node: ESTree.Node): node is ESTree.MemberExpression
     : property.type === "Identifier" && property.name === "postMessage";
 }
 
-function hasLocationKey(pattern: ESTree.ObjectPattern): boolean {
+function hasWrappedKey(pattern: ESTree.ObjectPattern): boolean {
   return pattern.properties.some(
     (property) =>
       property.type === "Property" &&
       !property.computed &&
-      ((property.key.type === "Identifier" && property.key.name === "location") ||
-        (property.key.type === "Literal" && property.key.value === "location")),
+      ((property.key.type === "Identifier" && isWrappedKey(property.key.name)) ||
+        (property.key.type === "Literal" &&
+          typeof property.key.value === "string" &&
+          isWrappedKey(property.key.value))),
   );
+}
+
+function isWrappedKey(name: string): boolean {
+  return name === "location" || WINDOW_REFS.has(name);
 }
 
 function hasOptionalLink(node: ESTree.Node): boolean {

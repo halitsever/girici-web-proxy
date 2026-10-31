@@ -1,40 +1,56 @@
 # Security Policy
 
-Girici is a web proxy, so its security posture matters to everyone who runs it. Thank you for helping
-keep it safe.
+Girici is a web proxy that many people run in public, so its security matters to everyone who uses it. Thank you
+for helping keep it safe.
 
 ## Supported versions
 
-Girici v2 is under active development on the `main` branch; security fixes land there. Girici v1 is no
-longer maintained and will not receive fixes. Run a current v2 build.
+Security fixes go into the latest v2 release, published as a new version on GitHub and as the `latest`, `v2` and
+version tags on Docker Hub and GHCR. Older releases do not get backports; update to the latest one. Girici v1 is no
+longer maintained.
 
 | Version | Supported |
 |---------|-----------|
-| v2 (`main`) | Yes |
+| Latest 2.x release | Yes |
+| Older 2.x releases | No, update |
 | v1 | No |
 
 ## Reporting a vulnerability
 
-Please report security issues privately, not in a public issue or pull request.
+Report security issues privately, never in a public issue, discussion or pull request.
 
 Use GitHub's private vulnerability reporting: open the repository's **Security** tab and choose
-**Report a vulnerability**. Include the affected version or commit, steps to reproduce, and the impact
-you observed. If you have a proposed fix, a draft PR against a private advisory is welcome.
+**Report a vulnerability**, or go straight to
+<https://github.com/halitsever/girici-web-proxy/security/advisories/new>. Include the version or commit, the steps to
+reproduce, and the impact you saw. A proposed fix is welcome as a draft in the private advisory.
 
-We aim to acknowledge a report within a few days and to coordinate a fix and disclosure timeline with
-you. Please give us a reasonable window to release a fix before any public disclosure.
+You should hear back within a few days. We will agree on a fix and a disclosure date with you, and credit you in the
+advisory unless you prefer otherwise. Please give us a reasonable window to ship a fix before you disclose.
 
-## Scope and known limitations
+## Scope
 
-Some properties are design trade-offs, documented so reports can focus on real issues:
+The [threat model](https://halitsever.github.io/girici-web-proxy/guide/threat-model) lists what Girici protects and
+the limits it already documents, so reports can focus on real issues. In short:
 
-- **Single origin.** Every proxied site shares one browser origin, so a malicious proxied page can
-  reach another site's cookies and storage. `HttpOnly` is not a security boundary here. Site isolation
-  is a known limitation, mitigated by in-app warnings and per-site data clearing.
-- **The operator sees traffic.** The HTTP relay terminates TLS at the server, so the operator can see
-  proxied traffic. End-to-end transport is future work.
-- **Open public access is opt-in.** With public access enabled the proxy is reachable without signing
-  in, which invites abuse. The default is private, behind an admin login.
+- **Single origin.** Every proxied site shares Girici's origin, and the separation between sites is rebuilt in
+  JavaScript. The documented gaps (computed window and `location` access, rewriters in the page realm, the shared
+  origin private file system and blob URLs) are known. A new way around the separation is still worth a report.
+- **The operator sees traffic.** TLS to the real site ends at the server. This is by design.
+- **Public access is opt-in.** An instance with public access on is open to anyone by choice.
 
-Reports that demonstrate a bypass of the SSRF guard, the CSRF checks, the auth gate, or the service
-worker's isolation are especially valuable.
+Bypasses of the SSRF guard, the sign-in and setup gate, the CSRF and origin checks, or the separation between sites
+are the most valuable reports.
+
+## Verifying release images
+
+Release images are signed with Sigstore cosign, without a long-lived key. Images released before signing was added
+are not. To check one:
+
+```bash
+cosign verify halitsever/girici-web-proxy:latest \
+  --certificate-identity https://github.com/halitsever/girici-web-proxy/.github/workflows/ci.yml@refs/heads/main \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The same works for `ghcr.io/halitsever/girici-web-proxy`. Each image also carries a build provenance attestation
+and an SBOM.

@@ -4,16 +4,17 @@ import type { DocumentListeners } from "./renewal.ts";
 import type { Realm } from "./url-context.ts";
 
 /** The worker cannot see frame ancestry, so a frame answers which page sits on top of it. */
-export function installTopSiteResponder(win: Realm, container: ServiceWorkerContainer | null): DocumentListeners {
+export function installTopSiteResponder(win: Realm, container: () => ServiceWorkerContainer | null): DocumentListeners {
   const answer = (event: MessageEvent) => {
     if ((event.data as { type?: unknown } | null)?.type !== TOP_SITE_QUERY) return;
     event.ports[0]?.postMessage({ top: realTopUrl(win) });
   };
   const listen = () => {
-    if (!container) return;
-    container.addEventListener("message", answer);
+    const current = container();
+    if (!current) return;
+    current.addEventListener("message", answer);
     // Messages wait in a queue until this runs, and a frame's first requests are the ones that ask.
-    container.startMessages();
+    current.startMessages();
   };
   listen();
   return { listen };

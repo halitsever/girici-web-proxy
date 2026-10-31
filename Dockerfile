@@ -18,10 +18,12 @@ COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
-RUN npm ci --omit=dev --ignore-scripts --workspace @girici/server && npm cache clean --force
+RUN npm ci --omit=dev --ignore-scripts --workspace @girici/server && npm cache clean --force && mkdir /empty
 
 FROM node:24-alpine AS runtime
-ENV NODE_ENV=production
+ARG GIRICI_VERSION=dev
+ENV NODE_ENV=production GIRICI_VERSION=$GIRICI_VERSION
+LABEL org.opencontainers.image.version=$GIRICI_VERSION
 WORKDIR /app
 COPY --from=deps /app ./
 COPY LICENSE ./
@@ -29,9 +31,10 @@ COPY --from=build /app/packages/engine/dist packages/engine/dist
 COPY --from=build /app/packages/server/dist packages/server/dist
 COPY --from=build /app/packages/web/dist packages/web/dist
 COPY reset-admin-password.js ./
-# The SQLite database lives here; the node user owns it so a mounted volume stays writable.
+# The SQLite database lives here; the node user owns it so a mounted volume stays writable. A COPY instead of RUN
+# keeps this stage free of commands, so building it for another architecture needs no emulation.
 ENV GIRICI_DATA_DIR=/data
-RUN mkdir -p /data && chown node:node /data
+COPY --from=deps --chown=node:node /empty /data
 VOLUME ["/data"]
 USER node
 EXPOSE 3000

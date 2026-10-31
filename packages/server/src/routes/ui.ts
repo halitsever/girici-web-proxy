@@ -11,6 +11,13 @@ const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH];
 
 export function uiRouter(webDistDir: string, store: AuthStore): Router {
   const router = Router();
+  // Revalidated like the engine's license file, since the name is not hashed.
+  router.get("/_g/ui/THIRD_PARTY_LICENSES.txt", (_req, res) => {
+    res.set("Cache-Control", "no-cache");
+    res.sendFile("_g/ui/THIRD_PARTY_LICENSES.txt", { root: webDistDir, cacheControl: false }, (err) => {
+      if (err) res.status(404).type("text/plain").send("Not found");
+    });
+  });
   router.use("/_g/ui", express.static(join(webDistDir, "_g/ui"), { immutable: true, maxAge: "1y", index: false }));
   const shell = (req: Request, res: Response) => {
     const redirect = shellRedirect(store, req.path, authed(store, req));

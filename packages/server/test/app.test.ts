@@ -60,6 +60,7 @@ describe("createApp", () => {
     writeFileSync(join(webDistDir, "index.html"), "<!doctype html><title>girici-test</title>");
     mkdirSync(join(webDistDir, "_g/ui"), { recursive: true });
     writeFileSync(join(webDistDir, "_g/ui/app.js"), "console.log(1)");
+    writeFileSync(join(webDistDir, "_g/ui/THIRD_PARTY_LICENSES.txt"), "== vue@3 (MIT) ==");
     emptyDir = mkdtempSync(join(tmpdir(), "girici-empty-"));
     ({ server, base } = await listen(webDistDir, (line) => logLines.push(line)));
     ({ server: emptyServer, base: emptyBase } = await listen(emptyDir));
@@ -120,6 +121,13 @@ describe("createApp", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("max-age=31536000");
     expect(res.headers.get("cache-control")).toContain("immutable");
+  });
+
+  it("serves the UI license texts revalidated, not immutable", async () => {
+    const res = await fetch(`${base}/_g/ui/THIRD_PARTY_LICENSES.txt`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    expect(await res.text()).toContain("vue@3");
   });
 
   it("redirects /_g/source to the configured source URL", async () => {

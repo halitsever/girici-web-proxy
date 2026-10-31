@@ -48,6 +48,11 @@ export class AuthStore {
     this.#db.close();
   }
 
+  /** Throws when the database cannot be read. */
+  ping(): void {
+    this.#db.prepare("SELECT count(*) FROM settings").get();
+  }
+
   hasAdmin(): boolean {
     return this.#adminRow() !== null;
   }
@@ -96,9 +101,12 @@ export class AuthStore {
   /** Logs every device out; revocation also covers a fixed GIRICI_SESSION_SECRET, which cannot rotate. */
   changePassword(id: number, password: string): void {
     const { hash, salt } = hashPassword(password);
-    this.#db.prepare("UPDATE admins SET pw_hash = ?, pw_salt = ? WHERE id = ?").run(hash, salt, id);
-    this.revokeSessions();
-    this.rotateSessionSecret();
+    // All or nothing: a new password with the old sessions still valid would leave a stolen session alive.
+    this.#transaction(() => {
+      this.#db.prepare("UPDATE admins SET pw_hash = ?, pw_salt = ? WHERE id = ?").run(hash, salt, id);
+      this.revokeSessions();
+      this.rotateSessionSecret();
+    });
   }
 
   /** Sessions issued before this time (ms) are void. Read on every check, since the reset script writes it. */
@@ -148,6 +156,17 @@ export class AuthStore {
 
   setBlockedHosts(hosts: readonly string[]): void {
     this.#setSetting("blocked_hosts", JSON.stringify(hosts));
+  }
+
+  #transaction(work: () => void): void {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      work();
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   #adminRow(): AdminRow | null {

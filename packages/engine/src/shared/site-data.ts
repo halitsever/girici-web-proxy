@@ -1,5 +1,5 @@
 import { domainMatches } from "./cookie-mirror.ts";
-import { partitionOrigin } from "./partition.ts";
+import { partitionOrigin, partitionTop } from "./partition.ts";
 
 /** The part of Storage used here; the service worker build compiles this folder without DOM types. */
 export interface KeyValueStore {
@@ -73,12 +73,22 @@ export async function partitionOrigins(env: SiteDataEnv): Promise<string[]> {
   return [...origins].sort();
 }
 
-/** Deletes the partitions of a site and its subdomains, or every partition when site is null. */
+/**
+ * Deletes the partitions of a site and its subdomains, or every partition when site is null. A site's copies inside
+ * other sites go too, and so do the copies other sites keep while embedded in it.
+ */
 export async function clearPartitions(env: SiteDataEnv, site: string | null): Promise<void> {
-  const matches = (name: string) => {
-    const origin = partitionOrigin(name);
-    return origin !== null && (site === null || domainMatches(new URL(origin).hostname, site));
+  const belongs = (origin: string | null) => {
+    if (origin === null || site === null) return false;
+    try {
+      return domainMatches(new URL(origin).hostname, site);
+    } catch {
+      // An unknown top ("null") belongs to no site.
+      return false;
+    }
   };
+  const matches = (name: string) =>
+    partitionOrigin(name) !== null && (site === null || belongs(partitionOrigin(name)) || belongs(partitionTop(name)));
   for (const storage of [env.local, env.session]) {
     for (const key of keysOf(storage)) if (matches(key)) storage?.removeItem(key);
   }

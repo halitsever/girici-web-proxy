@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rewriteHtml } from "../src/rewrite/html.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 const TAG = '<script src="/_g/client.test.js"></script>';
 const rw = (html: string, inject = false) =>
@@ -61,7 +62,7 @@ describe("URL attributes", () => {
     ],
     [
       "<a href=\"javascript:location='https://x.test/'\">",
-      "<a href=\"javascript:location=__g$.N(location, ('https://x.test/'))\">",
+      "<a href=\"javascript:__g$.J(&quot;location='https://x.test/'&quot;,&quot;https://site.test&quot;)\">",
     ],
   ])("rewrites %s", (input, output) => {
     expect(rw(input)).toBe(output);
@@ -163,7 +164,9 @@ describe("documents that are not well formed", () => {
   });
 
   it("survives URLs and bases that are not web URLs", () => {
-    expect(rw('<a href="java&#10;script:void(0)">x</a>')).toBe('<a href="java&#10;script:void(0)">x</a>');
+    expect(rw('<a href="java&#10;script:void(0)">x</a>')).toBe(
+      '<a href="javascript:__g$.J(&quot;void(0)&quot;,&quot;https://site.test&quot;)">x</a>',
+    );
     expect(rw('<base href="ftp://x.test/"><a href="y">')).toBe('<base href="ftp://x.test/"><a href="y">');
   });
 
@@ -178,5 +181,92 @@ describe("documents that are not well formed", () => {
       '<a href="https://x.test/"><img srcset="/a.png 1x"><script>location.href</script><style>a{b:url(/c.png)}</style>',
     );
     expect(rw(once)).toBe(once);
+  });
+});
+
+describe("srcdoc documents", () => {
+  const frameInject = (base: URL) => `<script src="http://p.test/_g/client.T.js" data-girici="${base.href}"></script>`;
+
+  it("gives srcdoc documents the runtime with the frame's base", () => {
+    const html = rewriteHtml(
+      '<base href="https://cdn.a.test/d/"><iframe srcdoc="<script>go(location)</script>"></iframe>',
+      { url: new URL("https://a.test/p"), origin: "http://p.test", frameInject },
+    );
+    expect(html).toContain(
+      "&lt;script src=&quot;http://p.test/_g/client.T.js&quot; data-girici=&quot;https://cdn.a.test/d/&quot;",
+    );
+    expect(html).toContain("go(__g$.L(location))");
+  });
+
+  it("passes the runtime on to nested srcdoc documents", () => {
+    const inner = '<iframe srcdoc="<p>x</p>"></iframe>';
+    const html = rewriteHtml(`<iframe srcdoc="${inner.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}"></iframe>`, {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+      frameInject,
+    });
+    expect(html.match(/client\.T\.js/g)).toHaveLength(2);
+  });
+
+  it("runtime-wraps srcdoc on iframes only", () => {
+    const html = rewriteHtml('<div srcdoc="<script>go(location)</script>"></div>', {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+      frameInject,
+    });
+    expect(html).not.toContain("client.T.js");
+    expect(html).not.toContain("__g$");
+  });
+
+  it("keeps a single runtime tag when the markup already starts with it", () => {
+    const inject = frameInject(new URL("https://a.test/p"));
+    const once = rewriteHtml("<p>x</p>", { url: new URL("https://a.test/p"), origin: "http://p.test", inject });
+    const twice = rewriteHtml(once, { url: new URL("https://a.test/p"), origin: "http://p.test", inject });
+    expect(twice).toBe(once);
+  });
+
+  it("leaves srcdoc scripts alone without frameInject", () => {
+    const html = rewriteHtml('<iframe srcdoc="<script>go(location)</script>"></iframe>', {
+      url: new URL("https://a.test/p"),
+      origin: "http://p.test",
+    });
+    expect(html).not.toContain("__g$");
+  });
+});
+
+describe("blob swaps", () => {
+  const swap = (url: string) => (url.startsWith("blob:") ? `blob:http://proxy.test/boot(${url.slice(5)})` : url);
+  const rewrite = (html: string) =>
+    rewriteHtml(html, { url: new URL("https://site.test/p"), origin: "http://proxy.test", swapBlob: swap });
+
+  it("swaps blob URLs that load frames, drops blob refreshes and leaves links for click time", () => {
+    expect(rewrite('<iframe src="blob:http://proxy.test/1"></iframe>')).toContain('src="blob:http://proxy.test/boot(');
+    expect(rewrite('<frame src="blob:http://proxy.test/1">')).toContain("boot(");
+    expect(rewrite('<object data="blob:http://proxy.test/1"></object>')).toContain("boot(");
+    expect(rewrite('<embed src="blob:http://proxy.test/1">')).toContain("boot(");
+    expect(rewrite('<meta http-equiv="refresh" content="0;url=blob:http://proxy.test/1">')).toContain('content=""');
+    expect(rewrite('<a href="blob:http://proxy.test/1">x</a>')).toBe('<a href="blob:http://proxy.test/1">x</a>');
+    expect(rewrite('<img src="blob:http://proxy.test/1">')).toBe('<img src="blob:http://proxy.test/1">');
+  });
+});
+
+describe("meta refresh with built-ins the page replaced", () => {
+  // toLowerCase is left out: htmlparser2 lowercases names with it, which no engine check can stand in for.
+  it("proxies the refresh target when String.prototype.trim is replaced", () => {
+    const out = withReplaced(String.prototype, "trim", { value: () => "" }, () =>
+      rw('<meta http-equiv="Refresh" content="0; url=https://other.test/">'),
+    );
+    expect(out).toBe('<meta http-equiv="Refresh" content="0; url=/~/https/other.test/">');
+  });
+
+  it("swaps a blob frame source when Set.prototype.has is replaced", () => {
+    const out = withReplaced(Set.prototype, "has", { value: () => false }, () =>
+      rewriteHtml('<iframe src="blob:http://proxy.test/1"></iframe>', {
+        url: new URL("https://site.test/"),
+        origin: "http://proxy.test",
+        swapBlob: () => "blob:boot",
+      }),
+    );
+    expect(out).toBe('<iframe src="blob:boot"></iframe>');
   });
 });

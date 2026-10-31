@@ -33,6 +33,13 @@ test("sends cookies a script just set", async ({ page }) => {
   await expect(page.locator("#echo")).toHaveText("js=1");
 });
 
+test("keeps a link followed after a cookie write on the proxy", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/cookie/click");
+  await page.click("#go");
+  await page.waitForURL(/\/~\/https\/site-b\.test\//);
+  await expect(page.locator("h1")).toHaveText("Site B");
+});
+
 test("updates document.cookie from fetch responses", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/cookie/api-page");
   await expect(page.locator("#after")).toHaveText("api=1");
