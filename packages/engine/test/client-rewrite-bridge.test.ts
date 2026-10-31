@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createRewriteBridge } from "../src/client/rewrite-bridge.ts";
 
-const frameTag = () => '<script src="http://proxy.test/_g/client.T.js" data-girici="{}"></script>';
+const frameTag = (base: URL) => `<script src="http://proxy.test/_g/client.T.js" data-girici="${base.href}"></script>`;
 
 const ctx = {
   origin: "http://proxy.test",
@@ -30,5 +30,40 @@ describe("createRewriteBridge", () => {
     const input = '<a href="https://b.test/x">x</a>';
     expect(bridge.srcdoc(input)).toContain("client.T.js");
     expect(bridge.unsrcdoc(bridge.srcdoc(input))).toBe(input);
+  });
+
+  const escape = (value: string) => value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+
+  it("hides the runtime tag when innerHTML of an iframe is read", () => {
+    const bridge = createRewriteBridge(ctx, frameTag);
+    const input = '<a href="https://b.test/x">x</a>';
+    const dom = `<iframe srcdoc="${escape(bridge.srcdoc(input))}"></iframe>`;
+    expect(dom).toContain("client.T.js");
+    expect(bridge.unhtml(dom)).toBe(`<iframe srcdoc="${escape(input)}"></iframe>`);
+  });
+
+  it("restores nested srcdoc documents", () => {
+    const bridge = createRewriteBridge(ctx, frameTag);
+    const input = '<iframe srcdoc="<p>x</p>"></iframe>';
+    const stored = bridge.srcdoc(input);
+    expect(stored.match(/client\.T\.js/g)).toHaveLength(2);
+    expect(bridge.unsrcdoc(stored)).toBe(input);
+  });
+
+  it("keeps one runtime tag when a rewritten srcdoc is rewritten again", () => {
+    const bridge = createRewriteBridge(ctx, frameTag);
+    const once = bridge.srcdoc("<p>x</p>");
+    expect(bridge.srcdoc(once)).toBe(once);
+    const stale = once.replace('data-girici="https://site.test/a/b"', 'data-girici="stale"');
+    expect(bridge.srcdoc(stale)).toBe(once);
+  });
+
+  it("inherits the page's base, and the markup's base for nested documents", () => {
+    const bridge = createRewriteBridge({ ...ctx, realBase: () => new URL("https://site.test/dir/") }, frameTag);
+    const out = bridge.srcdoc('<base href="https://cdn.test/d/"><iframe srcdoc="<p>x</p>"></iframe>');
+    expect(out.startsWith('<script src="http://proxy.test/_g/client.T.js" data-girici="https://site.test/dir/">')).toBe(
+      true,
+    );
+    expect(out).toContain("data-girici=&quot;https://cdn.test/d/&quot;");
   });
 });

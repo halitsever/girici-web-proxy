@@ -61,6 +61,7 @@ class HtmlRewriter {
   #baseSeen = false;
   #injectAt = 0;
   #injectFrozen = false;
+  #carried = false;
   #attributes: Attribute[] = [];
   #script: { start: number; contentStart: number; kind: ScriptKind } | null = null;
   #styleStart = -1;
@@ -98,11 +99,24 @@ class HtmlRewriter {
       { decodeEntities: true },
     );
     parser.end(this.#html);
-    if (this.#options.inject) this.#output.appendLeft(this.#injectAt, this.#options.inject);
+    if (this.#options.inject && !this.#carried) this.#output.appendLeft(this.#injectAt, this.#options.inject);
     return this.#output.hasChanged() ? this.#output.toString() : this.#html;
   }
 
   #openTag(name: string, attribs: Record<string, string>, attributes: Attribute[], start: number, end: number): void {
+    // Markup that already starts with the tag (a re-attached srcdoc) keeps that copy, untouched.
+    const { inject } = this.#options;
+    if (
+      inject &&
+      name === "script" &&
+      !this.#injectFrozen &&
+      start === this.#injectAt &&
+      this.#html.startsWith(inject, start)
+    ) {
+      this.#carried = true;
+      this.#injectFrozen = true;
+      return;
+    }
     if (!this.#injectFrozen) {
       // The runtime must run before any script, so it goes in as early as the doctype, <html> and <head> allow.
       if (name === "html" || name === "head") this.#injectAt = end + 1;
@@ -152,9 +166,10 @@ class HtmlRewriter {
     }
     const rewritten = this.#rewriteValue(tag, attribs, name, value);
     if (rewritten !== value) {
-      // A document that carries the runtime tag has its markup written out as text.
+      // Only a srcdoc that gets the runtime tag is written with `<` escaped.
       const text = escapeAttribute(rewritten);
-      const escaped = name === "srcdoc" && this.#options.frameInject ? text.replace(/</g, "&lt;") : text;
+      const escaped =
+        tag === "iframe" && name === "srcdoc" && this.#options.frameInject ? text.replace(/</g, "&lt;") : text;
       this.#output.overwrite(attribute.start, attribute.end, `${name}="${escaped}"`);
     }
   }
@@ -196,7 +211,7 @@ class HtmlRewriter {
     }
     if (name === "style") return rewriteCss(value, this.#base, origin);
     if (name.startsWith("on")) return this.#scripts ? rewriteJs(value, { kind: "handler" }) : value;
-    if (name === "srcdoc") {
+    if (tag === "iframe" && name === "srcdoc") {
       const { frameInject } = this.#options;
       if (!frameInject) return rewriteHtml(value, { url: this.#base, origin, scripts: false });
       return rewriteHtml(value, {

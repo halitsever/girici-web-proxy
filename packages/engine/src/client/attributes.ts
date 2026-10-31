@@ -42,6 +42,14 @@ const ownDescriptor = Object.getOwnPropertyDescriptor;
 const defineProperty = Object.defineProperty;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
+const indexOf = String.prototype.indexOf;
+const RUNTIME_ATTRIBUTE = "data-girici=";
+
+/** What the page wrote for a srcdoc and the value that went into the DOM for it. */
+interface SrcdocRecord {
+  native: string;
+  original: string;
+}
 
 /** The markup rewriters for a srcdoc document, which also carries the runtime tag. */
 export interface SrcdocBridge {
@@ -51,6 +59,12 @@ export interface SrcdocBridge {
 
 /** Pages read and write real URLs while the DOM keeps the proxied ones the browser actually loads. */
 export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBridge): void {
+  const written = new WeakMap<object, SrcdocRecord>();
+  const carried = new WeakMap<object, SrcdocRecord>();
+  const original = (node: object, value: string): string => {
+    const record = apply(mapGet, carried, [node]) as SrcdocRecord | undefined;
+    return record && record.native === value ? record.original : value;
+  };
   for (const [name, property] of URL_PROPERTIES) {
     wrap(
       win,
@@ -78,7 +92,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       (value) => rewriteAttribute("script", property, value, ctx.realBase(), ctx.origin),
     );
   }
-  wrap(win, "HTMLIFrameElement", "srcdoc", markup.unsrcdoc, markup.srcdoc);
+  installSrcdoc();
   for (const name of LINK_ELEMENTS) installLinkParts(win, name);
 
   const element = win.Element.prototype;
@@ -110,7 +124,8 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       get(this: Attr) {
         const value = get.call(this);
         const owner = this.ownerElement;
-        return owner && typeof value === "string" ? restore(owner, this.name, value) : value;
+        if (typeof value !== "string") return value;
+        return owner ? restore(owner, this.name, value) : original(this, value);
       },
       set(this: Attr, value: unknown) {
         const owner = this.ownerElement;
@@ -127,8 +142,16 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
       const value = apply(attrValue.get, node, []);
       if (typeof value !== "string") return;
       const { namespaceURI, name } = node as Attr;
+      const known = apply(mapGet, carried, [node]) as SrcdocRecord | undefined;
+      if (known && known.native === value) {
+        // Its own earlier output: rewriting it again would only lose the page's string.
+        apply(mapSet, written, [target, known]);
+        return;
+      }
       const next = rewrite(target as Element, attributeName(namespaceURI, name), value);
       if (next !== value) apply(attrValue.set, node, [next]);
+      const record = apply(mapGet, written, [target]) as SrcdocRecord | undefined;
+      if (record && record.native === next) apply(mapSet, carried, [node, record]);
     } catch {
       // The native call reports a node that is not an Attr.
     }
@@ -168,16 +191,45 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     }
   }
 
+  // The page's own srcdoc string per element, good while the attribute still holds what was written for it.
+  function installSrcdoc(): void {
+    const proto = prototypeOf(win, "HTMLIFrameElement");
+    const descriptor = proto && ownDescriptor(proto, "srcdoc");
+    if (!proto || !descriptor?.get) return;
+    const { get, set } = descriptor;
+    defineProperty(proto, "srcdoc", {
+      configurable: true,
+      enumerable: descriptor.enumerable ?? true,
+      get: maskNative(function (this: Element) {
+        return restore(this, "srcdoc", apply(get, this, []) as string);
+      }, get),
+      set: set
+        ? maskNative(function (this: Element, value: unknown) {
+            apply(set, this, [rewrite(this, "srcdoc", `${value}`)]);
+          }, set)
+        : undefined,
+    });
+  }
+
   function rewrite(target: Element, name: string, value: string): string {
-    return attributeKind(target.localName, name)
-      ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.srcdoc)
-      : value;
+    const kind = attributeKind(target.localName, name);
+    if (kind === "html") {
+      const next = markup.srcdoc(value);
+      // A value that already carries the runtime tag was rewritten before; its plain form is the best original left.
+      const original = (apply(indexOf, value, [RUNTIME_ATTRIBUTE]) as number) < 0 ? value : markup.unsrcdoc(value);
+      apply(mapSet, written, [target, { native: next, original }]);
+      return next;
+    }
+    return kind ? rewriteAttribute(target.localName, name, value, ctx.realBase(), ctx.origin) : value;
   }
 
   function restore(target: Element, name: string, value: string): string {
-    return attributeKind(target.localName, name)
-      ? restoreAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.unsrcdoc)
-      : value;
+    const kind = attributeKind(target.localName, name);
+    if (kind === "html") {
+      const record = apply(mapGet, written, [target]) as SrcdocRecord | undefined;
+      if (record && record.native === value) return record.original;
+    }
+    return kind ? restoreAttribute(target.localName, name, value, ctx.realBase(), ctx.origin, markup.unsrcdoc) : value;
   }
 }
 

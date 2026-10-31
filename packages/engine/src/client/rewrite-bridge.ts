@@ -21,26 +21,30 @@ export interface RewriteBridge {
 
 export function createRewriteBridge(
   ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy">,
-  frameTag: () => string,
+  frameTag: (base: URL) => string,
 ): RewriteBridge {
   const html = (markup: string) =>
     rewriteHtml(markup, { url: ctx.realBase(), origin: ctx.origin, scripts: true, frameInject: frameTag });
+  const clientUrl = () => tagSource(frameTag(ctx.realBase()));
+  // Nested srcdoc values come back through the same path, so the tag goes at every level.
+  const unsrcdoc = (markup: string): string =>
+    stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc), clientUrl());
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
     jsBody: (code) => rewriteJs(code, { kind: "handler" }),
     html,
+    // A tag carried over from an earlier rewrite is dropped first, since its cookie snapshot may be stale.
     srcdoc: (markup) =>
-      rewriteHtml(markup, {
+      rewriteHtml(stripClientTag(markup, clientUrl()), {
         url: ctx.realBase(),
         origin: ctx.origin,
         scripts: true,
-        inject: frameTag(),
+        inject: frameTag(ctx.realBase()),
         frameInject: frameTag,
       }),
-    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin),
-    unsrcdoc: (markup) =>
-      stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin), tagSource(frameTag())),
+    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc),
+    unsrcdoc,
     importSpecifier: (spec) => ctx.toProxy(spec),
     metaUrl: (url) => ctx.fromProxy(url),
   };
@@ -59,7 +63,12 @@ interface PendingAttribute {
 }
 
 /** Turns the proxy URLs the DOM holds back into real ones, so a page reading innerHTML sees what it wrote. */
-function unrewriteHtmlAttributes(html: string, base: URL, origin: string): string {
+function unrewriteHtmlAttributes(
+  html: string,
+  base: URL,
+  origin: string,
+  unsrcdoc: (markup: string) => string,
+): string {
   const output = new MagicString(html);
   let attributes: PendingAttribute[] = [];
   const parser: Parser = new Parser(
@@ -73,7 +82,7 @@ function unrewriteHtmlAttributes(html: string, base: URL, origin: string): strin
         if (implied) return;
         for (const attribute of pending) {
           if (!attributeKind(name, attribute.name)) continue;
-          const restored = restoreAttribute(name, attribute.name, attribute.value, base, origin);
+          const restored = restoreAttribute(name, attribute.name, attribute.value, base, origin, unsrcdoc);
           if (restored !== attribute.value) {
             output.overwrite(attribute.start, attribute.end, `${attribute.name}="${escapeAttribute(restored)}"`);
           }

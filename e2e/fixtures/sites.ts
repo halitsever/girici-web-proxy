@@ -939,17 +939,18 @@ const srcdocReport = (id: string): string =>
   `<p>${id}</p><script>${PROBE}
 (async () => {
   const hooked = Object.getOwnPropertyDescriptor(window, "__g$") !== undefined;
-  parent.postMessage(JSON.stringify({ id: ${JSON.stringify(id)}, hooked, probe: await girProbe(window) }), "*");
+  const base = document.baseURI;
+  parent.postMessage(JSON.stringify({ id: ${JSON.stringify(id)}, hooked, base, probe: await girProbe(window) }), "*");
 })();</script>`;
 
 const DOORS_SRCDOC = page(
   "Doors srcdoc",
-  `<pre id="results"></pre>
+  `<base href="https://cdn.site-a.test/d/"><pre id="results"></pre><pre id="readback"></pre>
 <script>
   const seen = {};
   addEventListener("message", (event) => {
     const report = JSON.parse(event.data);
-    seen[report.id] = { hooked: report.hooked, probe: report.probe };
+    seen[report.id] = { hooked: report.hooked, base: report.base, probe: report.probe };
     if (Object.keys(seen).length === 3) document.getElementById("results").textContent = JSON.stringify(seen);
   });
   const docs = ${JSON.stringify({ property: srcdocReport("property"), attribute: srcdocReport("attribute") }).replace(/<\//g, "<\\/")};
@@ -959,6 +960,11 @@ const DOORS_SRCDOC = page(
   const byAttribute = document.createElement("iframe");
   byAttribute.setAttribute("srcdoc", docs.attribute);
   document.body.appendChild(byAttribute);
+  document.getElementById("readback").textContent = JSON.stringify({
+    property: byProperty.srcdoc === docs.property,
+    attribute: byAttribute.getAttribute("srcdoc") === docs.attribute,
+    markup: !document.body.innerHTML.includes("data-" + "girici") && !byProperty.outerHTML.includes("data-" + "girici"),
+  });
 </script>
 <iframe srcdoc="${escapeHtml(srcdocReport("parsed"))}"></iframe>`,
 );
@@ -978,6 +984,27 @@ const ATTR_NODE = page(
   byMap.id = "by-map";
   byMap.attributes.setNamedItem(named);
   document.body.appendChild(byMap);
+  const doc = "<p id='doc'>doc</p><script>document.getElementById('doc').textContent = location.hostname<\\/script>";
+  const bySrcdoc = document.createElement("iframe");
+  const written = document.createAttribute("srcdoc");
+  written.value = doc;
+  bySrcdoc.id = "by-srcdoc";
+  bySrcdoc.setAttributeNode(written);
+  document.body.appendChild(bySrcdoc);
+  const moved = document.createElement("iframe");
+  moved.id = "moved-srcdoc";
+  bySrcdoc.removeAttributeNode(written);
+  moved.setAttributeNode(written);
+  document.body.appendChild(moved);
+  const readback = document.createElement("p");
+  readback.id = "readback";
+  readback.textContent = JSON.stringify({
+    node: written.value === doc,
+    attribute: moved.getAttribute("srcdoc") === doc,
+    property: moved.srcdoc === doc,
+    markup: !moved.outerHTML.includes("data-" + "girici"),
+  });
+  document.body.appendChild(readback);
 </script>`,
 );
 

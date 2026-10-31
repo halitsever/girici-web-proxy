@@ -61,9 +61,15 @@ test("runs srcdoc documents under the runtime from their first script", async ({
   await startBroadcast(context);
   await expect(page.locator("#results")).not.toBeEmpty({ timeout: 20_000 });
   const results = JSON.parse((await page.locator("#results").textContent()) ?? "{}");
+  const base = "https://cdn.site-a.test/d/";
   expect(results).toEqual({
-    parsed: { hooked: true, probe: closed },
-    property: { hooked: true, probe: closed },
-    attribute: { hooked: true, probe: closed },
+    parsed: { hooked: true, base, probe: closed },
+    property: { hooked: true, base, probe: closed },
+    attribute: { hooked: true, base, probe: closed },
+  });
+  expect(JSON.parse((await page.locator("#readback").textContent()) ?? "{}")).toEqual({
+    property: true,
+    attribute: true,
+    markup: true,
   });
 });

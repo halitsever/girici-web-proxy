@@ -130,7 +130,10 @@ export function install(
     }
     return fake;
   };
-  const rewrite = createRewriteBridge(ctx, () => clientTag(clientUrl, childConfig()));
+  const rewrite = createRewriteBridge(ctx, (base) => {
+    const child = childConfig();
+    return clientTag(clientUrl, { ...child, inherit: { origin: ctx.origin, base: base.href } });
+  });
   const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
     nativeLocation,
