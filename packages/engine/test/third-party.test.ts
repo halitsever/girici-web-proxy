@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { encodeUrl } from "../src/shared/codec.ts";
+import { MasterSealer } from "../src/shared/sealed-address.ts";
 import { FrameTops, isThirdParty, topSiteFor, type ClientInfo, type TopSiteDeps } from "../src/sw/third-party.ts";
 
 const origin = "https://girici.test";
@@ -165,5 +166,29 @@ describe("topSiteFor", () => {
     expect(await topSiteFor(nav("https://b.test/", "iframe", null, "f1"), undefined, deps())).toBeNull();
     expect(await topSiteFor(sub("https://b.test/p"), nested("f2", "https://b.test/"), deps())).toBeNull();
     expect(isThirdParty(new URL("https://b.test/p"), null)).toBe(true);
+  });
+});
+
+describe("sealed top-level windows", () => {
+  const master = new MasterSealer(new Uint8Array(32).fill(3));
+  const sealedTop: ClientInfo = {
+    id: "t",
+    type: "window",
+    frameType: "top-level",
+    url: origin + master.seal(new URL("https://www.a.test/p")),
+  };
+
+  it("reads the site of a sealed top-level window", async () => {
+    expect(await topSiteFor(sub("https://cdn.a.test/x"), sealedTop, { ...deps(), open: master.open })).toBe(
+      "https://a.test",
+    );
+    expect(await topSiteFor(sub("https://cdn.a.test/x"), sealedTop, deps())).toBeNull();
+  });
+
+  it("gives a frame of a sealed page that page's site", async () => {
+    const d = { ...deps({ clients: [sealedTop] }), open: master.open };
+    expect(await topSiteFor(nav("https://www.a.test/f", "iframe", sealedTop.url, "f1"), undefined, d)).toBe(
+      "https://a.test",
+    );
   });
 });

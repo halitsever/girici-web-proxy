@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MasterSealer } from "../src/shared/sealed-address.ts";
 import { cookieDeliveries } from "../src/sw/cookie-broadcast.ts";
 import type { CookieSnapshot } from "../src/shared/protocol.ts";
 
@@ -52,5 +53,14 @@ describe("cookieDeliveries", () => {
   it("keeps a nested frame of another site out of the tab's site changes", () => {
     const clients = [win("top", "a.test/"), win("frame", "b.test/embed")];
     expect(cookieDeliveries(clients, [snapshot("x", "a.test")], origin).map((d) => d.client.id)).toEqual(["top"]);
+  });
+
+  it("reaches a window on a sealed address", () => {
+    const master = new MasterSealer(new Uint8Array(32).fill(3));
+    const clients = [{ id: "sealed", type: "window", url: origin + master.seal(new URL("https://a.test/p")) }];
+    expect(cookieDeliveries(clients, [snapshot("x", "a.test")], origin, master.open).map((d) => d.client.id)).toEqual([
+      "sealed",
+    ]);
+    expect(cookieDeliveries(clients, [snapshot("x", "a.test")], origin)).toEqual([]);
   });
 });

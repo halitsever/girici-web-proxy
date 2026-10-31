@@ -662,6 +662,21 @@ const echo: Route = (req, res, body) => {
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(page("Echo", `<pre id="echo">${escapeHtml(`${req.method ?? ""}${body ? ` ${body}` : ""}`)}</pre>`));
 };
+const SEALED_PAGE = page(
+  "Sealed",
+  `<h1>Sealed</h1>
+<img id="rel" src="dot.png" alt="">
+<script type="module">import "./mod.js";</script>
+<a href="https://site-b.test/target">site-b</a>`,
+);
+const sealedPage: Route = (_req, res) => {
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "set-cookie": "sealed=1; Path=/; Domain=site-a.test; SameSite=Lax",
+  });
+  res.end(SEALED_PAGE);
+};
+
 const search: Route = (req, res) => {
   const query = new URL(req.url ?? "/", "http://fixture").searchParams.get("q") ?? "";
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -1929,6 +1944,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/nest.js": script(
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
     ),
+    "/sealed/page": sealedPage,
+    "/sealed/dot.png": png,
+    "/sealed/mod.js": script('document.body.dataset.mod = "1";'),
   },
   "www.site-a.test": {
     "/landing": html(page("Landing", "<h1>Landing</h1>")),
@@ -1938,6 +1956,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
+    "/target": html(page("Target", "<h1>Target</h1>")),
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,
