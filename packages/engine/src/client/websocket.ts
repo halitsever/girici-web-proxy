@@ -65,7 +65,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       // An opaque seal of the cookie and Origin; this page never sees the cookie itself.
       let seal: string | null = null;
       try {
-        const response = await nativeFetch(WS_PREP_PATH, {
+        const response = await nativeFetch(ctx.origin + WS_PREP_PATH, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ url: real.href }),

@@ -25,6 +25,7 @@ function setup() {
     },
     indirectEval: (code) => code,
     messageTarget: (value) => value,
+    renew: () => false,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
 }
@@ -68,6 +69,22 @@ describe("createHelpers", () => {
     expect(helpers.D(plain)).toBe(plain);
   });
 
+  it("D ignores proxy traps a page adds to Object.prototype", () => {
+    const { helpers, win } = setup();
+    const proto = Object.prototype as Record<string, unknown>;
+    let trapped: unknown = null;
+    proto.has = (target: object) => {
+      trapped = target;
+      return false;
+    };
+    try {
+      void ("location" in (helpers.D(win) as object));
+    } finally {
+      delete proto.has;
+    }
+    expect(trapped).toBeNull();
+  });
+
   it("routes eval, html and import helpers through the bridge", () => {
     const nativeLocation = { href: "http://proxy.test/~/https/site.test/" };
     const evaled: string[] = [];
@@ -91,6 +108,7 @@ describe("createHelpers", () => {
         return "result";
       },
       messageTarget: (value) => ({ standIn: value }),
+      renew: () => true,
     });
     expect(helpers.E("location")).toBe("/*rw*/location");
     expect(helpers.E(42)).toBe(42);
@@ -100,5 +118,6 @@ describe("createHelpers", () => {
     expect(helpers.H("<a>x</a>")).toBe("/*rw*/<a>x</a>");
     expect(helpers.M("/~/x")).toBe("real:/~/x");
     expect(helpers.P("w")).toEqual({ standIn: "w" });
+    expect(helpers.renew()).toBe(true);
   });
 });

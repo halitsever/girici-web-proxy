@@ -1,29 +1,32 @@
-import { prefixFor } from "./storage.ts";
+import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
-/** Named storage and messaging share our origin, so each real origin's databases, caches, channels and locks are prefixed. */
-export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
-  const prefix = () => prefixFor(ctx.realUrl().origin);
-  const strip = (name: string): string | null => (name.startsWith(prefix()) ? name.slice(prefix().length) : null);
+// Taken at load, so a replaced Function.prototype.call or String never receives a native or the name.
+const apply = Reflect.apply;
+const toText = String;
 
-  prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], prefix);
+/** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
+export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
+  const strip = (name: string): string | null => (name.startsWith(partition()) ? name.slice(partition().length) : null);
+
+  prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], partition);
   wrap(
     win.IDBFactory?.prototype,
     "databases",
     (native) =>
       async function (this: unknown) {
-        const all = (await native.call(this)) as NamedLock[];
+        const all = (await apply(native, this, [])) as NamedLock[];
         return stripLocks(all, strip);
       },
   );
 
-  prefixFirstArg(win.CacheStorage?.prototype, ["open", "has", "delete"], prefix);
+  prefixFirstArg(win.CacheStorage?.prototype, ["open", "has", "delete"], partition);
   wrap(
     win.CacheStorage?.prototype,
     "keys",
     (native) =>
       async function (this: unknown) {
-        const all = (await native.call(this)) as string[];
+        const all = (await apply(native, this, [])) as string[];
         return all.map(strip).filter((name): name is string => name !== null);
       },
   );
@@ -36,7 +39,7 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
         const caches = this as CacheStorage;
         const options = rawOptions as CacheQueryOptions & { cacheName?: string };
         if (options?.cacheName) {
-          return native.call(this, request, { ...options, cacheName: prefix() + options.cacheName });
+          return apply(native, this, [request, { ...options, cacheName: partition() + options.cacheName }]);
         }
         return (async () => {
           for (const name of await caches.keys()) {
@@ -49,23 +52,22 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext): void {
   );
 
   const LockManager = (win as unknown as { LockManager?: { prototype: object } }).LockManager;
-  prefixFirstArg(LockManager?.prototype, ["request"], prefix);
+  prefixFirstArg(LockManager?.prototype, ["request"], partition);
   wrap(
     LockManager?.prototype,
     "query",
     (native) =>
       async function (this: unknown) {
-        const result = (await native.call(this)) as { held?: NamedLock[]; pending?: NamedLock[] };
+        const result = (await apply(native, this, [])) as { held?: NamedLock[]; pending?: NamedLock[] };
         return { ...result, held: stripLocks(result.held, strip), pending: stripLocks(result.pending, strip) };
       },
   );
 
-  const Native = win.BroadcastChannel;
-  if (Native) {
-    win.BroadcastChannel = new Proxy(Native, {
-      construct: (target, args: [string, ...unknown[]]) =>
-        Reflect.construct(target, [prefix() + String(args[0]), ...args.slice(1)]),
-    });
+  if (win.BroadcastChannel) {
+    win.BroadcastChannel = hookConstructor(win.BroadcastChannel, (input) => [
+      partition() + toText(input[0]),
+      ...input.slice(1),
+    ]);
   }
 
   installCookieStore(win, ctx);
@@ -95,7 +97,7 @@ function prefixFirstArg(proto: object | undefined, methods: string[], prefix: ()
       method,
       (native) =>
         function (this: unknown, name: unknown, ...rest: unknown[]) {
-          return native.call(this, prefix() + String(name), ...rest);
+          return apply(native, this, [prefix() + toText(name), ...rest]);
         },
     );
   }

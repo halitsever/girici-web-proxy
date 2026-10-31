@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  BROADCAST_CHANNEL,
+  COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   decodeHeaderList,
   decodeHeaderValue,
@@ -17,7 +17,7 @@ describe("cookie protocol", () => {
       "x-girici-cseq",
       "x-girici-cookie-sync",
     ]);
-    expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, BROADCAST_CHANNEL]).toEqual([1, "/_g/rpc/cookie", "__girici"]);
+    expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, COOKIE_MESSAGE]).toEqual([2, "/_g/rpc/cookie", "girici:cookies"]);
   });
 });
 

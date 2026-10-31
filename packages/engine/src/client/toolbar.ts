@@ -102,7 +102,7 @@ export function installToolbar(win: Realm, ctx: UrlContext, natives: ToolbarNati
     message.textContent = "Clearing…";
     try {
       // The service worker picks the site from this page's address, so the body names none.
-      const response = await natives.fetch(SITE_DATA_RPC_PATH, {
+      const response = await natives.fetch(ctx.origin + SITE_DATA_RPC_PATH, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ v: PROTOCOL_VERSION, op: "clear" }),
@@ -124,7 +124,7 @@ export function installToolbar(win: Realm, ctx: UrlContext, natives: ToolbarNati
   handle.addEventListener("click", expand);
   panel.addEventListener("click", (event) => {
     const action = (event.target as Element | null)?.closest("button")?.dataset.action;
-    if (action === "home") nav.assign("/");
+    if (action === "home") nav.assign(ctx.origin + "/");
     else if (action === "back") win.history.back();
     else if (action === "forward") win.history.forward();
     else if (action === "reload") nav.reload();

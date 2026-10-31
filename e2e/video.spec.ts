@@ -46,6 +46,15 @@ test("plays a proxied video", async ({ page, browserName }) => {
     .toBeGreaterThanOrEqual(1);
 });
 
+test("plays a video opened directly", async ({ page, browserName }) => {
+  // Linux Playwright WebKit (GStreamer) lacks reliable webm/mp4 demux.
+  test.skip(browserName === "webkit", "WebKit on Linux cannot demux webm");
+  await page.goto("/~/https/site-a.test/sample.webm");
+  await expect
+    .poll(() => page.locator("video").evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 15000 })
+    .toBeGreaterThanOrEqual(1);
+});
+
 test("leaves a MediaSource blob url untouched", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/mse");
   await expect(page.locator("#result")).toHaveText(/^blob:/);

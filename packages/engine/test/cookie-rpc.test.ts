@@ -38,6 +38,12 @@ describe("CookieRpc", () => {
     ).toBe("a=1");
   });
 
+  it("asks a runtime from 2.1.2 to reload", async () => {
+    const rpc = new CookieRpc(await service());
+    const res = await rpc.handle(post({ v: 1, seq: 1, cookie: "a=1" }), "c1", page);
+    expect(res.status).toBe(409);
+  });
+
   it("refuses other protocol versions, malformed bodies and unknown pages", async () => {
     const rpc = new CookieRpc(await service());
     expect((await rpc.handle(post({ v: PROTOCOL_VERSION + 1, seq: 1, cookie: "a=1" }), "c", page)).status).toBe(409);

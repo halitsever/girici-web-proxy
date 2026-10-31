@@ -1,5 +1,6 @@
 import { schemefulSite } from "./cookies/policy.ts";
 import { realUrlOf } from "./route.ts";
+import type { WorkerIdentity } from "./worker-identity.ts";
 
 /** The parts of a Client this module reads, so tests can pass plain objects. */
 export interface ClientInfo {
@@ -37,6 +38,8 @@ export interface TopSiteDeps {
   windowClients(): Promise<readonly ClientInfo[]>;
   /** Asks a frame's runtime for the real URL of its top page, which it can read because every frame shares our origin. */
   askTop(clientId: string): Promise<string | null>;
+  /** The page that started a worker, as it announced itself. */
+  workers(clientId: string): Promise<WorkerIdentity | null>;
 }
 
 export interface TopSiteRequest {
@@ -45,6 +48,7 @@ export interface TopSiteRequest {
   target: URL;
   referrer: string | null;
   resultingClientId: string;
+  clientId: string;
 }
 
 const TOP_FRAMES = new Set(["top-level", "auxiliary"]);
@@ -62,27 +66,17 @@ export async function topSiteFor(
     if (top && known && request.resultingClientId) deps.frames.set(request.resultingClientId, top);
     return top;
   }
-  if (!client) return siteOfProxied(request.referrer, deps.origin);
-  if (client.type === "window") {
-    return TOP_FRAMES.has(client.frameType) ? siteOfProxied(client.url, deps.origin) : nestedTop(client, deps);
-  }
-  return workerTop(request, client, deps);
+  if (client?.type === "window") return windowTop(client, deps);
+  const id = client?.id ?? request.clientId;
+  // Chromium sends a nested worker's requests with no client, and those get no site, whatever their referrer says.
+  if (!id) return null;
+  // A worker shares the top site of the page that started it; one no page announced has none.
+  return (await deps.workers(id))?.top ?? null;
 }
 
-/**
- * A worker counts as its own script's site. Page workers live on blob: addresses, so their runtime names the real
- * script, through the referrer of the fetches it makes or when asked; either answer is kept for the worker's
- * other requests, such as XHR.
- */
-async function workerTop(request: TopSiteRequest, client: ClientInfo, deps: TopSiteDeps): Promise<string | null> {
-  const own = siteOfProxied(client.url, deps.origin);
-  if (own) return own;
-  const known = deps.frames.get(client.id);
-  if (known) return known;
-  const named = siteOfProxied(request.referrer, deps.origin);
-  if (!named) return nestedTop(client, deps);
-  deps.frames.set(client.id, named);
-  return named;
+/** The top site of a window client, top-level or nested. */
+export async function windowTop(client: ClientInfo, deps: TopSiteDeps): Promise<string | null> {
+  return TOP_FRAMES.has(client.frameType) ? siteOfProxied(client.url, deps.origin) : nestedTop(client, deps);
 }
 
 /** An unknown top counts as third-party: with blocking on, privacy wins. */

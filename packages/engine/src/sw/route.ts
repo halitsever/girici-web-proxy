@@ -66,9 +66,31 @@ export function realUrlOf(value: string | null, origin: string): URL | null {
 
 /** The parts of a Client the authority checks read. */
 export interface ClientShape {
+  id: string;
   type: string;
   frameType: string;
   url: string;
+}
+
+export interface ClientUrlInput {
+  client: ClientShape | undefined;
+  /** The page that started the client, for workers. */
+  identity: { page: string } | null;
+}
+
+/**
+ * The proxy URL a request is judged from. A worker sits on a blob: address and can send any referrer, so it takes the
+ * page that started it. Chromium sends a nested worker's requests with no client at all; a request without one gets no
+ * URL, whatever its referrer says.
+ */
+export function requestClientUrl(input: ClientUrlInput, origin: string): string | null {
+  if (input.client?.type === "window") return input.client.url;
+  return input.identity ? new URL(encodeUrl(new URL(input.identity.page)), origin).href : null;
+}
+
+/** The clients that real Girici UI navigations produced. */
+export interface UiClientSet {
+  has(id: string): boolean;
 }
 
 const UI_ROUTES = new Set(["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH]);
@@ -76,18 +98,27 @@ const WORKER_ONLY = new Set([POT_PATH, WS_SEAL_PATH]);
 const ADMIN_PATHS = new Set(["/_g/account", "/_g/logout", LOGIN_PATH, SETUP_PATH]);
 const ADMIN_PREFIXES = ["/_g/admin/", "/_g/auth/"];
 
+/** True for an address on one of the UI's own routes. */
+export function isUiRoute(url: URL, origin: string): boolean {
+  return url.origin === origin && UI_ROUTES.has(normalizePath(url.pathname));
+}
+
 /**
- * True for a Girici UI page: a top-level window on one of the UI's own routes. Workers that proxied pages start, this
- * worker's error pages and blob: documents all sit on our origin too, and frames and popups can be scripted.
+ * A top-level window on one of the UI's routes. Workers that proxied pages start, this worker's error pages and blob:
+ * documents all sit on our origin too, and frames and popups can be scripted.
  */
-export function isUiWindow(client: ClientShape | null | undefined, origin: string): boolean {
-  if (!client || client.type !== "window" || client.frameType !== "top-level") return false;
+export function hasUiShape(client: ClientShape, origin: string): boolean {
+  if (client.type !== "window" || client.frameType !== "top-level") return false;
   try {
-    const url = new URL(client.url);
-    return url.origin === origin && UI_ROUTES.has(normalizePath(url.pathname));
+    return isUiRoute(new URL(client.url), origin);
   } catch {
     return false;
   }
+}
+
+/** A proxied page can make its address look like the UI's, so the client must also come from a real UI load. */
+export function isUiWindow(client: ClientShape | null | undefined, origin: string, ui: UiClientSet): boolean {
+  return !!client && hasUiShape(client, origin) && ui.has(client.id);
 }
 
 /** Express routes paths case-insensitively and with a trailing slash, so the checks here compare this form. */
@@ -116,10 +147,11 @@ export function reservedAccess(
   request: ReservedRequest,
   client: ClientShape | null | undefined,
   origin: string,
+  ui: UiClientSet,
 ): "allow" | "deny" {
   if (WORKER_ONLY.has(normalizePath(pathname))) return "deny";
   if (request.mode === "navigate") {
     return request.destination === "document" && request.method === "GET" ? "allow" : "deny";
   }
-  return isUiWindow(client, origin) ? "allow" : "deny";
+  return isUiWindow(client, origin, ui) ? "allow" : "deny";
 }

@@ -10,6 +10,7 @@ export interface HelperEnv {
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
   messageTarget(value: unknown): unknown;
+  renew(): boolean;
 }
 
 export interface GiriciHelpers {
@@ -23,6 +24,8 @@ export interface GiriciHelpers {
   H(html: unknown): string;
   M(url: unknown): string;
   P(value: unknown): unknown;
+  /** The engine script of a document that reuses this window calls this instead of installing again. */
+  renew(): boolean;
 }
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
@@ -53,12 +56,17 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     },
     D: (object) => {
       if (!env.isWindowOrDocument(object)) return object;
-      return new Proxy(object as object, {
-        get: (target, property) => {
-          const value: unknown = Reflect.get(target, property, target);
-          return property === "location" ? L(value) : value;
-        },
-      });
+      // A null prototype keeps traps a page adds to Object.prototype out of this handler.
+      return new Proxy(
+        object as object,
+        {
+          __proto__: null,
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property, target);
+            return property === "location" ? L(value) : value;
+          },
+        } as ProxyHandler<object>,
+      );
     },
     // eval returns non-string arguments untouched, so only code strings are rewritten.
     E: (code) => (typeof code === "string" ? env.rewrite.js(code) : code),
@@ -67,5 +75,6 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     H: (html) => env.rewrite.html(String(html)),
     M: (url) => env.rewrite.metaUrl(String(url)),
     P: (value) => env.messageTarget(value),
+    renew: () => env.renew(),
   };
 }

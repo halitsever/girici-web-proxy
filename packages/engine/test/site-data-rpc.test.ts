@@ -79,24 +79,27 @@ describe("handleSiteData", () => {
 
 describe("callerOf", () => {
   const origin = "https://girici.test";
-  const ui = { type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const ui = { id: "ui-1", type: "window", frameType: "top-level", url: `${origin}/settings` };
+  const known = new Set(["ui-1"]);
 
   it("gives Girici UI authority only to a top-level UI window", () => {
-    expect(callerOf(ui, origin)).toEqual({ kind: "ui" });
-    expect(callerOf({ ...ui, frameType: "nested" }, origin)).toEqual({ kind: "other" });
-    expect(callerOf({ ...ui, frameType: "auxiliary" }, origin)).toEqual({ kind: "other" });
-    expect(callerOf({ type: "worker", frameType: "none", url: `blob:${origin}/1234` }, origin)).toEqual({
-      kind: "other",
-    });
-    expect(callerOf({ ...ui, url: "https://evil.example/settings" }, origin)).toEqual({ kind: "other" });
-    expect(callerOf({ ...ui, url: `blob:${origin}/1` }, origin)).toEqual({ kind: "other" });
-    expect(callerOf(undefined, origin)).toEqual({ kind: "other" });
+    expect(callerOf(ui, origin, known)).toEqual({ kind: "ui" });
+    expect(callerOf({ ...ui, frameType: "nested" }, origin, known)).toEqual({ kind: "other" });
+    expect(callerOf({ ...ui, frameType: "auxiliary" }, origin, known)).toEqual({ kind: "other" });
+    expect(
+      callerOf({ id: "ui-1", type: "worker", frameType: "none", url: `blob:${origin}/1234` }, origin, known),
+    ).toEqual({ kind: "other" });
+    expect(callerOf({ ...ui, url: "https://evil.example/settings" }, origin, known)).toEqual({ kind: "other" });
+    expect(callerOf({ ...ui, url: `blob:${origin}/1` }, origin, known)).toEqual({ kind: "other" });
+    expect(callerOf(undefined, origin, known)).toEqual({ kind: "other" });
+  });
+
+  it("gives nothing to a window on a UI address that no UI navigation produced", () => {
+    expect(callerOf({ ...ui, id: "page-7" }, origin, known)).toEqual({ kind: "other" });
   });
 
   it("names a proxied window by its real address, framed or not", () => {
-    expect(callerOf({ type: "window", frameType: "nested", url: `${origin}/~/https/a.test/x` }, origin)).toEqual({
-      kind: "page",
-      url: new URL("https://a.test/x"),
-    });
+    const framed = { id: "page-1", type: "window", frameType: "nested", url: `${origin}/~/https/a.test/x` };
+    expect(callerOf(framed, origin, known)).toEqual({ kind: "page", url: new URL("https://a.test/x") });
   });
 });

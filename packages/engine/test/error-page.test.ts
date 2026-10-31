@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorPage, errorResponse } from "../src/sw/error-page.ts";
+import { errorPage, errorResponse, forbiddenResponse, SANDBOX_CSP } from "../src/sw/error-page.ts";
 
 describe("errorPage", () => {
   it("explains a rate limit", () => {
@@ -8,6 +8,10 @@ describe("errorPage", () => {
 
   it("names a blocked host", () => {
     expect(errorPage("blocked", new URL("https://bad.test/"))).toContain("bad.test is blocked on this Girici server.");
+  });
+
+  it("explains a runtime that failed verification", () => {
+    expect(errorPage("runtime", null)).toContain("turn that off for /_g/.");
   });
 
   it("blames the upstream proxy", () => {
@@ -20,8 +24,17 @@ describe("errorResponse", () => {
     const res = errorResponse("bad_request", 400, null);
     expect(res.status).toBe(400);
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
-    expect(res.headers.get("content-security-policy")).toMatch(/^sandbox/);
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
     expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(await res.text()).toContain("This address cannot be opened through Girici.");
+  });
+});
+
+describe("forbiddenResponse", () => {
+  it("answers refusals with an inert document", () => {
+    const res = forbiddenResponse();
+    expect(res.status).toBe(403);
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 });

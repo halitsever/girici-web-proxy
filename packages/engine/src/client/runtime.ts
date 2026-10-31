@@ -1,4 +1,5 @@
 import { decodeUrl } from "../shared/codec.ts";
+import { prefixFor } from "../shared/partition.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
@@ -6,8 +7,10 @@ import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { installFrames } from "./frames.ts";
 import { createHelpers } from "./helpers.ts";
-import { createFakeLocation } from "./location.ts";
+import { createInvoker, type Invoke } from "./invoke.ts";
+import { createFakeLocation, type LocationEnv } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
+import { captureCurrentScript, DocumentSteps, engineScriptConfig, type DocumentListeners } from "./renewal.ts";
 import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installScriptExec } from "./script-exec.ts";
 import { installToStringMask } from "./native-mask.ts";
@@ -24,30 +27,46 @@ import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, installToolbar, shouldShowToolbar } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
-import { createUrlContext, type InheritedContext, type Realm } from "./url-context.ts";
+import { createUrlContext, type Realm } from "./url-context.ts";
 
-export function install(win: Realm, config: ClientConfig, inherited?: InheritedContext): void {
-  // A realm is set up once; a child frame that already carries the runtime is left alone.
-  if (Object.getOwnPropertyDescriptor(win, "__g$")) return;
-  const ctx = createUrlContext(win, inherited);
+export function install(win: Realm, config: ClientConfig, clientUrl: string): void {
+  const existing = Object.getOwnPropertyDescriptor(win, "__g$");
+  if (existing) {
+    // The browser reused this window for a new document, which renews the runtime from its own engine script.
+    const helpers = existing.value as { renew?: unknown } | undefined;
+    if (typeof helpers?.renew === "function") helpers.renew();
+    return;
+  }
+  // Compiled before script exec replaces win.Function.
+  const invoke = createInvoker(win);
+  const ctx = createUrlContext(win, config.inherit);
+  const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
+  const container = serviceWorkerContainer(win);
   const nativeLocation = win.location;
+  const ownLocation = locationCalls(nativeLocation, invoke);
+  const steps = new DocumentSteps();
+  const listeners: DocumentListeners[] = [];
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
-  let cookies: CookieBridge = { currentSeq: () => 0, pendingWrites: () => null, applySync: () => {} };
+  let cookies: CookieBridge = {
+    listen: () => {},
+    currentSeq: () => 0,
+    pendingWrites: () => null,
+    applySync: () => {},
+    reset: () => {},
+    snapshot: () => [],
+  };
   const fakeLocation = createFakeLocation(
     {
       real: () => ctx.realUrl(),
       navigate: (url, mode) => {
-        const go = () => (mode === "replace" ? nativeLocation.replace(url) : nativeLocation.assign(url));
         // The next page must already see cookies this one has just written.
         const writes = cookies.pendingWrites();
-        if (writes) void writes.then(go);
-        else go();
+        if (writes) void writes.then(() => ownLocation.navigate(url, mode));
+        else ownLocation.navigate(url, mode);
       },
-      reload: () => nativeLocation.reload(),
-      setHash: (hash) => {
-        nativeLocation.hash = hash;
-      },
+      reload: ownLocation.reload,
+      setHash: ownLocation.setHash,
     },
     win.Location.prototype,
   );
@@ -58,12 +77,8 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     if (!fake) {
       fake = createFakeLocation(
         {
+          ...locationCalls(location, invoke),
           real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
-          navigate: (url, mode) => (mode === "replace" ? location.replace(url) : location.assign(url)),
-          reload: () => location.reload(),
-          setHash: (hash) => {
-            location.hash = hash;
-          },
         },
         win.Location.prototype,
       );
@@ -72,6 +87,7 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     return fake;
   };
   const rewrite = createRewriteBridge(ctx);
+  const partition = () => prefixFor(ctx.realUrl().origin);
   const helpers = createHelpers({
     nativeLocation,
     fakeLocation,
@@ -87,53 +103,86 @@ export function install(win: Realm, config: ClientConfig, inherited?: InheritedC
     toProxy: (raw) => ctx.toProxy(raw),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
-    messageTarget: createMessageSender(win, ctx),
+    messageTarget: createMessageSender(win, ctx, invoke),
+    renew: () => {
+      const next = engineScriptConfig(currentScript(), ctx.origin);
+      if (!next) return false;
+      steps.run(next);
+      return true;
+    },
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted.
   Object.defineProperty(win, "__g$", { value: helpers, enumerable: false });
 
-  const steps: Array<[string, () => void]> = [
+  const installSteps: Array<[string, () => void]> = [
     ["document", () => installDocument(win, ctx)],
     ["attributes", () => installAttributes(win, ctx)],
     ["html sinks", () => installHtmlSinks(win, (html) => helpers.H(html), rewrite.unhtml)],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
-    ["workers", () => installWorkers(win, ctx)],
-    ["cookies", () => (cookies = installCookies(win, ctx, config))],
-    ["navigation", () => installNavigation(win, ctx, cookies)],
-    // Before the mask hides the real service worker container from the page.
-    ["top site", () => installTopSiteResponder(win)],
+    ["workers", () => installWorkers(win, ctx, partition)],
+    ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container)))],
+    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke))],
+    ["top site", () => listeners.push(installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => installStorage(win, ctx)],
-    ["storage isolation", () => installStorageIsolation(win, ctx)],
-    ["messaging", () => installMessaging(win, ctx)],
+    ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
+    ["messaging", () => installMessaging(win, ctx, invoke)],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
-    ["frames", () => installFrames(win, ctx, config, install)],
-    [
-      "toolbar",
-      () => {
-        const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
-        if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: inherited !== undefined, prefs })) return;
-        installToolbar(win, ctx, toolbarNatives, {
-          assign: (path) => nativeLocation.assign(path),
-          reload: () => nativeLocation.reload(),
-        });
-      },
-    ],
+    ["frames", () => installFrames(win, ctx, config, clientUrl, install)],
     // Last, so every hook installed above is registered before tamper checks can read a masked toString.
     ["native mask", () => installToStringMask(win)],
   ];
-  for (const [name, step] of steps) {
+  for (const [name, step] of installSteps) {
     try {
       step();
     } catch (error) {
       // One browser difference should cost one hook, not the whole page.
       console.warn("Girici:", name, error);
     }
+  }
+
+  steps.add("cookies", (next) => cookies.reset(next));
+  steps.add("context", (next) => ctx.inherit(next.inherit));
+  steps.add("listeners", () => {
+    for (const listener of listeners) listener.listen();
+  });
+  steps.add("toolbar", (next) => {
+    const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
+    if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: next.inherit !== undefined, prefs })) return;
+    installToolbar(win, ctx, toolbarNatives, {
+      assign: (path) => ownLocation.navigate(new URL(path, ctx.origin).href, "assign"),
+      reload: ownLocation.reload,
+    });
+  });
+  steps.run(config);
+}
+
+/** Location calls take their source document from the calling realm, so they go through the invoker. */
+function locationCalls(location: Location, invoke: Invoke): Pick<LocationEnv, "navigate" | "reload" | "setHash"> {
+  return {
+    navigate: (url, mode) => invoke(mode === "replace" ? location.replace : location.assign, location, [url]),
+    reload: () => invoke(location.reload, location, []),
+    setHash: (hash) => {
+      // Location members are own properties of each instance, not of Location.prototype.
+      const set = Object.getOwnPropertyDescriptor(location, "hash")?.set;
+      if (set) invoke(set, location, [hash]);
+      else location.hash = hash;
+    },
+  };
+}
+
+/** Taken before the service worker mask hides the real container from the page. */
+function serviceWorkerContainer(win: Realm): ServiceWorkerContainer | null {
+  try {
+    return (win.navigator.serviceWorker as ServiceWorkerContainer | undefined) ?? null;
+  } catch {
+    // Some engines throw here for an opaque origin; such a frame has no worker to answer.
+    return null;
   }
 }
 

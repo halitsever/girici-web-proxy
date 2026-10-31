@@ -59,6 +59,11 @@ subresources. Turning on public access opens the data path to everyone and skips
 - **The operator sees traffic.** The relay terminates TLS at the server.
 - **Bot protection still applies.** A correct proxy can still be blocked by a site's bot checks or by
   blocks on datacenter IP ranges.
+- **Documents Girici does not rewrite run no script.** XHTML, SVG, XML, plain text and untyped bodies that do not
+  start like HTML open as they are, without their scripts.
+- **CDNs and proxies in front of `/_g/`.** Girici checks its page script against a digest before using it. A CDN
+  or proxy that rewrites or minifies JavaScript changes those bytes, so pages stop loading until that is turned off
+  for `/_g/`.
 
 ## Toolbar and site data
 

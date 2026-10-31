@@ -57,4 +57,62 @@ describe("createPartitionedStorage", () => {
     a.setItem("n", 5 as unknown as string);
     expect(a.getItem("n")).toBe("5");
   });
+
+  it("never hands the raw store to a replaced Storage method", () => {
+    const native = new MemoryStorage();
+    native.setItem("__g|https://b.test|secret", "b");
+    const a = createPartitionedStorage(native, "https://a.test");
+    const proto = MemoryStorage.prototype as unknown as Record<string, unknown>;
+    const original = proto.getItem;
+    const seen: unknown[] = [];
+    proto.getItem = function (this: unknown) {
+      seen.push(this);
+      return null;
+    };
+    try {
+      expect(a.getItem("x")).toBeNull();
+      expect((a as unknown as Record<string, unknown>).x).toBeUndefined();
+    } finally {
+      proto.getItem = original;
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it("shows no raw store or foreign key to globals a page replaced before its first access", () => {
+    const native = new MemoryStorage();
+    native.setItem("__g|https://b.test|secret", "b");
+    const seen: unknown[] = [];
+    const getPrototypeOf = Object.getPrototypeOf;
+    const startsWith = String.prototype.startsWith;
+    Object.getPrototypeOf = (value: unknown) => (seen.push(value), getPrototypeOf(value));
+    String.prototype.startsWith = function (this: string, search: string) {
+      seen.push(String(this));
+      return Reflect.apply(startsWith, this, [search]);
+    };
+    try {
+      const a = createPartitionedStorage(native, "https://a.test");
+      a.setItem("own", "1");
+      expect(Object.keys(a)).toEqual(["own"]);
+    } finally {
+      Object.getPrototypeOf = getPrototypeOf;
+      String.prototype.startsWith = startsWith;
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it("ignores proxy traps a page adds to Object.prototype", () => {
+    const a = createPartitionedStorage(new MemoryStorage(), "https://a.test");
+    const proto = Object.prototype as Record<string, unknown>;
+    let trapped = false;
+    proto.getPrototypeOf = () => {
+      trapped = true;
+      return null;
+    };
+    try {
+      Object.getPrototypeOf(a);
+    } finally {
+      delete proto.getPrototypeOf;
+    }
+    expect(trapped).toBe(false);
+  });
 });

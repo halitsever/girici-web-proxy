@@ -4,9 +4,15 @@ import "./assets/main.css";
 import { createApp } from "vue";
 import App from "./App.vue";
 import { syncEnginePrefs } from "./lib/engine-prefs";
+import { reloadThroughEngine } from "./lib/proxy";
 import { loadSettings } from "./lib/settings";
 import router from "./router";
 
-createApp(App).use(router).mount("#app");
-// A worker installed before the last settings change still holds the old choice until it hears this.
-void syncEnginePrefs(loadSettings());
+void reloadThroughEngine()
+  .catch(() => false)
+  .then((reloading) => {
+    if (reloading) return;
+    createApp(App).use(router).mount("#app");
+    // A worker installed before the last settings change still holds the old choice until it hears this.
+    void syncEnginePrefs(loadSettings());
+  });

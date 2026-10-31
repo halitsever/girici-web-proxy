@@ -1,38 +1,58 @@
 import { isReservedPath } from "../shared/codec.ts";
 import {
-  BROADCAST_CHANNEL,
+  COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
   POT_PATH,
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
   TOP_SITE_QUERY,
+  WORKER_RPC_PATH,
   WS_PREP_PATH,
   WS_SEAL_PATH,
+  type CookieSnapshot,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
+import { createIdbClientRecords } from "./client-records.ts";
+import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
-import { errorResponse } from "./error-page.ts";
+import { errorResponse, forbiddenResponse } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { classifyRequest, isGuardedPath, realUrlOf, reservedAccess } from "./route.ts";
+import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
-import { FrameTops, isThirdParty, topSiteFor, type TopSiteDeps } from "./third-party.ts";
+import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
+import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
+import { loadsUi, UiClients } from "./ui-clients.ts";
 import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
+import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
 declare const __GIRICI_WORKER__: string;
+declare const __GIRICI_CLIENT_SHA256__: string;
+declare const __GIRICI_WORKER_SHA256__: string;
 
 const CLIENT_PATH = __GIRICI_CLIENT__;
 const WORKER_PATH = __GIRICI_WORKER__;
 // Each worker keeps the runtime it was built with, so a server update cannot hand old workers a mismatched one.
 const CLIENT_CACHE = `girici:${CLIENT_PATH}`;
-const PRECACHED = new Set([CLIENT_PATH, WORKER_PATH]);
+const runtime = new RuntimeStore(
+  [
+    { path: CLIENT_PATH, sha256: __GIRICI_CLIENT_SHA256__ },
+    { path: WORKER_PATH, sha256: __GIRICI_WORKER_SHA256__ },
+  ],
+  {
+    open: () => caches.open(CLIENT_CACHE),
+    // The cache mode skips the HTTP cache, so a stale or altered copy there cannot pass for the runtime.
+    fetch: (path) => fetch(path, { cache: "reload" }),
+    digest: sha256Hex,
+  },
+);
 const transport = new HttpRelayTransport();
 // Window clients answer at once; only a deadlocked worker ever reaches this.
 const CLIENT_LOOKUP_TIMEOUT = 200;
@@ -41,37 +61,57 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
+const clientRecords = createIdbClientRecords();
+const ui = new UiClients(clientRecords, {
+  liveIds: async () =>
+    new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
+});
+const workers = new WorkerRegistry(clientRecords);
+// A UI tab can message the worker before the activation that records it has finished.
+let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
   frames: new FrameTops(),
   origin: self.location.origin,
   windowClients: () => self.clients.matchAll({ type: "window" }),
   askTop,
+  workers: (clientId) => workers.identityOf(clientId),
 };
-const channel = new BroadcastChannel(BROADCAST_CHANNEL);
-// Other tabs of the same site keep their document.cookie mirrors current through this channel.
-cookies.onChange((changes) => channel.postMessage({ type: "cookies", v: PROTOCOL_VERSION, changes }));
+// Tabs of the same site keep their document.cookie mirrors current through these messages.
+// One chain keeps deliveries in write order.
+let announced: Promise<void> = Promise.resolve();
+cookies.onChange((changes) => {
+  announced = announced.then(() => announceCookies(changes)).catch(() => {});
+});
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CLIENT_CACHE)
-      .then((cache) => cache.addAll([...PRECACHED]))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(runtime.install().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
-        ),
-      )
-      .then(() => self.clients.claim()),
-  );
+  seeding = seedUiClients();
+  const cleanup = caches
+    .keys()
+    .then((keys) =>
+      Promise.all(
+        keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
+      ),
+    );
+  // UI tabs are recorded before claim() hands them to this worker.
+  event.waitUntil(Promise.all([cleanup, seeding]).then(() => self.clients.claim()));
 });
+
+async function seedUiClients(): Promise<void> {
+  try {
+    await ui.ready();
+    await ui.seedOnce(await self.clients.matchAll({ type: "window", includeUncontrolled: true }), self.location.origin);
+  } catch {
+    // An unseeded tab gains UI authority on its next load.
+  }
+}
+
+async function uiReady(): Promise<void> {
+  await Promise.all([ui.ready(), seeding]);
+}
 
 self.addEventListener("message", (event) => {
   // The bootstrap page asks for control at once instead of waiting for the next navigation.
@@ -79,17 +119,36 @@ self.addEventListener("message", (event) => {
     event.waitUntil(self.clients.claim());
     return;
   }
-  const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin);
-  if (!update) return;
-  // The UI waits for this answer before navigating, so the next page already sees the new choice.
   const answer = event.ports[0];
-  event.waitUntil(prefs.set(update).then(() => answer?.postMessage({ ok: true })));
+  event.waitUntil(
+    uiReady().then(async () => {
+      const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
+      if (!update) return;
+      await prefs.set(update);
+      // The UI waits for this answer before navigating, so the next page already sees the new choice.
+      answer?.postMessage({ ok: true });
+    }),
+  );
 });
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
-  if (url.origin === self.location.origin && PRECACHED.has(url.pathname)) {
-    event.respondWith(caches.match(event.request).then((cached) => cached ?? fetch(event.request)));
+  if (loadsUi(event.request, url, self.location.origin)) {
+    if (event.resultingClientId) ui.add(event.resultingClientId);
+    // Answering keeps the page controlled under this ID, which Playwright's Firefox loses when a navigation falls
+    // back. Once the worker answers, a server that is down gets Girici's error page instead of the browser's.
+    event.respondWith(fetch(event.request).catch(() => htmlError("connect", 502, url)));
+    return;
+  }
+  // The query is ignored for serving: a worker's import carries the nonce its page announced.
+  if (url.origin === self.location.origin && runtime.has(url.pathname)) {
+    const nonce = readNonce(url);
+    if (nonce && event.clientId) event.waitUntil(workers.claim(event.clientId, nonce));
+    event.respondWith(runtime.response(url.pathname));
+    return;
+  }
+  if (url.origin === self.location.origin && url.pathname === WORKER_RPC_PATH && event.request.method === "POST") {
+    event.respondWith(handleWorkerRpc(event));
     return;
   }
   if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
@@ -106,9 +165,9 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin === self.location.origin && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
-      // Navigations are judged without a client lookup, so the login and setup screens load at once.
-      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin) === "deny") {
-        event.respondWith(forbidden());
+      // A navigation has no client yet, so only its shape is judged.
+      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin, ui) === "deny") {
+        event.respondWith(forbiddenResponse());
       }
       return;
     }
@@ -119,15 +178,22 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(handle(event));
 });
 
-/** A client that cannot be looked up in time counts as a page, not as the UI. */
-async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
-  const client = await clientOf(event);
-  const decision = reservedAccess(pathname, event.request, client, self.location.origin);
-  return decision === "allow" ? fetch(event.request) : forbidden();
+async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
+  const clients = await self.clients.matchAll({ type: "window" });
+  for (const delivery of cookieDeliveries(clients, changes, self.location.origin)) {
+    delivery.client.postMessage({
+      type: COOKIE_MESSAGE,
+      v: PROTOCOL_VERSION,
+      changes: delivery.changes,
+    });
+  }
 }
 
-function forbidden(): Response {
-  return new Response(null, { status: 403 });
+/** A client that cannot be looked up in time counts as a page, not as the UI. */
+async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
+  const [client] = await Promise.all([clientOf(event), uiReady()]);
+  const decision = reservedAccess(pathname, event.request, client, self.location.origin, ui);
+  return decision === "allow" ? fetch(event.request) : forbiddenResponse();
 }
 
 async function handle(event: FetchEvent): Promise<Response> {
@@ -136,8 +202,9 @@ async function handle(event: FetchEvent): Promise<Response> {
   const navigation = request.mode === "navigate";
   const client = await clientOf(event);
   const referrer = request.referrer || null;
-  // A worker stuck in importScripts cannot be looked up, but its requests still name it as the referrer.
-  const clientUrl = client?.url ?? (navigation ? null : referrer);
+  // A worker stuck in importScripts cannot be looked up, but its binding is known by its client ID.
+  const identity = await identityOf(event, client);
+  const clientUrl = requestClientUrl({ client, identity }, origin);
   const route = classifyRequest({ url: request.url, origin, navigation, clientUrl, referrer });
 
   switch (route.kind) {
@@ -198,6 +265,7 @@ async function handle(event: FetchEvent): Promise<Response> {
           cookies: () => (blocked ? Promise.resolve([]) : cookies.snapshot(route.target)),
           syncCookies: navigation ? undefined : changes,
           cookiesBlocked: blocked,
+          runtimeAvailable: async () => (await runtime.bytes(CLIENT_PATH)) !== null,
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
@@ -218,6 +286,7 @@ async function cookiesBlocked(event: FetchEvent, client: Client | undefined, tar
       target,
       referrer: request.referrer || null,
       resultingClientId: event.resultingClientId ?? "",
+      clientId: event.clientId,
     },
     client,
     topSiteDeps,
@@ -259,7 +328,9 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
 async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await cookies.ready();
   const client = await clientOf(event);
-  const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
+  const identity = await identityOf(event, client);
+  const pageUrl =
+    client?.type === "window" ? realUrlOf(client.url, self.location.origin) : identity && new URL(identity.page);
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -286,18 +357,43 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
 }
 
 async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
-  await cookies.ready();
-  return handleSiteData(event.request, callerOf(await clientOf(event), self.location.origin), cookies);
+  const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady()]);
+  return handleSiteData(event.request, callerOf(client, self.location.origin, ui), cookies);
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   await cookies.ready();
   const client = await clientOf(event);
-  const pageUrl = realUrlOf(client?.url ?? null, self.location.origin);
+  // Only a page's document.cookie calls here, and a worker cannot show which page it acts for.
+  if (client?.type !== "window") return new Response(null, { status: 403 });
+  const pageUrl = realUrlOf(client.url, self.location.origin);
   const blocked = pageUrl ? await cookiesBlocked(event, client, pageUrl) : false;
   const response = await rpc.handle(event.request, event.clientId, pageUrl, { blocked });
   event.waitUntil(forgetClosedClients());
   return response;
+}
+
+/**
+ * A page announces each worker it starts, and a worker its nested ones, before they exist. The caller's own place,
+ * never the body, decides the identity the nonce binds to.
+ */
+async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
+  return answerAnnouncement(event.request, event.clientId, () => callerIdentity(event), workers);
+}
+
+/** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */
+async function callerIdentity(event: FetchEvent): Promise<WorkerIdentity | null> {
+  const client = await clientOf(event);
+  if (client?.type !== "window") return identityOf(event, client);
+  // A blank frame's address is about:blank, so its workers stay unbound.
+  const page = realUrlOf(client.url, self.location.origin);
+  return page && { page: page.href, top: await windowTop(client, topSiteDeps) };
+}
+
+/** The page that started the request's client, when that client is not a window. */
+async function identityOf(event: FetchEvent, client: Client | undefined): Promise<WorkerIdentity | null> {
+  if (client?.type === "window" || !event.clientId) return null;
+  return workers.identityOf(event.clientId);
 }
 
 /** Sequence numbers are kept per tab, so tabs that have closed are dropped once the list grows. */

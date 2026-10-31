@@ -74,6 +74,19 @@ describe("installWebSocket", () => {
     expect(inner.protocols).toEqual(["girici.v1"]);
   });
 
+  it("asks for the seal at an absolute URL", async () => {
+    const urls: unknown[] = [];
+    const win = makeWin();
+    (win as unknown as { fetch: unknown }).fetch = async (url: unknown) => {
+      urls.push(url);
+      return { ok: true, json: async () => ({ seal: "S" }) };
+    };
+    installWebSocket(win, ctx);
+    new win.WebSocket("wss://gateway.discord.gg/");
+    await flush();
+    expect(urls[0]).toBe(`${ctx.origin}/_g/rpc/ws-prep`);
+  });
+
   it("opens only after the server control frame, then delivers text and binary by binaryType", async () => {
     const win = makeWin();
     installWebSocket(win, ctx);

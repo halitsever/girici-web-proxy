@@ -233,6 +233,120 @@ const COOKIE_API_PAGE = page(
 </script>`,
 );
 
+const OLD_CHANNEL = page(
+  "Old channel",
+  `<p id="heard">waiting</p><button id="judge">judge</button>
+<script>
+  const Channel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
+  const old = new Channel("__girici");
+  const heard = document.getElementById("heard");
+  old.onmessage = () => { heard.textContent = "yes"; };
+  document.getElementById("judge").onclick = () => {
+    setTimeout(() => { if (heard.textContent !== "yes") heard.textContent = "no"; }, 2000);
+  };
+</script>`,
+);
+
+/** Source of `girProbe(scope)`, which reports whether a realm reaches Girici's own storage or another site's channel. */
+export const PROBE = `async function girProbe(scope) {
+  const jar = await new Promise((resolve) => {
+    const request = scope.indexedDB.open("__girici");
+    // Aborting the upgrade stops the probe from creating a database it did not find.
+    request.onupgradeneeded = () => request.transaction.abort();
+    request.onsuccess = () => {
+      const found = request.result.objectStoreNames.contains("cookies");
+      request.result.close();
+      resolve(found);
+    };
+    request.onerror = (event) => {
+      event.preventDefault();
+      resolve(false);
+    };
+  });
+  const engineCaches = (await scope.caches.keys()).some((name) => name.startsWith("girici:"));
+  const heard = await new Promise((resolve) => {
+    const channel = new scope.BroadcastChannel("__g|https://site-b.test|probe");
+    const timer = setTimeout(() => {
+      channel.close();
+      resolve(false);
+    }, 1500);
+    channel.onmessage = () => {
+      clearTimeout(timer);
+      channel.close();
+      resolve(true);
+    };
+  });
+  return { jar, engineCaches, heard };
+}`;
+
+const PROBE_WORKER = `${PROBE}\ngirProbe(self).then((result) => postMessage(result));`;
+
+const DOORS_WORKERS = page(
+  "Doors workers",
+  `<button id="start">start</button><pre id="results"></pre>
+<script>
+  const probeSource = ${JSON.stringify(PROBE_WORKER)};
+  const probeUrl = () => URL.createObjectURL(new Blob([probeSource], { type: "text/javascript" }));
+  // Each tamper is undone at once, so the engine's later calls see the real prototypes.
+  const viaTrap = () => {
+    let leaked = null;
+    Object.prototype.get = function (target, key, receiver) {
+      leaked = target;
+      return Reflect.get(target, key, receiver);
+    };
+    try { void Worker.name; } finally { delete Object.prototype.get; }
+    return leaked || Worker;
+  };
+  const viaCall = () => {
+    let leaked = null;
+    const call = Function.prototype.call;
+    Function.prototype.call = function (self, ...rest) {
+      if (typeof self === "function" && self !== Worker) leaked = self;
+      return Reflect.apply(this, self, rest);
+    };
+    try { Worker.toString(); } finally { Function.prototype.call = call; }
+    return leaked || Worker;
+  };
+  const viaParts = () => {
+    const iterate = Array.prototype[Symbol.iterator];
+    Array.prototype[Symbol.iterator] = function () {
+      const swap = typeof this[0] === "string" && this[0].includes("__giriciRuntime");
+      return swap ? [probeSource].values() : iterate.call(this);
+    };
+    try { return new Worker("/probe-worker.js"); } finally { Array.prototype[Symbol.iterator] = iterate; }
+  };
+  const answer = (worker) =>
+    new Promise((resolve) => {
+      worker.onmessage = (event) => resolve(event.data);
+      worker.onerror = () => resolve("error");
+    });
+  const listen = (channel) =>
+    new Promise((resolve) => {
+      channel.onmessage = () => resolve(true);
+      setTimeout(() => resolve(false), 1500);
+    });
+  document.getElementById("start").onclick = async () => {
+    const worker = new Worker(probeUrl());
+    const LeakedWorker = Object.getPrototypeOf(worker).constructor;
+    const LeakedChannel = Object.getPrototypeOf(new BroadcastChannel("x")).constructor;
+    const TrapWorker = viaTrap();
+    const CallWorker = viaCall();
+    const [own, nested, leakedWorker, leakedChannel, trapWorker, callWorker, partsWorker] = await Promise.all([
+      answer(worker),
+      answer(new Worker("/nest.js")),
+      answer(new LeakedWorker(probeUrl())),
+      listen(new LeakedChannel("__g|https://site-b.test|probe")),
+      answer(new TrapWorker(probeUrl())),
+      answer(new CallWorker(probeUrl())),
+      answer(viaParts()),
+    ]);
+    document.getElementById("results").textContent = JSON.stringify({
+      worker: own, nested, leakedWorker, leakedChannel, trapWorker, callWorker, partsWorker,
+    });
+  };
+</script>`,
+);
+
 const api: Route = (req, res) => {
   res.writeHead(200, { "content-type": "application/json" });
   res.end(JSON.stringify({ method: req.method, origin: req.headers.origin ?? null }));
@@ -467,6 +581,28 @@ const PM_SOURCE_CHILD = page(
 </script>`,
 );
 
+// Reading contentWindow installs the runtime into the blank frame before the page gives the frame its src.
+const REUSE = page(
+  "Reuse",
+  `<pre id="results"></pre>
+<script>
+  document.cookie = "a=1; path=/";
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const blank = frame.contentWindow;
+  window.addEventListener("message", (event) => {
+    const out = { ...event.data, fromChild: event.source === frame.contentWindow };
+    document.getElementById("results").textContent = JSON.stringify(out);
+  });
+  frame.src = "https://site-b.test/reuse-child";
+</script>`,
+);
+
+const REUSE_CHILD = page(
+  "Reuse child",
+  `<script>parent.postMessage({ cookie: document.cookie, href: location.href }, "*");</script>`,
+);
+
 // Workers come from a blank frame's constructor, the way anti-tamper code reaches for untouched natives.
 const FRAME_WORKER = page(
   "Frame worker",
@@ -544,6 +680,39 @@ const RAW_ATTR = page(
 </script>`,
 );
 
+const PLAIN_BODY = '<script>parent.postMessage("ran", "*")</script>';
+const SVG_BODY = `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-ran", "1"); parent.postMessage("ran", "*")</script></svg>`;
+const XML_BODY = `<html xmlns="http://www.w3.org/1999/xhtml"><body><script>parent.postMessage("ran", "*")</script></body></html>`;
+
+const INERT = page(
+  "Inert",
+  `<pre id="results"></pre>
+<iframe src="/plain.txt"></iframe>
+<iframe src="/doc.svg"></iframe>
+<iframe src="/untyped"></iframe>
+<iframe src="/data.xml"></iframe>
+<object data="/doc.svg" type="image/svg+xml"></object>
+<embed src="/untyped">
+<script>
+  let ran = 0;
+  window.addEventListener("message", (event) => { if (event.data === "ran") ran++; });
+  setTimeout(() => {
+    const readable = [];
+    for (let i = 0; i < frames.length; i++) {
+      try { readable.push(Boolean(frames[i].document)); } catch { readable.push(false); }
+    }
+    document.getElementById("results").textContent = JSON.stringify({ ran, readable });
+  }, 1500);
+</script>`,
+);
+
+const typed =
+  (type: string | null, body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, type ? { "content-type": type } : {});
+    res.end(body);
+  };
+
 const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
@@ -591,6 +760,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/runtime": html(RUNTIME),
     "/cookie/login": login,
     "/cookie/whoami": whoami,
+    "/ui-link": html(page("UI link", '<a id="settings" href="/settings">settings</a>')),
+    "/settings": html(page("Site settings", "<p>site settings</p>")),
     "/third-party": html(
       page(
         "Third party",
@@ -603,6 +774,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/api": api,
     "/sse": sse,
     "/cookie/echo": cookieEcho,
+    "/old-channel": html(OLD_CHANNEL),
     "/cookie/script": html(COOKIE_SCRIPT),
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),
@@ -629,6 +801,22 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
+    "/reuse": html(REUSE),
+    "/plain.txt": typed("text/plain", PLAIN_BODY),
+    "/doc.svg": typed("image/svg+xml", SVG_BODY),
+    "/untyped": typed(null, PLAIN_BODY),
+    "/untyped-page": typed(
+      null,
+      `\uFEFF\n<!DOCTYPE html><title>Untyped</title><p id="where"></p>
+<script>document.getElementById("where").textContent = location.href;</script>`,
+    ),
+    "/cyrillic.txt": (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain; charset=windows-1251" });
+      // "Привет" in windows-1251.
+      res.end(Buffer.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]));
+    },
+    "/data.xml": typed("application/xml", XML_BODY),
+    "/inert": html(INERT),
     "/frame-worker": html(FRAME_WORKER),
     "/sri": html(SRI),
     "/sri-a.js": script(SRI_A),
@@ -699,6 +887,51 @@ const ROUTES: Record<string, Record<string, Route>> = {
       'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));',
     ),
     "/worker-module.js": script("postMessage(self.location.href);"),
+    "/worker-kinds": html(
+      page(
+        "Worker kinds",
+        `<p id="module"></p><p id="blob"></p><p id="nested"></p>
+<script>
+  const show = (id, worker) => {
+    worker.onmessage = (e) => { document.getElementById(id).textContent = e.data || "none"; };
+    worker.onerror = () => { document.getElementById(id).textContent = "error"; };
+  };
+  const echo = 'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));';
+  show("module", new Worker("/worker-cookie.js", { type: "module" }));
+  show("blob", new Worker(URL.createObjectURL(new Blob([echo], { type: "text/javascript" }))));
+  show("nested", new Worker("/worker-nest-cookie.js"));
+</script>`,
+      ),
+    ),
+    "/worker-nest-cookie.js": script(
+      'const inner = new Worker("/worker-cookie.js");\ninner.onmessage = (e) => postMessage(e.data);\ninner.onerror = () => postMessage("error");',
+    ),
+    "/worker-forge": html(
+      page(
+        "Worker forge",
+        `<p id="worker"></p>
+<script>
+  const query = new URLSearchParams(location.search);
+  const proxy = query.get("proxy");
+  const blobOf = (code) => URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  const forge =
+    'fetch("https://site-b.test/cookie/echo", { credentials: "include", referrer: ' +
+    JSON.stringify(proxy + "/~/https/site-b.test/") +
+    ' }).then((r) => r.text()).then((t) => postMessage(t));';
+  // The nested form starts the forging worker from inside another worker.
+  const code = query.has("nested")
+    ? 'const inner = new Worker(' + JSON.stringify(blobOf(forge)) + '); inner.onmessage = (e) => postMessage(e.data);'
+    : forge;
+  const w = new Worker(blobOf(code));
+  w.onmessage = (e) => { document.getElementById("worker").textContent = e.data || "none"; };
+</script>`,
+      ),
+    ),
+    "/doors-workers": html(DOORS_WORKERS),
+    "/probe-worker.js": script(PROBE_WORKER),
+    "/nest.js": script(
+      'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
+    ),
   },
   "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
@@ -719,6 +952,13 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/idb-store": html(IDB_STORE),
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
+    "/reuse-child": html(REUSE_CHILD),
+    "/broadcast": html(
+      page(
+        "Broadcast",
+        `<script>const channel = new BroadcastChannel("probe"); setInterval(() => channel.postMessage("x"), 200);</script>`,
+      ),
+    ),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

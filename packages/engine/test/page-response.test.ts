@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STANDALONE_SHIM } from "../src/rewrite/js.ts";
+import { SANDBOX_CSP } from "../src/sw/error-page.ts";
 import { buildPageResponse, type PageContext } from "../src/sw/page-response.ts";
 import type { TransportResult } from "../src/sw/transport.ts";
 
@@ -25,6 +26,141 @@ function context(overrides: Partial<PageContext> = {}): PageContext {
 }
 
 describe("buildPageResponse", () => {
+  it("refuses to serve a page when its runtime cannot be verified", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      context({ navigation: true, destination: "document", runtimeAvailable: async () => false }),
+    );
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("could not verify its page script");
+  });
+
+  it("serves an untyped navigation inert", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-security-policy", "default-src *"]], "<script>x()</script>"),
+      context({ navigation: true, destination: "iframe" }),
+    );
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("serves an untyped or invalid-typed navigation as plain text", async () => {
+    for (const headers of [[], [["content-type", "foo"]], [["content-type", "text/"]]] as Array<
+      Array<[string, string]>
+    >) {
+      const res = await buildPageResponse(upstream(headers), context({ navigation: true, destination: "document" }));
+      expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    }
+  });
+
+  it("rewrites an untyped navigation whose body starts as HTML", async () => {
+    for (const body of ["<!DOCTYPE html><p>x</p>", "\uFEFF\n  <html><p>x</p></html>"]) {
+      const res = await buildPageResponse(upstream([], body), context({ navigation: true, destination: "document" }));
+      expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(res.headers.get("content-security-policy")).toBeNull();
+      expect(await res.text()).toContain("/_g/client.test.js");
+    }
+  });
+
+  it("keeps an untyped navigation that is not HTML as sandboxed text", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-length", "15"]], "hello <html> x."),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(res.headers.get("content-length")).toBe("15");
+    expect(await res.text()).toBe("hello <html> x.");
+  });
+
+  it("starts an untyped download before its last byte arrives", async () => {
+    let more!: ReadableStreamDefaultController<Uint8Array>;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        more = controller;
+        controller.enqueue(new Uint8Array(2000).fill(120));
+      },
+    });
+    const result: TransportResult = { ok: true, response: { status: 200, headers: [], setCookies: [], body } };
+    const res = await buildPageResponse(result, context({ navigation: true, destination: "document" }));
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    more.enqueue(new Uint8Array([121]));
+    more.close();
+    const text = await res.text();
+    expect(text.length).toBe(2001);
+    expect(text.endsWith("xy")).toBe(true);
+  });
+
+  it("leaves an untyped subresource that looks like HTML untouched", async () => {
+    const res = await buildPageResponse(upstream([], "<html><p>x</p>"), context({ destination: "" }));
+    expect(await res.text()).toBe("<html><p>x</p>");
+  });
+
+  it("keeps the charset of a sandboxed text navigation", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/plain; charset=windows-1251; foo=bar"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=windows-1251");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+  });
+
+  it("serves a comma-joined html type as rewritten html", async () => {
+    const res = await buildPageResponse(
+      upstream(
+        [
+          ["content-type", "video/mp4"],
+          ["content-type", "text/html"],
+        ],
+        "<p>x</p>",
+      ),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("sends an exempt navigation with only the type that exempted it", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", 'text/html; x="a, video/mp4; "']]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("video/mp4");
+    expect(res.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("sends a sandboxed navigation with the single parsed type", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/plain; charset=x, text/xml"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("content-type")).toBe("text/xml");
+    expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+  });
+
+  it("leaves subresources and media without a sandbox", async () => {
+    const image = await buildPageResponse(
+      upstream([["content-type", "image/svg+xml"]]),
+      context({ destination: "image" }),
+    );
+    expect(image.headers.get("content-security-policy")).toBeNull();
+    const video = await buildPageResponse(
+      upstream([["content-type", "video/mp4"]]),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(video.headers.get("content-security-policy")).toBeNull();
+  });
+
+  it("injects an absolute runtime URL and the page's site", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      context({ navigation: true, destination: "document", target: new URL("https://www.site-a.test/p") }),
+    );
+    const html = await res.text();
+    expect(html).toContain(`<script src="${origin}/_g/client.test.js"`);
+    expect(html).toContain("&quot;site&quot;:&quot;https://site-a.test&quot;");
+  });
+
   it("rebuilds the upstream response from the envelope", async () => {
     const res = await buildPageResponse(
       upstream(
@@ -145,7 +281,7 @@ describe("buildPageResponse", () => {
     );
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(await res.text()).toBe(
-      '<!doctype html><head><script src="/_g/client.test.js" data-girici="{&quot;v&quot;:1,&quot;cookies&quot;:[]}"></script><title>t</title><a href="/~/https/site-b.test/">b</a>',
+      '<!doctype html><head><script src="http://127.0.0.1:41000/_g/client.test.js" data-girici="{&quot;v&quot;:2,&quot;cookies&quot;:[],&quot;site&quot;:&quot;https://site-a.test&quot;}"></script><title>t</title><a href="/~/https/site-b.test/">b</a>',
     );
   });
 

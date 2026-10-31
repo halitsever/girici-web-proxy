@@ -1,15 +1,6 @@
 import { PROTOCOL_VERSION } from "../shared/protocol.ts";
 import type { BodyKind } from "./body.ts";
 
-/** The Cache API surface the rewrite cache needs, so a fake stands in for it under test. */
-export interface CacheLike {
-  match(request: string): Promise<Response | undefined>;
-  put(request: string, response: Response): Promise<void>;
-}
-
-/** The named cache holding rewritten bodies; dropped on engine updates by the activate cleanup. */
-export const REWRITE_CACHE = "girici:rw";
-
 export interface Validators {
   etag: string | null;
   lastModified: string | null;
@@ -25,11 +16,42 @@ export function cacheKey(target: URL, kind: BodyKind, validators: Validators): s
   return `https://girici.invalid/rw/${PROTOCOL_VERSION}/${kind}/${encodeURIComponent(`${target.href}|${validator}`)}`;
 }
 
-export async function readRewritten(key: string, cache: CacheLike): Promise<string | null> {
-  const response = await cache.match(key);
-  return response ? response.text() : null;
-}
+const DEFAULT_MAX_BYTES = 24 * 1024 * 1024;
 
-export async function writeRewritten(key: string, text: string, cache: CacheLike): Promise<void> {
-  await cache.put(key, new Response(text));
+/** Rewrites live in memory only, so nothing the page could write into a cache is ever served as a script. */
+export class RewriteMemo {
+  readonly #entries = new Map<string, string>();
+  readonly #maxBytes: number;
+  #bytes = 0;
+
+  constructor(maxBytes = DEFAULT_MAX_BYTES) {
+    this.#maxBytes = maxBytes;
+  }
+
+  get(key: string): string | null {
+    const text = this.#entries.get(key);
+    if (text === undefined) return null;
+    this.#entries.delete(key);
+    this.#entries.set(key, text);
+    return text;
+  }
+
+  set(key: string, text: string): void {
+    const size = 2 * text.length;
+    if (size > this.#maxBytes) return;
+    this.#drop(key);
+    this.#entries.set(key, text);
+    this.#bytes += size;
+    for (const oldest of this.#entries.keys()) {
+      if (this.#bytes <= this.#maxBytes) break;
+      this.#drop(oldest);
+    }
+  }
+
+  #drop(key: string): void {
+    const text = this.#entries.get(key);
+    if (text === undefined) return;
+    this.#entries.delete(key);
+    this.#bytes -= 2 * text.length;
+  }
 }

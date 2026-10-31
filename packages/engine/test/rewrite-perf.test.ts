@@ -1,17 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { rewriteJs } from "../src/rewrite/js.ts";
-import { cacheKey, readRewritten, writeRewritten, type CacheLike } from "../src/sw/rewrite-cache.ts";
-
-class FakeCache implements CacheLike {
-  readonly store = new Map<string, Response>();
-  match(request: string): Promise<Response | undefined> {
-    return Promise.resolve(this.store.get(request)?.clone());
-  }
-  put(request: string, response: Response): Promise<void> {
-    this.store.set(request, response);
-    return Promise.resolve();
-  }
-}
+import { cacheKey, RewriteMemo } from "../src/sw/rewrite-cache.ts";
 
 describe("rewrite performance", () => {
   it("rewrites a base.js-sized bundle within budget", () => {
@@ -25,17 +14,17 @@ describe("rewrite performance", () => {
     expect(output).toContain("__g$.L(location)");
   });
 
-  it("serves the second rewrite from the cache without re-rewriting", async () => {
-    const cache = new FakeCache();
+  it("serves the second rewrite from the memo without re-rewriting", () => {
+    const memo = new RewriteMemo();
     const key = cacheKey(new URL("https://s.test/base.js"), "js", { etag: 'W/"1"', lastModified: null, length: "100" });
     let rewrites = 0;
     const rewrite = () => {
       rewrites++;
       return "rewritten";
     };
-    const cached = (await readRewritten(key as string, cache)) ?? (() => rewrite())();
-    if ((await readRewritten(key as string, cache)) === null) await writeRewritten(key as string, cached, cache);
-    const second = (await readRewritten(key as string, cache)) ?? rewrite();
+    const first = memo.get(key as string) ?? rewrite();
+    memo.set(key as string, first);
+    const second = memo.get(key as string) ?? rewrite();
     expect(second).toBe("rewritten");
     expect(rewrites).toBe(1);
   });

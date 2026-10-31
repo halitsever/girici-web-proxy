@@ -1,4 +1,4 @@
-import type { ClientConfig } from "../shared/protocol.ts";
+import type { ClientConfig } from "./protocol.ts";
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;", "'": "&#39;" };
 

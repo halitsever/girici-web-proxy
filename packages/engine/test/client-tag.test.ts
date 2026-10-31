@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientTag } from "../src/sw/client-tag.ts";
+import { clientTag } from "../src/shared/client-tag.ts";
 
 describe("clientTag", () => {
   it("embeds the config as an escaped attribute", () => {
