@@ -12,10 +12,10 @@ describe("PrefsService", () => {
     const saved: unknown[] = [];
     const prefs = new PrefsService({ load: async () => undefined, save: async (value) => void saved.push(value) });
     await prefs.ready();
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: true });
+    expect(prefs.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: false, instanceSeal: false });
     await prefs.set({ blockThirdPartyCookies: false });
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: false });
-    expect(saved).toEqual([{ blockThirdPartyCookies: false }]);
+    expect(prefs.current()).toEqual({ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false });
+    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false }]);
   });
 
   it("loads a stored choice and survives a broken store", async () => {
@@ -35,9 +35,29 @@ describe("PrefsService", () => {
     await broken.set({ blockThirdPartyCookies: false });
     expect(broken.current().blockThirdPartyCookies).toBe(false);
   });
+
+  it("loads stored sealing switches and drops malformed ones", async () => {
+    const stored = new PrefsService({
+      load: async () => ({ blockThirdPartyCookies: true, sealAddresses: true, instanceSeal: "yes" }),
+      save: async () => {},
+    });
+    await stored.ready();
+    expect(stored.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: true, instanceSeal: false });
+  });
 });
 
 describe("readPrefsMessage", () => {
+  it("keeps the sealing switches the UI sends", () => {
+    expect(readPrefsMessage({ ...valid, sealAddresses: true, instanceSeal: "yes" }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+      sealAddresses: true,
+    });
+    expect(readPrefsMessage({ ...valid, instanceSeal: true }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+      instanceSeal: true,
+    });
+  });
+
   it("takes the setting only from the Girici UI", () => {
     expect(readPrefsMessage(valid, ui, origin, known)).toEqual({ blockThirdPartyCookies: false });
     expect(
@@ -57,6 +77,12 @@ describe("readPrefsMessage", () => {
     expect(readPrefsMessage(valid, null, origin, known)).toBeNull();
     expect(readPrefsMessage({ ...valid, v: 0 }, ui, origin, known)).toBeNull();
     expect(readPrefsMessage({ ...valid, blockThirdPartyCookies: "no" }, ui, origin, known)).toBeNull();
+  });
+
+  it("lets the UI turn the instance switch on but never off, which only the server's answer does", () => {
+    expect(readPrefsMessage({ ...valid, instanceSeal: false }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+    });
   });
 
   it("ignores a window on a UI address that no UI navigation produced", () => {

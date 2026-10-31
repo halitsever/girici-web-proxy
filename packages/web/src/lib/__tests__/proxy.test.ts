@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reloadThroughEngine, serviceWorkerSupport, type ReloadEnv } from "../proxy";
+import { openProxied, reloadThroughEngine, serviceWorkerSupport, type ReloadEnv } from "../proxy";
 
 describe("serviceWorkerSupport", () => {
   it.each([
@@ -108,5 +108,20 @@ describe("reloadThroughEngine", () => {
     await reloadThroughEngine(env);
     await gainControl();
     expect(reloads()).toBe(0);
+  });
+});
+
+describe("openProxied", () => {
+  it("opens the address the engine seals", async () => {
+    const steps: string[] = [];
+    await openProxied("/~/https/a.test/", {
+      start: async () => void steps.push("start"),
+      seal: async (path) => {
+        steps.push(`seal ${path}`);
+        return "/~/x/L.B";
+      },
+      assign: (url) => void steps.push(`assign ${url}`),
+    });
+    expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
   });
 });

@@ -67,7 +67,7 @@ export function installNavigation(
           "SecurityError",
         );
       }
-      return apply(native, this, [data, unused, encodeUrl(target)]);
+      return apply(native, this, [data, unused, ctx.documentAddress(target)]);
     };
   }
 
@@ -205,7 +205,7 @@ export function installNavigation(
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
       // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
-      void writes.then(() => invoke(win.location.assign, win.location, [ctx.toProxy(url)]));
+      void writes.then(() => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
     },
     false,
   ]);
@@ -276,6 +276,12 @@ function resolve(raw: string | undefined, ctx: UrlContext): string | null {
   } catch {
     return null;
   }
+}
+
+/** The address a link this window follows loads at, sealed for its own origin while the page holds a seal. */
+function addressOf(url: string, ctx: UrlContext): string {
+  const real = newUrl(ctx.fromProxy(url));
+  return originOf(real) === ctx.origin ? ctx.toProxy(url) : ctx.documentAddress(real);
 }
 
 /** A submitter that redirects the form elsewhere is left to the browser rather than replayed without its overrides. */

@@ -1,5 +1,6 @@
 import { PROXY_PREFIX } from "../shared/codec.ts";
 import { lowerCase, setHas, startsWith, trim } from "../shared/primordials.ts";
+import type { OpenSealed } from "../shared/sealed-address.ts";
 import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
@@ -25,12 +26,13 @@ export function rewriteAttribute(
   origin: string,
   html?: (markup: string) => string,
   owner?: string,
+  opaque?: boolean,
 ): string {
   switch (attributeKind(element, name)) {
     case "url":
-      return rewriteUrl(value, base, origin, owner);
+      return rewriteUrl(value, base, origin, owner, opaque);
     case "srcset":
-      return rewriteSrcset(value, (url) => rewriteUrl(url, base, origin));
+      return rewriteSrcset(value, (url) => rewriteUrl(url, base, origin, undefined, opaque));
     // The proxy rewrites scripts and styles, so their hash no longer matches; an empty value turns the check off.
     case "integrity":
       return "";
@@ -49,11 +51,12 @@ export function restoreAttribute(
   base: URL,
   origin: string,
   unhtml?: (markup: string) => string,
+  open?: OpenSealed,
 ): string {
   const restore = (url: string) => {
     const trimmed = trim(url);
     return startsWith(trimmed, PROXY_PREFIX) || startsWith(trimmed, `${origin}/`) || startsWith(trimmed, WRAPPED_SCRIPT)
-      ? unrewriteUrl(trimmed, base, origin)
+      ? unrewriteUrl(trimmed, base, origin, open)
       : url;
   };
   switch (attributeKind(element, name)) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeUrl } from "../src/shared/codec.ts";
+import { createOriginSealer, MasterSealer } from "../src/shared/sealed-address.ts";
 import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
@@ -161,4 +162,23 @@ describe("with built-ins the page replaced", () => {
       expect(results).toEqual(["/~/https/other.test/a?b=1", "https://other.test/a?b=1", "https://other.test/a"]);
     });
   }
+});
+
+describe("documents with a sealed address", () => {
+  const base = new URL("https://a.test/dir/page");
+  it("writes relative URLs as absolute proxy URLs", () => {
+    expect(rewriteUrl("img/x.png", base, origin, undefined, true)).toBe("/~/https/a.test/dir/img/x.png");
+    expect(rewriteUrl("../up", base, origin, undefined, true)).toBe("/~/https/a.test/up");
+    expect(rewriteUrl("img/x.png", base, origin)).toBe("img/x.png");
+  });
+  it("leaves hash and query links relative to the document", () => {
+    for (const value of ["#top", "?page=2", ""]) expect(rewriteUrl(value, base, origin, undefined, true)).toBe(value);
+  });
+  it("reads a sealed address of the page's own origin back as its real URL", () => {
+    const own = createOriginSealer(new MasterSealer(new Uint8Array(32).fill(1)).originSeal("https://a.test"))!;
+    const native = `${origin}${own.seal(new URL("https://a.test/dir/page"))}?page=2#x`;
+    expect(unrewriteUrl(native, base, origin, own.open)).toBe("https://a.test/dir/page?page=2#x");
+    const other = new MasterSealer(new Uint8Array(32).fill(2)).seal(new URL("https://a.test/dir/page"));
+    expect(unrewriteUrl(`${origin}${other}`, base, origin, own.open)).toBe(`https://a.test${other}`);
+  });
 });

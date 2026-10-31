@@ -11,16 +11,17 @@ import {
   WS_PREP_PATH,
   WS_SEAL_PATH,
   type CookieSnapshot,
-  type RelayErrorCode,
 } from "../shared/protocol.ts";
 import { createIdbClientRecords } from "./client-records.ts";
 import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
-import { errorResponse, forbiddenResponse } from "./error-page.ts";
+import { errorResponse, forbiddenResponse, type ErrorPageCode } from "./error-page.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess } from "./route.ts";
+import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
+import { isSealedPath } from "../shared/sealed-address.ts";
+import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess, type Route } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
@@ -61,6 +62,10 @@ const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
+const sealing = new Sealing(createIdbKeyStore(), prefs);
+// The admin's switch reaches open tabs within a minute without a UI tab telling the worker.
+const INSTANCE_SEAL_INTERVAL = 60_000;
+let instanceSealCheckedAt = -Infinity;
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
@@ -75,6 +80,7 @@ const topSiteDeps: TopSiteDeps = {
   windowClients: () => self.clients.matchAll({ type: "window" }),
   askTop,
   workers: (clientId) => workers.identityOf(clientId),
+  open: sealing.open,
 };
 // Tabs of the same site keep their document.cookie mirrors current through these messages.
 // One chain keeps deliveries in write order.
@@ -89,6 +95,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   seeding = seedUiClients();
+  refreshInstanceSeal(true);
   const cleanup = caches
     .keys()
     .then((keys) =>
@@ -109,6 +116,16 @@ async function seedUiClients(): Promise<void> {
   }
 }
 
+/** Fire and forget; a failed check keeps the switch the worker last heard. */
+function refreshInstanceSeal(force = false): void {
+  const now = Date.now();
+  if (!force && now - instanceSealCheckedAt < INSTANCE_SEAL_INTERVAL) return;
+  instanceSealCheckedAt = now;
+  void readInstanceSeal(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" })).then(
+    (instanceSeal) => (instanceSeal === null ? undefined : prefs.set({ instanceSeal })),
+  );
+}
+
 async function uiReady(): Promise<void> {
   await Promise.all([ui.ready(), seeding]);
 }
@@ -122,9 +139,16 @@ self.addEventListener("message", (event) => {
   const answer = event.ports[0];
   event.waitUntil(
     uiReady().then(async () => {
+      const sealRequest = readSealMessage(event.data, event.source as Client | null, self.location.origin, ui);
+      if (sealRequest !== null) {
+        answer?.postMessage({ path: await sealing.addressFor(sealRequest).catch(() => null) });
+        return;
+      }
       const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
       if (!update) return;
       await prefs.set(update);
+      // The UI cannot turn the admin's switch off, only have the worker ask the server again.
+      if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
       // The UI waits for this answer before navigating, so the next page already sees the new choice.
       answer?.postMessage({ ok: true });
     }),
@@ -179,8 +203,8 @@ self.addEventListener("fetch", (event) => {
 });
 
 async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
-  const clients = await self.clients.matchAll({ type: "window" });
-  for (const delivery of cookieDeliveries(clients, changes, self.location.origin)) {
+  const [clients] = await Promise.all([self.clients.matchAll({ type: "window" }), sealing.ready()]);
+  for (const delivery of cookieDeliveries(clients, changes, self.location.origin, sealing.open)) {
     delivery.client.postMessage({
       type: COOKIE_MESSAGE,
       v: PROTOCOL_VERSION,
@@ -205,19 +229,42 @@ async function handle(event: FetchEvent): Promise<Response> {
   // A worker stuck in importScripts cannot be looked up, but its binding is known by its client ID.
   const identity = await identityOf(event, client);
   const clientUrl = requestClientUrl({ client, identity }, origin);
-  const route = classifyRequest({ url: request.url, origin, navigation, clientUrl, referrer });
+  const topLevelGet = navigation && request.destination === "document" && request.method === "GET";
+  if (topLevelGet) refreshInstanceSeal();
+  await Promise.all([cookies.ready(), sealing.ready()]);
+  const master = await sealing.sealerFor(isSealedPath(new URL(request.url).pathname));
+  let route: Route;
+  try {
+    route = classifyRequest({
+      url: request.url,
+      origin,
+      navigation,
+      clientUrl,
+      referrer,
+      topLevelGet,
+      open: sealing.open,
+      seal: master ? (url) => master.seal(url) : undefined,
+    });
+  } catch {
+    // An address the router cannot read gets Girici's error page rather than the browser's network error.
+    return navigation ? htmlError("bad_request", 400, null) : Response.error();
+  }
 
   switch (route.kind) {
     case "passthrough":
       return fetch(request);
     case "invalid":
       return navigation ? htmlError("bad_request", 400, null) : Response.error();
+    case "unsealable":
+      return navigation ? htmlError("sealed", 404, null) : Response.error();
     case "redirect":
       return Response.redirect(new URL(route.location, origin).href, 307);
     case "proxy": {
-      const initiator = realUrlOf(navigation ? referrer : clientUrl, origin);
+      const initiator = realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
+      const seal = route.sealed && master ? master.originSeal(route.target.origin) : undefined;
+      const sealsLoad = navigation && request.destination === "document" && master && sealing.enabled();
+      const address = sealsLoad ? (url: URL) => master.seal(url) : undefined;
       try {
-        await cookies.ready();
         // A request sent right after a document.cookie write must carry that cookie.
         const seq = Number(request.headers.get(HEADER.cookieSeq));
         if (seq > 0 && event.clientId) await rpc.waitFor(event.clientId, seq);
@@ -266,6 +313,8 @@ async function handle(event: FetchEvent): Promise<Response> {
           syncCookies: navigation ? undefined : changes,
           cookiesBlocked: blocked,
           runtimeAvailable: async () => (await runtime.bytes(CLIENT_PATH)) !== null,
+          seal,
+          address,
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
@@ -326,11 +375,13 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
 
 /** Hand the WebSocket shim a seal of the target's cookies and Origin, read from the jar as the page. */
 async function handleWsPrep(event: FetchEvent): Promise<Response> {
-  await cookies.ready();
+  await Promise.all([cookies.ready(), sealing.ready()]);
   const client = await clientOf(event);
   const identity = await identityOf(event, client);
   const pageUrl =
-    client?.type === "window" ? realUrlOf(client.url, self.location.origin) : identity && new URL(identity.page);
+    client?.type === "window"
+      ? realUrlOf(client.url, self.location.origin, sealing.open)
+      : identity && new URL(identity.page);
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -357,16 +408,16 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
 }
 
 async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
-  const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady()]);
-  return handleSiteData(event.request, callerOf(client, self.location.origin, ui), cookies);
+  const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady(), sealing.ready()]);
+  return handleSiteData(event.request, callerOf(client, self.location.origin, ui, sealing.open), cookies);
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
-  await cookies.ready();
+  await Promise.all([cookies.ready(), sealing.ready()]);
   const client = await clientOf(event);
   // Only a page's document.cookie calls here, and a worker cannot show which page it acts for.
   if (client?.type !== "window") return new Response(null, { status: 403 });
-  const pageUrl = realUrlOf(client.url, self.location.origin);
+  const pageUrl = realUrlOf(client.url, self.location.origin, sealing.open);
   const blocked = pageUrl ? await cookiesBlocked(event, client, pageUrl) : false;
   const response = await rpc.handle(event.request, event.clientId, pageUrl, { blocked });
   event.waitUntil(forgetClosedClients());
@@ -386,7 +437,8 @@ async function callerIdentity(event: FetchEvent): Promise<WorkerIdentity | null>
   const client = await clientOf(event);
   if (client?.type !== "window") return identityOf(event, client);
   // A blank frame's address is about:blank, so its workers stay unbound.
-  const page = realUrlOf(client.url, self.location.origin);
+  await sealing.ready();
+  const page = realUrlOf(client.url, self.location.origin, sealing.open);
   return page && { page: page.href, top: await windowTop(client, topSiteDeps) };
 }
 
@@ -410,6 +462,6 @@ async function clientOf(event: FetchEvent): Promise<Client | undefined> {
   return Promise.race([self.clients.get(event.clientId), timeout]);
 }
 
-function htmlError(code: RelayErrorCode, status: number, target: URL | null): Response {
+function htmlError(code: ErrorPageCode, status: number, target: URL | null): Response {
   return errorResponse(code, status, target);
 }

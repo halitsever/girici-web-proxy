@@ -662,6 +662,63 @@ const echo: Route = (req, res, body) => {
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(page("Echo", `<pre id="echo">${escapeHtml(`${req.method ?? ""}${body ? ` ${body}` : ""}`)}</pre>`));
 };
+const SEALED_PAGE = page(
+  "Sealed",
+  `<h1>Sealed</h1>
+<img id="rel" src="dot.png" alt="">
+<script type="module">import "./mod.js";</script>
+<a href="https://site-b.test/target">site-b</a>`,
+);
+const SEALED_SPA = page(
+  "Sealed SPA",
+  `<h1>SPA</h1>
+<button id="push">Push</button><pre id="href"></pre>
+<a id="to-bottom" href="#bottom">bottom</a> <a id="page2" href="?page=2">page 2</a>
+<form action="/sealed/search"><input name="q" aria-label="Search"><button id="search-go">Search</button></form>
+<button id="popup-go">Popup</button><pre id="popup"></pre>
+<iframe id="frame" src="https://www.site-a.test/sealed/cookie-echo"></iframe>
+<div style="height: 3000px"></div><p id="bottom">Bottom</p>
+<script>
+  window.marker = "kept";
+  document.getElementById("push").onclick = () => {
+    history.pushState({}, "", "next?a=1");
+    document.getElementById("href").textContent = location.href;
+  };
+  document.getElementById("popup-go").onclick = () => {
+    const popup = window.open("/sealed/next");
+    const poll = setInterval(() => {
+      try {
+        if (popup.location.pathname !== "/sealed/next") return;
+        document.getElementById("popup").textContent = popup.location.pathname;
+        clearInterval(poll);
+      } catch {}
+    }, 100);
+  };
+</script>`,
+);
+const SEALED_ECHO = `<pre id="href"></pre><pre id="search"></pre>
+<script>
+  document.getElementById("href").textContent = location.href;
+  document.getElementById("search").textContent = location.search;
+</script>`;
+
+/** Sets the cookie a same-site frame of the page should still carry. */
+const sealedCookie =
+  (body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "set-cookie": "sealed=1; Path=/; Domain=site-a.test; SameSite=Lax",
+    });
+    res.end(body);
+  };
+const sealedPage = sealedCookie(SEALED_PAGE);
+const sealedSearch: Route = (req, res) => {
+  const query = new URL(req.url ?? "/", "http://fixture").search;
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(page("Sealed search", `<pre id="query">${escapeHtml(query)}</pre>${SEALED_ECHO}`));
+};
+
 const search: Route = (req, res) => {
   const query = new URL(req.url ?? "/", "http://fixture").searchParams.get("q") ?? "";
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -1161,6 +1218,56 @@ const XS_HELD = page(
       before,
       document: failure(() => w.document),
       global: failure(() => global.document),
+      closed: w.closed,
+    });
+  };
+</script>`,
+);
+
+// Opens another site's popup and keeps trying its document until checked; with "forge" its own JSON.parse first drops
+// the seal from any engine config and names this page as the one the popup inherits from.
+const XS_SEALED_OPENER = page(
+  "Sealed opener",
+  `<button id="open">open</button><button id="forge">forge</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  let w;
+  let leaks = 0;
+  let polling = true;
+  const channel = new MessageChannel();
+  channel.port1.onmessage = () => {
+    if (!polling) return;
+    try {
+      void w.document;
+      leaks++;
+    } catch {}
+    channel.port2.postMessage(0);
+  };
+  const open = () => {
+    w = window.open("https://site-b.test/xs-opened");
+    channel.port2.postMessage(0);
+    setTimeout(() => (polling = false), 10000);
+  };
+  document.getElementById("open").onclick = open;
+  document.getElementById("forge").onclick = () => {
+    const parse = JSON.parse;
+    const base = location.href;
+    JSON.parse = function (text, reviver) {
+      const value = parse(text, reviver);
+      if (value && typeof value === "object" && "cookies" in value) {
+        delete value.seal;
+        value.inherit = { origin: "forged", base };
+      }
+      return value;
+    };
+    open();
+  };
+  document.getElementById("check").onclick = () => {
+    polling = false;
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      leaks,
       closed: w.closed,
     });
   };
@@ -1815,6 +1922,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/xs-held": html(XS_HELD),
+    "/xs-sealed-opener": html(XS_SEALED_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
     "/refresh-quote": html(REFRESH_QUOTE),
@@ -1966,15 +2074,23 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/nest.js": script(
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
     ),
+    "/sealed/page": sealedPage,
+    "/sealed/dot.png": png,
+    "/sealed/mod.js": script('document.body.dataset.mod = "1";'),
+    "/sealed/spa": sealedCookie(SEALED_SPA),
+    "/sealed/next": html(page("Sealed next", SEALED_ECHO)),
+    "/sealed/search": sealedSearch,
   },
   "www.site-a.test": {
     "/landing": html(page("Landing", "<h1>Landing</h1>")),
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
+    "/sealed/cookie-echo": cookieEcho,
   },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
+    "/target": html(page("Target", "<h1>Target</h1>")),
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,

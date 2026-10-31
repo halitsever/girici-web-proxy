@@ -26,6 +26,20 @@ export const test = base.extend<{ escapeGuard: void }>({
 
 export { expect };
 
+/** Turns on this browser's "Encrypt page addresses" switch through the UI's stored settings. */
+export async function enableSealing(page: Page): Promise<void> {
+  await page.goto("/settings");
+  // Settings registers the worker, and WebKit leaves an install a reload cuts short stuck for good.
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+  });
+  await page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem("girici:settings") ?? "{}") as Record<string, unknown>;
+    localStorage.setItem("girici:settings", JSON.stringify({ ...saved, sealAddresses: true }));
+  });
+  await page.reload();
+}
+
 export async function openThroughUi(page: Page, url: string): Promise<void> {
   await page.goto("/");
   const input = page.getByLabel("URL or search");
@@ -33,4 +47,14 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
   // A typed URL is the first row; Enter submits the command palette and opens it.
   await input.press("Enter");
   await page.waitForURL(/\/~\//);
+}
+
+export const INSTANCE = "http://127.0.0.1:41002";
+
+export async function signIn(page: Page, base: string): Promise<void> {
+  await page.goto(`${base}/_g/login`);
+  await page.getByLabel("Username").fill("e2e");
+  await page.getByLabel("Password").fill("e2e-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(`${base}/`);
 }

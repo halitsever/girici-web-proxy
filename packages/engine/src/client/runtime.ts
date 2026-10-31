@@ -1,20 +1,7 @@
 import { clientTag } from "../shared/client-tag.ts";
-import { decodeUrl } from "../shared/codec.ts";
-import {
-  append,
-  define,
-  hashOf,
-  hrefOf,
-  isWebUrl,
-  NativeWeakMap,
-  newUrl,
-  originOf,
-  parseUrl,
-  pathnameOf,
-  searchOf,
-  setUrlPart,
-} from "../shared/primordials.ts";
+import { append, define, hrefOf, isWebUrl, NativeWeakMap, newUrl, originOf, parseUrl } from "../shared/primordials.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
+import type { OpenSealed } from "../shared/sealed-address.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
 import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
@@ -42,7 +29,7 @@ import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
-import { createUrlContext, engineSiteOf, realOriginOf, type Realm } from "./url-context.ts";
+import { createUrlContext, engineSiteOf, realOriginOf, realUrlOf, type Realm } from "./url-context.ts";
 import { createWindowGuard, installWindowLinks } from "./windows.ts";
 
 // Taken at load: install also runs when a page inserts a frame, after page code may have replaced these.
@@ -79,7 +66,7 @@ export function install(
   const invoke = createInvoker(win);
   // Taken before the network hooks wrap it.
   const nativeFetch = win.fetch;
-  const ctx = createUrlContext(win, config.inherit);
+  const ctx = createUrlContext(win, config.inherit, config.seal);
   const blobs = installBlobDocuments(
     win,
     ctx,
@@ -141,6 +128,7 @@ export function install(
       reload: ownLocation.reload,
       setHash: ownLocation.setHash,
       owner: () => originOf(ctx.realUrl()),
+      address: ctx.documentAddress,
     } as LocationEnv,
     win.Location.prototype,
   );
@@ -156,7 +144,7 @@ export function install(
           navigate: calls.navigate,
           reload: calls.reload,
           setHash: calls.setHash,
-          real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
+          real: () => realUrlOfLocation(location, ctx.origin, ctx.openSealed) ?? ctx.realUrl(),
           // The caller is this realm, whichever window the stand-in navigates.
           owner: () => originOf(ctx.realUrl()),
         } as LocationEnv,
@@ -208,7 +196,7 @@ export function install(
     wrapWindow: guard.wrap,
     realOrigin: () => originOf(ctx.realUrl()),
     site: () => current.site,
-    renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit)),
+    renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit, next.seal)),
   } as HelperEnv);
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
   define(win, "__g$", { value: freeze(helpers), enumerable: false });
@@ -294,7 +282,7 @@ export function install(
   });
   steps.add("document", () => resetDomain());
   steps.add("cookies", (next) => cookies.reset(next));
-  steps.add("context", (next) => ctx.inherit(next.inherit));
+  steps.add("context", (next) => ctx.inherit(next.inherit, next.seal));
   // The document may be of another site now, so windows handed out as is to the last one are judged again.
   steps.add("site", () => guard.reset());
   steps.add("listeners", () => {
@@ -413,12 +401,10 @@ function fakeFor(win: Realm, location: object): object | null {
   return null;
 }
 
-function realUrlOfLocation(location: Location, origin: string): URL | null {
+/** A sealed address opens here only when it is this page's own origin, which its seal covers. */
+function realUrlOfLocation(location: Location, origin: string, open: OpenSealed): URL | null {
   try {
-    const url = newUrl(location.href);
-    const real = originOf(url) === origin ? decodeUrl(pathnameOf(url) + searchOf(url)) : null;
-    if (real) setUrlPart(real, "hash", hashOf(url));
-    return real;
+    return realUrlOf(location.href, origin, open);
   } catch {
     // A cross-origin window hides its address; the caller falls back to this page's URL.
     return null;

@@ -1,5 +1,11 @@
 import { append, isArray, ownValue, parseJson } from "../shared/primordials.ts";
-import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot, type InheritedContext } from "../shared/protocol.ts";
+import {
+  PROTOCOL_VERSION,
+  type ClientConfig,
+  type CookieSnapshot,
+  type InheritedContext,
+  type OriginSeal,
+} from "../shared/protocol.ts";
 
 export function readConfig(raw: string | null): ClientConfig {
   // A missing or broken config leaves the page with an empty cookie mirror.
@@ -28,6 +34,8 @@ export function parseConfig(raw: string | null): ClientConfig | null {
   if (typeof site === "string") config.site = site;
   const blocked = ownValue(parsed, "cookiesBlocked");
   if (typeof blocked === "boolean") config.cookiesBlocked = blocked;
+  const seal = readSeal(ownValue(parsed, "seal"));
+  if (seal) config.seal = seal;
   return config;
 }
 
@@ -67,4 +75,13 @@ function readInherited(value: unknown): InheritedContext | undefined {
   const blob = ownValue(value, "blob");
   if (typeof blob === "string") inherit.blob = blob;
   return inherit;
+}
+
+function readSeal(value: unknown): OriginSeal | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const origin = ownValue(value, "origin");
+  const label = ownValue(value, "label");
+  const key = ownValue(value, "key");
+  if (typeof origin !== "string" || typeof label !== "string" || typeof key !== "string") return undefined;
+  return { __proto__: null, origin, label, key } as OriginSeal;
 }

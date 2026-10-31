@@ -17,6 +17,10 @@ describe("errorPage", () => {
   it("blames the upstream proxy", () => {
     expect(errorPage("proxy", new URL("https://a.test/"))).toContain("Girici's upstream proxy could not reach a.test.");
   });
+
+  it("explains a sealed address this browser cannot open", () => {
+    expect(errorPage("sealed", null)).toContain("sealed in another browser");
+  });
 });
 
 describe("errorResponse", () => {

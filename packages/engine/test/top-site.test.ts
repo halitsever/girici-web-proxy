@@ -6,40 +6,48 @@ import { REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./repla
 
 const proxy = "http://proxy.test";
 
-function responder() {
-  let handler: ((event: unknown) => void) | null = null;
+function ask(top: unknown, data: unknown = { type: TOP_SITE_QUERY }): unknown {
+  let listener: ((event: unknown) => void) | null = null;
   const container = {
-    addEventListener: (_type: string, listener: (event: unknown) => void) => (handler = listener),
+    addEventListener: (_type: string, handler: (event: unknown) => void) => (listener = handler),
     startMessages: () => {},
   } as unknown as ServiceWorkerContainer;
-  const win = { location: { origin: proxy, href: `${proxy}/~/https/a.test/page?q=1` } } as unknown as Realm;
-  (win as unknown as { top: unknown }).top = win;
+  const win = { top, location: { origin: proxy } } as unknown as Realm;
   installTopSiteResponder(win, () => container);
-  const ask = (data: unknown): unknown[] => {
-    const answers: unknown[] = [];
-    handler?.({ data, ports: [{ postMessage: (answer: unknown) => answers.push(answer) }] });
-    return answers;
-  };
-  return ask;
+  let answer: unknown = null;
+  listener!({ data, ports: [{ postMessage: (value: unknown) => (answer = value) }] });
+  return answer;
 }
 
 describe("installTopSiteResponder", () => {
-  it("answers with the real top URL", () => {
-    expect(responder()({ type: TOP_SITE_QUERY })).toEqual([{ top: "https://a.test/page?q=1" }]);
+  it("answers with the top page's real origin", () => {
+    expect(ask({ location: { href: `${proxy}/~/https/www.a.test/p?q` } })).toEqual({ top: "https://www.a.test" });
+  });
+
+  it("answers with the top page's real origin when the top has a sealed address", () => {
+    const top = { location: { href: `${proxy}/~/x/L.B` }, __g$: { realOrigin: () => "https://a.test" } };
+    expect(ask(top)).toEqual({ top: "https://a.test" });
+  });
+
+  it("answers nothing for a top it cannot read", () => {
+    const hidden = {
+      get location(): never {
+        throw new Error("cross-origin");
+      },
+    };
+    expect(ask(hidden)).toEqual({ top: null });
   });
 
   it("answers only a query named by the message itself", () => {
-    const ask = responder();
-    const answers = withPrototypeAdditions({ type: { value: TOP_SITE_QUERY, writable: true } }, () => ask({}));
-    expect(answers).toEqual([]);
+    const top = { location: { href: `${proxy}/~/https/a.test/` } };
+    const answer = withPrototypeAdditions({ type: { value: TOP_SITE_QUERY, writable: true } }, () => ask(top, {}));
+    expect(answer).toBeNull();
   });
 
   for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
-    it(`reads the top URL when ${name} is replaced`, () => {
-      const ask = responder();
-      expect(withReplaced(target, key, replacement, () => ask({ type: TOP_SITE_QUERY }))).toEqual([
-        { top: "https://a.test/page?q=1" },
-      ]);
+    it(`reads the top origin when ${name} is replaced`, () => {
+      const top = { location: { href: `${proxy}/~/https/a.test/page?q=1` } };
+      expect(withReplaced(target, key, replacement, () => ask(top))).toEqual({ top: "https://a.test" });
     });
   }
 });

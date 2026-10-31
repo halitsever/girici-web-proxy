@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { generateSetupCode, setupBanner } from "./auth/setup-code.ts";
 import { AuthStore } from "./auth/store.ts";
+import { BrandStore } from "./brand/store.ts";
 import { loadConfig, trustProxyWarning, type Config } from "./config.ts";
 import { openDb } from "./db/open.ts";
 import { compileTrust } from "./http/client-ip.ts";
@@ -72,6 +73,7 @@ const server = createHttpServer(
     sourceUrl: config.sourceUrl,
     logger,
     authStore,
+    brand: new BrandStore(join(config.dataDir, "brand"), authStore),
     trust,
     limiter,
     blocklist,

@@ -6,6 +6,7 @@ import { mapRefresh } from "../rewrite/refresh.ts";
 import { stripClientTag } from "../shared/client-tag.ts";
 import { originOf } from "../shared/primordials.ts";
 import { attributeKind, restoreAttribute } from "./attribute-values.ts";
+import type { OpenSealed } from "../shared/sealed-address.ts";
 import type { BlobDocuments } from "./blob-documents.ts";
 import type { UrlContext } from "./url-context.ts";
 
@@ -23,13 +24,15 @@ export interface RewriteBridge {
 }
 
 export function createRewriteBridge(
-  ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy"> & Partial<Pick<UrlContext, "realUrl">>,
+  ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy"> &
+    Partial<Pick<UrlContext, "realUrl" | "opaque" | "openSealed">>,
   frameTag: (base: URL) => string,
   blobs: Pick<BlobDocuments, "swap" | "original"> = { swap: (url) => url, original: (url) => url },
 ): RewriteBridge {
   const swapBlob = blobs.swap;
   // The document's own origin, not its base's, is what its javascript: URLs carry.
   const owner = () => (ctx.realUrl ? originOf(ctx.realUrl()) : undefined);
+  const opaque = () => (ctx.opaque ? ctx.opaque() : false);
   const html = (markup: string) =>
     rewriteHtml(markup, {
       url: ctx.realBase(),
@@ -38,11 +41,15 @@ export function createRewriteBridge(
       frameInject: frameTag,
       swapBlob,
       owner: owner(),
+      opaque: opaque(),
     });
   const clientUrl = () => tagSource(frameTag(ctx.realBase()));
   // Nested srcdoc values come back through the same path, so the tag goes at every level.
   const unsrcdoc = (markup: string): string =>
-    stripClientTag(unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original), clientUrl());
+    stripClientTag(
+      unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original, ctx.openSealed),
+      clientUrl(),
+    );
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
@@ -58,8 +65,10 @@ export function createRewriteBridge(
         frameInject: frameTag,
         swapBlob,
         owner: owner(),
+        opaque: opaque(),
       }),
-    unhtml: (markup) => unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original),
+    unhtml: (markup) =>
+      unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original, ctx.openSealed),
     unsrcdoc,
     importSpecifier: (spec) => ctx.toProxy(spec),
     metaUrl: (url) => ctx.fromProxy(url),
@@ -85,8 +94,9 @@ function unrewriteHtmlAttributes(
   origin: string,
   unsrcdoc: (markup: string) => string,
   original: (url: string) => string,
+  open?: OpenSealed,
 ): string {
-  const restoreUrl = (url: string) => original(restoreAttribute("a", "href", url, base, origin));
+  const restoreUrl = (url: string) => original(restoreAttribute("a", "href", url, base, origin, undefined, open));
   const output = new MagicString(html);
   let attributes: PendingAttribute[] = [];
   const parser: Parser = new Parser(
@@ -104,7 +114,7 @@ function unrewriteHtmlAttributes(
           let restored: string;
           if (refresh && attribute.name === "content") restored = mapRefresh(attribute.value, restoreUrl);
           else if (attributeKind(name, attribute.name)) {
-            restored = original(restoreAttribute(name, attribute.name, attribute.value, base, origin, unsrcdoc));
+            restored = original(restoreAttribute(name, attribute.name, attribute.value, base, origin, unsrcdoc, open));
           } else continue;
           if (restored !== attribute.value) {
             output.overwrite(attribute.start, attribute.end, `${attribute.name}="${escapeAttribute(restored)}"`);

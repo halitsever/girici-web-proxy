@@ -17,6 +17,8 @@ export interface HtmlRewriteOptions {
   swapBlob?: (url: string) => string;
   /** The document's real origin, which its javascript: URLs carry; a `<base>` does not change it. */
   owner?: string;
+  /** The document has a sealed address, so relative URLs are written absolute; a srcdoc inside inherits it. */
+  opaque?: boolean;
 }
 
 interface Attribute {
@@ -65,6 +67,7 @@ class HtmlRewriter {
   readonly #output: MagicString;
   #base: URL;
   readonly #owner: string;
+  readonly #opaque: boolean;
   #baseSeen = false;
   #injectAt = 0;
   #injectFrozen = false;
@@ -80,6 +83,7 @@ class HtmlRewriter {
     this.#output = new MagicString(html);
     this.#base = options.url;
     this.#owner = options.owner ?? (isWebUrl(options.url) ? originOf(options.url) : "null");
+    this.#opaque = options.opaque ?? false;
   }
 
   run(): string {
@@ -150,7 +154,9 @@ class HtmlRewriter {
       if (kind === "remove") this.#output.remove(scriptStart, end + 1);
       else this.#rewriteRange(contentStart, start, (text) => this.#rewriteScript(text, kind));
     } else if (name === "style" && this.#styleStart >= 0) {
-      this.#rewriteRange(this.#styleStart, start, (text) => rewriteCss(text, this.#base, this.#options.origin));
+      this.#rewriteRange(this.#styleStart, start, (text) =>
+        rewriteCss(text, this.#base, this.#options.origin, this.#opaque),
+      );
       this.#styleStart = -1;
     }
   }
@@ -195,7 +201,7 @@ class HtmlRewriter {
       }
       // A javascript: URL is left as written where scripts are not rewritten.
       if (!this.#scripts && rewriteJavascriptUrl(value, this.#owner) !== null) return value;
-      const rewritten = rewriteUrl(value, this.#base, origin, this.#owner);
+      const rewritten = rewriteUrl(value, this.#base, origin, this.#owner, this.#opaque);
       if (tag === "base" && name === "href" && !this.#baseSeen) {
         this.#baseSeen = true;
         try {
@@ -215,17 +221,25 @@ class HtmlRewriter {
     if (setHas(SRCSET_ATTRIBUTES, name)) {
       let changed = false;
       const rewritten = rewriteSrcset(value, (url) => {
-        const next = rewriteUrl(url, this.#base, origin);
+        const next = rewriteUrl(url, this.#base, origin, undefined, this.#opaque);
         if (next !== url) changed = true;
         return next;
       });
       return changed ? rewritten : value;
     }
-    if (name === "style") return rewriteCss(value, this.#base, origin);
+    if (name === "style") return rewriteCss(value, this.#base, origin, this.#opaque);
     if (name.startsWith("on")) return this.#scripts ? rewriteJs(value, { kind: "handler" }) : value;
     if (tag === "iframe" && name === "srcdoc") {
       const { frameInject } = this.#options;
-      if (!frameInject) return rewriteHtml(value, { url: this.#base, origin, scripts: false, owner: this.#owner });
+      if (!frameInject) {
+        return rewriteHtml(value, {
+          url: this.#base,
+          origin,
+          scripts: false,
+          owner: this.#owner,
+          opaque: this.#opaque,
+        });
+      }
       return rewriteHtml(value, {
         url: this.#base,
         origin,
@@ -234,10 +248,11 @@ class HtmlRewriter {
         frameInject,
         swapBlob: this.#options.swapBlob,
         owner: this.#owner,
+        opaque: this.#opaque,
       });
     }
     if (tag === "meta" && name === "content" && keyword(attribs["http-equiv"]) === "refresh") {
-      return rewriteRefresh(value, this.#base, origin);
+      return rewriteRefresh(value, this.#base, origin, this.#opaque);
     }
     return value;
   }
@@ -259,7 +274,7 @@ class HtmlRewriter {
 
   #rewriteScript(text: string, kind: ScriptKind): string {
     if (kind === "classic" || kind === "module") return rewriteJs(text, { kind });
-    if (kind === "importmap") return rewriteImportMap(text, this.#base, this.#options.origin);
+    if (kind === "importmap") return rewriteImportMap(text, this.#base, this.#options.origin, this.#opaque);
     return text;
   }
 
@@ -272,7 +287,7 @@ class HtmlRewriter {
 }
 
 /** Bare specifiers in "imports" stay keys; URL values and scope prefixes have to point at the proxy. */
-function rewriteImportMap(text: string, base: URL, origin: string): string {
+function rewriteImportMap(text: string, base: URL, origin: string, opaque: boolean): string {
   let map: unknown;
   try {
     map = JSON.parse(text);
@@ -282,7 +297,7 @@ function rewriteImportMap(text: string, base: URL, origin: string): string {
   if (!isRecord(map)) return text;
   let changed = false;
   const rewrite = (url: string) => {
-    const next = rewriteUrl(url, base, origin);
+    const next = rewriteUrl(url, base, origin, undefined, opaque);
     if (next !== url) changed = true;
     return next;
   };

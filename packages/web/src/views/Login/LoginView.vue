@@ -3,9 +3,12 @@ import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import BrandMark from "@/components/layout/BrandMark.vue";
+import SourceLink from "@/components/layout/SourceLink.vue";
 import { Input } from "@/components/ui/input";
 import { getAuthState, login } from "@/lib/auth";
-import { toProxyPath } from "@/lib/target";
+import { brand } from "@/lib/brand";
+import { resolveNext } from "@/lib/next";
 
 const route = useRoute();
 const router = useRouter();
@@ -31,20 +34,10 @@ async function onSubmit() {
   }
 }
 
-/**
- * ?next is either a Girici page the router guard sent here, such as /account, or the real target of a proxied
- * navigation the SW sent here, which reopens through the proxy.
- */
 function goNext() {
-  const next = typeof route.query.next === "string" ? route.query.next : "";
-  // "//host" and "/\host" would leave Girici, so only a single leading slash counts as one of our pages.
-  if (/^\/(?![/\\])/.test(next)) {
-    void router.replace(next);
-    return;
-  }
-  const proxied = next ? toProxyPath(next) : null;
-  if (proxied) window.location.assign(proxied);
-  else void router.replace("/");
+  const next = resolveNext(typeof route.query.next === "string" ? route.query.next : "");
+  if (next.kind === "proxy") window.location.assign(next.path);
+  else void router.replace(next.kind === "route" ? next.path : "/");
 }
 </script>
 
@@ -52,9 +45,9 @@ function goNext() {
   <div class="grid min-h-screen place-items-center px-4 py-10">
     <form class="flex w-full max-w-[400px] flex-col gap-6" @submit.prevent="onSubmit">
       <div class="flex flex-col items-center gap-3 text-center">
-        <img src="@/assets/brand/girici-icon-dark.svg" class="h-9 w-9" alt="" />
+        <BrandMark size="lg" :show-name="false" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Sign in to Girici</h1>
+          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Sign in to {{ brand.name }}</h1>
           <p class="mt-1 text-[14px] text-muted-foreground">This proxy is private. Sign in to keep browsing.</p>
         </div>
       </div>
@@ -83,6 +76,8 @@ function goNext() {
       >
         Continue without signing in
       </RouterLink>
+
+      <p class="text-center text-[13px]"><SourceLink /></p>
     </form>
   </div>
 </template>

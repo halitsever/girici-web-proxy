@@ -65,14 +65,25 @@ export class PrefsService {
 
   async #load(): Promise<void> {
     try {
-      const value = (await this.#store.load()) as Partial<EnginePrefs> | undefined;
+      const value = (await this.#store.load()) as Record<string, unknown> | undefined;
       if (typeof value?.blockThirdPartyCookies === "boolean") {
-        this.#current = { blockThirdPartyCookies: value.blockThirdPartyCookies };
+        this.#current = { ...DEFAULT_ENGINE_PREFS, ...booleanPrefs(value) };
       }
     } catch {
       // A broken store leaves the defaults.
     }
   }
+}
+
+const PREF_NAMES = ["blockThirdPartyCookies", "sealAddresses", "instanceSeal"] as const;
+
+function booleanPrefs(value: Record<string, unknown>): Partial<EnginePrefs> {
+  const prefs: Partial<EnginePrefs> = {};
+  for (const name of PREF_NAMES) {
+    const field = value[name];
+    if (typeof field === "boolean") prefs[name] = field;
+  }
+  return prefs;
 }
 
 /** Only the Girici UI may change these; a proxied page or its worker posting the same message is ignored. */
@@ -83,7 +94,11 @@ export function readPrefsMessage(
   ui: UiClientSet,
 ): Partial<EnginePrefs> | null {
   if (typeof data !== "object" || data === null || !isUiWindow(source, origin, ui)) return null;
-  const { type, v, blockThirdPartyCookies } = data as Record<string, unknown>;
+  const fields = data as Record<string, unknown>;
+  const { type, v, blockThirdPartyCookies } = fields;
   if (type !== PREFS_MESSAGE || v !== PROTOCOL_VERSION || typeof blockThirdPartyCookies !== "boolean") return null;
-  return { blockThirdPartyCookies };
+  const update = booleanPrefs(fields);
+  // Any UI window can post; only the server's answer turns the admin's switch off.
+  if (update.instanceSeal === false) delete update.instanceSeal;
+  return update;
 }

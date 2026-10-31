@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { MasterSealer } from "../src/shared/sealed-address.ts";
 import {
   classifyRequest,
   isGuardedPath,
   isUiWindow,
+  realUrlOf,
   requestClientUrl,
   reservedAccess,
   type Route,
@@ -206,5 +208,176 @@ describe("requestClientUrl", () => {
   it("places no worker or clientless request that no page announced", () => {
     expect(requestClientUrl({ ...base, client: worker }, origin)).toBeNull();
     expect(requestClientUrl(base, origin)).toBeNull();
+  });
+});
+
+describe("sealed addresses", () => {
+  const master = new MasterSealer(new Uint8Array(32).fill(3));
+  const origin = "https://proxy.test";
+  const page = new URL("https://a.test/dir/page?x=1");
+  const sealed = master.seal(page);
+  const on = { origin, open: master.open, seal: (url: URL) => master.seal(url) };
+  const load = { navigation: true, topLevelGet: true, clientUrl: null, referrer: null };
+  const sealedSummary = (route: Route) => (route.kind === "proxy" ? { ...route, target: route.target.href } : route);
+
+  it("opens a sealed page load", () => {
+    expect(sealedSummary(classifyRequest({ ...on, ...load, url: origin + sealed }))).toEqual({
+      kind: "proxy",
+      target: page.href,
+      navigation: true,
+      sealed: true,
+    });
+  });
+
+  it("moves a top-level page load of a plain address to its sealed address", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}/~/https/a.test/dir/page?x=1` })).toEqual({
+      kind: "redirect",
+      location: sealed,
+    });
+  });
+
+  it("leaves plain page loads alone while sealing is off", () => {
+    expect(
+      sealedSummary(
+        classifyRequest({ ...load, origin, open: master.open, url: `${origin}/~/https/a.test/dir/page?x=1` }),
+      ),
+    ).toEqual({ kind: "proxy", target: page.href, navigation: true, sealed: false });
+  });
+
+  it("keeps frames and requests on plain addresses", () => {
+    const plain = `${origin}/~/https/a.test/dir/page?x=1`;
+    expect(classifyRequest({ ...on, ...load, topLevelGet: false, url: plain })).toMatchObject({
+      kind: "proxy",
+      sealed: false,
+    });
+    expect(classifyRequest({ ...on, ...load, navigation: false, topLevelGet: false, url: plain })).toMatchObject({
+      kind: "proxy",
+      sealed: false,
+    });
+  });
+
+  it("seals a query a form or link put after the token", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}${sealed}?q=find` })).toEqual({
+      kind: "redirect",
+      location: master.seal(new URL("https://a.test/dir/page?q=find")),
+    });
+    const fetched = classifyRequest({
+      ...on,
+      navigation: false,
+      clientUrl: origin + sealed,
+      referrer: null,
+      url: `${origin}${sealed}?q=find`,
+    });
+    expect(sealedSummary(fetched)).toMatchObject({
+      kind: "proxy",
+      target: "https://a.test/dir/page?q=find",
+      sealed: true,
+    });
+  });
+
+  it("resolves relative requests of a sealed page against its real address", () => {
+    const from = { ...on, navigation: false, clientUrl: origin + sealed, referrer: null };
+    expect(sealedSummary(classifyRequest({ ...from, url: `${origin}/~/x/img/a.png` }))).toEqual({
+      kind: "proxy",
+      target: "https://a.test/dir/img/a.png",
+      navigation: false,
+      sealed: false,
+    });
+    expect(sealedSummary(classifyRequest({ ...from, url: `${origin}/~/up.css` }))).toMatchObject({
+      target: "https://a.test/up.css",
+    });
+    expect(classifyRequest({ ...from, url: `${origin}/root.js` })).toEqual({
+      kind: "redirect",
+      location: "/~/https/a.test/root.js",
+    });
+  });
+
+  it("sends a relative page load of a sealed page to its sealed or plain address", () => {
+    const from = { ...on, ...load, referrer: origin + sealed };
+    expect(classifyRequest({ ...from, url: `${origin}/~/x/next?a=1` })).toEqual({
+      kind: "redirect",
+      location: master.seal(new URL("https://a.test/dir/next?a=1")),
+    });
+    expect(classifyRequest({ ...from, url: `${origin}/other` })).toEqual({
+      kind: "redirect",
+      location: master.seal(new URL("https://a.test/other")),
+    });
+    expect(classifyRequest({ ...from, topLevelGet: false, url: `${origin}/~/x/frame` })).toEqual({
+      kind: "redirect",
+      location: "/~/https/a.test/dir/frame",
+    });
+  });
+
+  it("does not let a relative path that looks like another site's token leave the page's site", () => {
+    const b = master.seal(new URL("https://b.test/"));
+    const fakeBody = `${b.slice(0, b.indexOf(".") + 1)}AAAA`;
+    const route = classifyRequest({
+      ...on,
+      navigation: false,
+      clientUrl: origin + sealed,
+      referrer: null,
+      url: origin + fakeBody,
+    });
+    expect(route.kind === "proxy" && route.target.hostname).toBe("a.test");
+  });
+
+  it("refuses a sealed address this browser cannot open", () => {
+    const other = new MasterSealer(new Uint8Array(32).fill(4)).seal(page);
+    expect(classifyRequest({ ...on, ...load, url: origin + other })).toEqual({ kind: "unsealable" });
+    expect(classifyRequest({ origin, ...load, url: origin + sealed })).toEqual({ kind: "unsealable" });
+  });
+
+  it("seals a non-canonical plain address in one redirect", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}/~/https/A.TEST/dir/page?x=1` })).toEqual({
+      kind: "redirect",
+      location: sealed,
+    });
+  });
+
+  it("clears the sealed query for a bare question mark, as a form with no fields does", () => {
+    expect(classifyRequest({ ...on, ...load, url: `${origin}${sealed}?` })).toEqual({
+      kind: "redirect",
+      location: master.seal(new URL("https://a.test/dir/page")),
+    });
+  });
+
+  it("keeps a sealed page whose address does not open away from the Girici server", () => {
+    const keyless = { origin, navigation: false, clientUrl: origin + sealed, referrer: null };
+    expect(classifyRequest({ ...keyless, url: `${origin}/root.js` })).toEqual({ kind: "unsealable" });
+    expect(classifyRequest({ origin, ...load, referrer: origin + sealed, url: `${origin}/next` })).toEqual({
+      kind: "unsealable",
+    });
+  });
+
+  it("refuses a path under a sealed page that resolves to no web URL instead of throwing", () => {
+    const from = { ...on, ...load, referrer: origin + sealed };
+    expect(classifyRequest({ ...from, url: `${origin}/~/x/javascript:alert(1)` })).toEqual({ kind: "invalid" });
+    const fetched = { ...on, navigation: false, clientUrl: origin + sealed, referrer: null };
+    expect(classifyRequest({ ...fetched, url: `${origin}/~/x/data:text/html,x` })).toEqual({ kind: "invalid" });
+  });
+
+  it("proxies what a sealed page sends to another origin", () => {
+    const route = classifyRequest({
+      ...on,
+      navigation: false,
+      clientUrl: origin + sealed,
+      referrer: null,
+      url: "https://b.test/x",
+    });
+    expect(sealedSummary(route)).toMatchObject({ kind: "proxy", target: "https://b.test/x" });
+    const keyless = classifyRequest({
+      origin,
+      navigation: false,
+      clientUrl: origin + sealed,
+      referrer: null,
+      url: "https://b.test/x",
+    });
+    expect(keyless.kind).toBe("proxy");
+  });
+
+  it("reads a sealed window's real address", () => {
+    expect(realUrlOf(origin + sealed, origin, master.open)?.href).toBe(page.href);
+    expect(realUrlOf(`${origin + sealed}#h`, origin, master.open)?.href).toBe(page.href);
+    expect(realUrlOf(origin + sealed, origin)).toBeNull();
   });
 });

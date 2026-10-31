@@ -40,6 +40,14 @@ describe("authRouter state", () => {
     const res = await fetch(`${await listen(new AuthStore(openDb(":memory:")))}/_g/auth/state`);
     expect(await res.json()).toMatchObject({ setup: true, authed: false, public: false });
   });
+
+  it("tells every visitor whether addresses are encrypted", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const base = await listen(store);
+    expect(await (await fetch(`${base}/_g/auth/state`)).json()).toMatchObject({ sealAddresses: false });
+    store.setSealAddresses(true);
+    expect(await (await fetch(`${base}/_g/auth/state`)).json()).toMatchObject({ authed: false, sealAddresses: true });
+  });
 });
 
 describe("authRouter setup", () => {

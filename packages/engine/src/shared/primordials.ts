@@ -25,8 +25,9 @@ const jsonStringify = JSON.stringify;
 const jsonParse = JSON.parse;
 const NativeArrayBuffer = ArrayBuffer;
 const NativeUint8Array = Uint8Array;
-const bufferOf = ownDescriptor(Reflect.getPrototypeOf(Uint8Array.prototype) as object, "buffer")
-  ?.get as () => ArrayBuffer;
+const typedArrays = Reflect.getPrototypeOf(Uint8Array.prototype) as object;
+const bufferOf = ownDescriptor(typedArrays, "buffer")?.get as () => ArrayBuffer;
+const typedLength = ownDescriptor(typedArrays, "length")?.get as () => number;
 const nativeDecode = TextDecoder.prototype.decode;
 const utf8Decoder = new TextDecoder();
 const nativeExec = RegExp.prototype.exec;
@@ -136,6 +137,11 @@ export function parseJson(text: string): unknown {
 /** A zeroed byte view whose indexed writes never reach a prototype. */
 export function newBytes(size: number): Uint8Array {
   return new NativeUint8Array(new NativeArrayBuffer(size));
+}
+
+/** A typed array's length; `.length` is a prototype getter a page can replace. */
+export function bytesLength(bytes: Uint8Array): number {
+  return apply(typedLength, bytes, []);
 }
 
 /** The first `length` bytes as UTF-8, with U+FFFD for invalid sequences. */
