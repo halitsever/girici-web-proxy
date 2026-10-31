@@ -327,6 +327,21 @@ describe("sealed addresses", () => {
     expect(classifyRequest({ origin, ...load, url: origin + sealed })).toEqual({ kind: "unsealable" });
   });
 
+  it("keeps a sealed page whose address does not open away from the Girici server", () => {
+    const keyless = { origin, navigation: false, clientUrl: origin + sealed, referrer: null };
+    expect(classifyRequest({ ...keyless, url: `${origin}/root.js` })).toEqual({ kind: "unsealable" });
+    expect(classifyRequest({ origin, ...load, referrer: origin + sealed, url: `${origin}/next` })).toEqual({
+      kind: "unsealable",
+    });
+  });
+
+  it("refuses a path under a sealed page that resolves to no web URL instead of throwing", () => {
+    const from = { ...on, ...load, referrer: origin + sealed };
+    expect(classifyRequest({ ...from, url: `${origin}/~/x/javascript:alert(1)` })).toEqual({ kind: "invalid" });
+    const fetched = { ...on, navigation: false, clientUrl: origin + sealed, referrer: null };
+    expect(classifyRequest({ ...fetched, url: `${origin}/~/x/data:text/html,x` })).toEqual({ kind: "invalid" });
+  });
+
   it("proxies what a sealed page sends to another origin", () => {
     const route = classifyRequest({
       ...on,

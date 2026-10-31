@@ -21,7 +21,7 @@ import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
 import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
-import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess } from "./route.ts";
+import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess, type Route } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
@@ -233,16 +233,22 @@ async function handle(event: FetchEvent): Promise<Response> {
   if (topLevelGet) refreshInstanceSeal();
   await Promise.all([cookies.ready(), sealing.ready()]);
   const master = await sealing.sealerFor(isSealedPath(new URL(request.url).pathname));
-  const route = classifyRequest({
-    url: request.url,
-    origin,
-    navigation,
-    clientUrl,
-    referrer,
-    topLevelGet,
-    open: sealing.open,
-    seal: master ? (url) => master.seal(url) : undefined,
-  });
+  let route: Route;
+  try {
+    route = classifyRequest({
+      url: request.url,
+      origin,
+      navigation,
+      clientUrl,
+      referrer,
+      topLevelGet,
+      open: sealing.open,
+      seal: master ? (url) => master.seal(url) : undefined,
+    });
+  } catch {
+    // An address the router cannot read gets Girici's error page rather than the browser's network error.
+    return navigation ? htmlError("bad_request", 400, null) : Response.error();
+  }
 
   switch (route.kind) {
     case "passthrough":

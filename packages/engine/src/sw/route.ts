@@ -64,8 +64,10 @@ export function classifyRequest(input: RouteInput): Route {
   }
 
   // A root-relative URL the page resolved against our origin belongs to the page's real origin.
-  const base = realUrlOf(input.navigation ? input.referrer : input.clientUrl, input.origin, input.open);
-  if (!base) return { kind: "passthrough" };
+  const from = input.navigation ? input.referrer : input.clientUrl;
+  const base = realUrlOf(from, input.origin, input.open);
+  // A sealed page whose address does not open here must not reach the Girici server with its cookies.
+  if (!base) return isSealedClient(from, input.origin) ? { kind: "unsealable" } : { kind: "passthrough" };
   const real = new URL(pathAndQuery, base.origin);
   return { kind: "redirect", location: sealOnLoad ? sealOnLoad(real) : encodeUrl(real) };
 }
@@ -74,7 +76,14 @@ export function classifyRequest(input: RouteInput): Route {
 function relativeToSealed(relative: string, input: RouteInput): Route {
   const base = sealedBase(input);
   if (!base) return { kind: "unsealable" };
-  const real = new URL(relative, base);
+  let real: URL;
+  try {
+    real = new URL(relative, base);
+  } catch {
+    return { kind: "invalid" };
+  }
+  // A path such as javascript:x resolves to no address the proxy can carry or seal.
+  if (real.protocol !== "http:" && real.protocol !== "https:") return { kind: "invalid" };
   if (input.navigation) {
     return { kind: "redirect", location: (input.topLevelGet ? input.seal?.(real) : undefined) ?? encodeUrl(real) };
   }
