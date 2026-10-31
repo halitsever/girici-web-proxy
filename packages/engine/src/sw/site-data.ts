@@ -1,4 +1,5 @@
 import { PROTOCOL_VERSION, type SiteSummary } from "../shared/protocol.ts";
+import type { OpenSealed } from "../shared/sealed-address.ts";
 import { siteOf, type CookieService } from "./cookies/jar.ts";
 import { isUiWindow, realUrlOf, type ClientShape, type UiClientSet } from "./route.ts";
 
@@ -6,10 +7,15 @@ import { isUiWindow, realUrlOf, type ClientShape, type UiClientSet } from "./rou
 export type SiteDataCaller = { kind: "ui" } | { kind: "page"; url: URL } | { kind: "other" };
 
 /** The Girici UI may manage every site, a proxied window only its own, anything else nothing. */
-export function callerOf(client: ClientShape | undefined, origin: string, ui: UiClientSet): SiteDataCaller {
+export function callerOf(
+  client: ClientShape | undefined,
+  origin: string,
+  ui: UiClientSet,
+  open?: OpenSealed,
+): SiteDataCaller {
   if (!client) return { kind: "other" };
   if (isUiWindow(client, origin, ui)) return { kind: "ui" };
-  const real = client.type === "window" ? realUrlOf(client.url, origin) : null;
+  const real = client.type === "window" ? realUrlOf(client.url, origin, open) : null;
   return real ? { kind: "page", url: real } : { kind: "other" };
 }
 

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createApp } from "./app.ts";
 import { generateSetupCode, setupBanner } from "./auth/setup-code.ts";
 import { AuthStore } from "./auth/store.ts";
+import { BrandStore } from "./brand/store.ts";
 import { loadConfig, trustProxyWarning, type Config } from "./config.ts";
 import { openDb } from "./db/open.ts";
 import { compileTrust } from "./http/client-ip.ts";
@@ -16,7 +17,7 @@ import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
 import { createGuardedLookup } from "./upstream/ssrf.ts";
 import { createPoTokenMinter } from "./youtube/botguard-session.ts";
-import { attachWsRelay } from "./ws/relay-ws.ts";
+import { attachWsRelay, testUpstreamDial } from "./ws/relay-ws.ts";
 
 let config: Config;
 try {
@@ -71,6 +72,7 @@ const server = createHttpServer(
     sourceUrl: config.sourceUrl,
     logger,
     authStore,
+    brand: new BrandStore(join(config.dataDir, "brand"), authStore),
     trust,
     limiter,
     blocklist,
@@ -92,7 +94,10 @@ const server = createHttpServer(
   }),
 );
 const wsLookup = createGuardedLookup();
+const testCa = config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined;
 attachWsRelay(server, {
+  dial:
+    config.testUpstreams.size > 0 && !config.upstreamProxy ? testUpstreamDial(config.testUpstreams, testCa) : undefined,
   allowedTestHosts: new Set(config.testUpstreams.keys()),
   lookup: wsLookup,
   tunnel: config.upstreamProxy

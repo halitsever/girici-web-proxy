@@ -69,6 +69,7 @@ const NAV = page(
 <form id="post" method="post" action="https://site-a.test/echo"><input name="q" value="posted"><button id="post-go">Go</button></form>
 <form method="post" action="/redirect-307"><input name="q" value="kept"><button id="post-307-go">Go</button></form>
 <form method="post" action="/redirect-303"><input name="q" value="dropped"><button id="post-303-go">Go</button></form>
+<button id="blank-popup" onclick="const w = window.open(); w.location = 'https://site-b.test/';">blank popup</button>
 <button id="blank-frame" onclick="const f = document.createElement('iframe'); f.id = 'blank'; document.body.append(f); f.contentWindow.location.href = 'https://site-b.test/';">blank frame</button>
 <iframe id="frame" src="https://site-b.test/frame"></iframe>`,
 );
@@ -109,7 +110,13 @@ const FRAME = page(
   "Frame",
   `<h1>Frame</h1><pre id="frame-results"></pre>
 <script>
-  document.getElementById("frame-results").textContent = JSON.stringify({ href: location.href, parent: parent.location.href });
+  let parentHref;
+  try {
+    parentHref = parent.location.href;
+  } catch (error) {
+    parentHref = error.name;
+  }
+  document.getElementById("frame-results").textContent = JSON.stringify({ href: location.href, parent: parentHref });
 </script>`,
 );
 
@@ -177,6 +184,32 @@ const WORKER = page(
 </script>`,
 );
 
+// Reports how a binary frame reached it, to its parent when it is a frame.
+const WS_BINARY = page(
+  "Binary socket",
+  `<pre id="type"></pre>
+<script>
+  const socket = new WebSocket("wss://site-b.test/binary-socket");
+  socket.onmessage = (event) => {
+    const type = event.data instanceof Blob ? "blob" : Object.prototype.toString.call(event.data);
+    document.getElementById("type").textContent = type;
+    if (parent !== window) parent.postMessage("socket:" + type, "*");
+  };
+</script>`,
+);
+
+const WS_FRAME = page(
+  "Binary socket frame",
+  `<pre id="type"></pre><iframe src="/ws-binary"></iframe>
+<script>
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("socket:")) {
+      document.getElementById("type").textContent = event.data.slice(7);
+    }
+  });
+</script>`,
+);
+
 const REALTIME = page(
   "Realtime",
   `<pre id="results"></pre>
@@ -221,6 +254,16 @@ const COOKIE_SCRIPT = page(
     .then((t) => {
       document.getElementById("echo").textContent = t;
     });
+</script>`,
+);
+// The click writes a cookie first, so the runtime holds the navigation until the write is stored.
+const COOKIE_CLICK = page(
+  "Cookie click",
+  `<a id="go" href="https://site-b.test/">site b</a>
+<script>
+  document.getElementById("go").addEventListener("click", () => {
+    document.cookie = "clicked=1; path=/";
+  });
 </script>`,
 );
 const COOKIE_API_PAGE = page(
@@ -280,6 +323,225 @@ export const PROBE = `async function girProbe(scope) {
 }`;
 
 const PROBE_WORKER = `${PROBE}\ngirProbe(self).then((result) => postMessage(result));`;
+
+// Each case makes one window and checks it at once through a raw index, which no hook sees.
+const DOORS_FRAMES = page(
+  "Doors frames",
+  `<iframe id="parsed"></iframe>
+<script>const parsedHooked = Object.getOwnPropertyDescriptor(frames[0], "__g$") !== undefined;</script>
+<button id="start">start</button><pre id="results"></pre>
+<script>
+  ${PROBE}
+  const hookedOf = (w) => Boolean(w) && Object.getOwnPropertyDescriptor(w, "__g$") !== undefined;
+  // A window may be missing (the server refused the load) or sandboxed into another origin; neither reaches storage.
+  const stateOf = (w) => {
+    if (!w) return "none";
+    try {
+      return hookedOf(w);
+    } catch {
+      return "cross-origin";
+    }
+  };
+  // Frames name a page, as real ones do: a frame without src loads its blank document at once, and that load alone
+  // would adopt it.
+  const frame = () => {
+    const f = document.createElement("iframe");
+    f.src = "/page2";
+    return f;
+  };
+  const blankFrame = () => document.createElement("iframe");
+  // A fresh empty element at the end of body, so a frame made in it is the last window.
+  const box = () => document.getElementById("slot").appendChild(document.createElement("div"));
+  const last = () => frames[frames.length - 1];
+  // Each case must make a window; one that makes none reports that instead of passing on an older frame.
+  const newest = (view, count) => (view.length > count ? view[view.length - 1] : "no window");
+  const inBox = (insert) => {
+    const count = frames.length;
+    insert(box(), frame());
+    return newest(window, count);
+  };
+  // Frames in a shadow tree are never indexed, so DocumentFragment insertions are reachable only through the hooked
+  // getters and have no case here.
+  // A blank frame whose document has no element yet, for Document and DocumentType insertions.
+  const inHost = (insert) => {
+    const host = box().appendChild(blankFrame());
+    const doc = host.contentDocument;
+    const child = host.contentWindow;
+    doc.documentElement.remove();
+    insert(doc, frame());
+    return newest(child, 0);
+  };
+  // A blank frame whose document keeps its elements, for setters that need a document element.
+  const inLoadedHost = (insert) => {
+    const host = box().appendChild(blankFrame());
+    const doc = host.contentDocument;
+    const child = host.contentWindow;
+    insert(doc, child);
+    return newest(child, 0);
+  };
+  const withDoctype = (doc) => {
+    const doctype = doc.implementation.createDocumentType("html", "", "");
+    doc.appendChild(doctype);
+    return doctype;
+  };
+  const cases = {
+    "Node.appendChild": () => inBox((b, f) => b.appendChild(f)),
+    "Node.insertBefore": () => inBox((b, f) => b.insertBefore(f, null)),
+    "Node.replaceChild": () => inBox((b, f) => b.replaceChild(f, b.appendChild(document.createElement("span")))),
+    "Element.append": () => inBox((b, f) => b.append(f)),
+    "Element.prepend": () => inBox((b, f) => b.prepend(f)),
+    "Element.replaceChildren": () => inBox((b, f) => b.replaceChildren(f)),
+    "Element.before": () => inBox((b, f) => b.appendChild(document.createElement("span")).before(f)),
+    "Element.after": () => inBox((b, f) => b.appendChild(document.createElement("span")).after(f)),
+    "Element.replaceWith": () => inBox((b, f) => b.appendChild(document.createElement("span")).replaceWith(f)),
+    "Element.insertAdjacentElement": () => inBox((b, f) => b.insertAdjacentElement("beforeend", f)),
+    "Document.append": () => inHost((d, f) => d.append(f)),
+    "Document.prepend": () => inHost((d, f) => d.prepend(f)),
+    "Document.replaceChildren": () => inHost((d, f) => d.replaceChildren(f)),
+    "Document.body": () =>
+      inLoadedHost((d) => {
+        const body = d.createElement("body");
+        const f = d.createElement("iframe");
+        f.src = "/page2";
+        body.append(f);
+        d.body = body;
+      }),
+    "table.caption": () =>
+      inBox((b, f) => {
+        const caption = document.createElement("caption");
+        caption.append(f);
+        b.appendChild(document.createElement("table")).caption = caption;
+      }),
+    "table.tHead": () =>
+      inBox((b, f) => {
+        const head = document.createElement("thead");
+        head.insertRow().insertCell().append(f);
+        b.appendChild(document.createElement("table")).tHead = head;
+      }),
+    "table.tFoot": () =>
+      inBox((b, f) => {
+        const foot = document.createElement("tfoot");
+        foot.insertRow().insertCell().append(f);
+        b.appendChild(document.createElement("table")).tFoot = foot;
+      }),
+    execCommand: () =>
+      inBox((b) => {
+        b.contentEditable = "true";
+        b.focus();
+        getSelection().selectAllChildren(b);
+        document.execCommand("insertHTML", false, "<iframe src='/page2'></iframe>");
+      }),
+    "CharacterData.before": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).before(f)),
+    "CharacterData.after": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).after(f)),
+    "CharacterData.replaceWith": () => inBox((b, f) => b.appendChild(document.createTextNode("t")).replaceWith(f)),
+    // An element can never come before a doctype, so DocumentType.before cannot make a window.
+    "DocumentType.after": () => inHost((d, f) => withDoctype(d).after(f)),
+    "DocumentType.replaceWith": () => inHost((d, f) => withDoctype(d).replaceWith(f)),
+    "Range.insertNode": () =>
+      inBox((b, f) => {
+        const range = document.createRange();
+        range.selectNodeContents(b);
+        range.insertNode(f);
+      }),
+    "Range.surroundContents": () =>
+      inBox((b, f) => {
+        b.appendChild(document.createTextNode("t"));
+        const range = document.createRange();
+        range.selectNodeContents(b);
+        range.surroundContents(f);
+      }),
+    innerHTML: () => inBox((b) => (b.innerHTML = "<iframe src='/page2'></iframe>")),
+    outerHTML: () => inBox((b) => (b.appendChild(document.createElement("span")).outerHTML = "<iframe src='/page2'></iframe>")),
+    insertAdjacentHTML: () => inBox((b) => b.insertAdjacentHTML("beforeend", "<iframe src='/page2'></iframe>")),
+    "document.write": () => {
+      const host = box().appendChild(blankFrame());
+      const doc = host.contentDocument;
+      const child = host.contentWindow;
+      doc.open();
+      doc.write("<iframe src='/page2'></iframe>");
+      const made = child[0];
+      doc.close();
+      return made;
+    },
+    // A write to a loaded document opens it first, which drops the document's listeners.
+    "document.write after load": () =>
+      inLoadedHost((d) => {
+        d.write("<iframe src='/page2'></iframe>");
+        d.close();
+      }),
+    "fragment after open": () =>
+      inLoadedHost((d) => {
+        d.open();
+        d.write("<body></body>");
+        d.close();
+        const fragment = d.createDocumentFragment();
+        const f = d.createElement("iframe");
+        f.src = "/page2";
+        fragment.append(f);
+        d.body.appendChild(fragment);
+      }),
+  };
+  // A javascript: URL whose string result becomes the frame's next document; its script reports what it found.
+  const jsDocument = (key) =>
+    "javascript:" +
+    JSON.stringify(
+      "<scr" + "ipt>parent.jsDone(" + JSON.stringify(key) + ", Object.getOwnPropertyDescriptor(window, '__g$') !== undefined)</scr" + "ipt>",
+    );
+  const jsWaiting = {};
+  window.jsDone = (key, value) => jsWaiting[key]?.(value);
+  const viaJavascript = (key, navigate) =>
+    new Promise((resolve) => {
+      jsWaiting[key] = resolve;
+      setTimeout(() => resolve("timeout"), 5000);
+      const f = box().appendChild(blankFrame());
+      navigate(f, jsDocument(key));
+    });
+  const loadedWindow = (element) =>
+    new Promise((resolve) => {
+      const count = frames.length;
+      element.onload = element.onerror = () => resolve(frames.length > count ? last() : null);
+      setTimeout(() => resolve(frames.length > count ? last() : null), 5000);
+      box().appendChild(element);
+    });
+  document.getElementById("start").onclick = async () => {
+    const hooked = { parsed: parsedHooked };
+    // First, while the click still counts as user activation.
+    let pip = "unavailable";
+    try {
+      const w = await documentPictureInPicture.requestWindow();
+      pip = hookedOf(w);
+      w.close();
+    } catch {}
+    for (const [name, make] of Object.entries(cases)) {
+      const made = make();
+      hooked[name] = made === "no window" ? made : hookedOf(made);
+    }
+    hooked["javascript: src"] = await viaJavascript("src", (f, url) => (f.src = url));
+    hooked["javascript: location"] = await viaJavascript("location", (f, url) => (f.contentWindow.location.href = url));
+    hooked["javascript: self"] = await viaJavascript("self", (f, url) =>
+      new f.contentWindow.Function("location.href = " + JSON.stringify(url))(),
+    );
+    // Object and embed windows come a task later, so they are checked when the element loads.
+    const object = document.createElement("object");
+    object.type = "text/html";
+    object.data = "/page2";
+    const embed = document.createElement("embed");
+    embed.type = "text/html";
+    embed.src = "/page2";
+    const loaded = { object: stateOf(await loadedWindow(object)), embed: stateOf(await loadedWindow(embed)) };
+    const popup = open();
+    hooked.open = hookedOf(popup);
+    const named = document.open("", "doors-named", "");
+    hooked["document.open with three arguments"] = hookedOf(named);
+    let probed = null;
+    for (let i = frames.length - 1; i >= 0 && !probed; i--) if (stateOf(frames[i]) === true) probed = frames[i];
+    const [frameProbe, popupProbe] = await Promise.all([girProbe(probed), girProbe(popup)]);
+    popup.close();
+    named?.close();
+    document.getElementById("results").textContent = JSON.stringify({ hooked, loaded, pip, frameProbe, popupProbe });
+  };
+</script><div id="slot"></div>`,
+);
 
 const DOORS_WORKERS = page(
   "Doors workers",
@@ -400,11 +662,154 @@ const echo: Route = (req, res, body) => {
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(page("Echo", `<pre id="echo">${escapeHtml(`${req.method ?? ""}${body ? ` ${body}` : ""}`)}</pre>`));
 };
+const SEALED_PAGE = page(
+  "Sealed",
+  `<h1>Sealed</h1>
+<img id="rel" src="dot.png" alt="">
+<script type="module">import "./mod.js";</script>
+<a href="https://site-b.test/target">site-b</a>`,
+);
+const SEALED_SPA = page(
+  "Sealed SPA",
+  `<h1>SPA</h1>
+<button id="push">Push</button><pre id="href"></pre>
+<a id="to-bottom" href="#bottom">bottom</a> <a id="page2" href="?page=2">page 2</a>
+<form action="/sealed/search"><input name="q" aria-label="Search"><button id="search-go">Search</button></form>
+<button id="popup-go">Popup</button><pre id="popup"></pre>
+<iframe id="frame" src="https://www.site-a.test/sealed/cookie-echo"></iframe>
+<div style="height: 3000px"></div><p id="bottom">Bottom</p>
+<script>
+  window.marker = "kept";
+  document.getElementById("push").onclick = () => {
+    history.pushState({}, "", "next?a=1");
+    document.getElementById("href").textContent = location.href;
+  };
+  document.getElementById("popup-go").onclick = () => {
+    const popup = window.open("/sealed/next");
+    const poll = setInterval(() => {
+      try {
+        if (popup.location.pathname !== "/sealed/next") return;
+        document.getElementById("popup").textContent = popup.location.pathname;
+        clearInterval(poll);
+      } catch {}
+    }, 100);
+  };
+</script>`,
+);
+const SEALED_ECHO = `<pre id="href"></pre><pre id="search"></pre>
+<script>
+  document.getElementById("href").textContent = location.href;
+  document.getElementById("search").textContent = location.search;
+</script>`;
+
+/** Sets the cookie a same-site frame of the page should still carry. */
+const sealedCookie =
+  (body: string): Route =>
+  (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/html; charset=utf-8",
+      "set-cookie": "sealed=1; Path=/; Domain=site-a.test; SameSite=Lax",
+    });
+    res.end(body);
+  };
+const sealedPage = sealedCookie(SEALED_PAGE);
+const sealedSearch: Route = (req, res) => {
+  const query = new URL(req.url ?? "/", "http://fixture").search;
+  res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+  res.end(page("Sealed search", `<pre id="query">${escapeHtml(query)}</pre>${SEALED_ECHO}`));
+};
+
 const search: Route = (req, res) => {
   const query = new URL(req.url ?? "/", "http://fixture").searchParams.get("q") ?? "";
   res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
   res.end(page("Search", `<h1 id="query">${escapeHtml(query)}</h1>`));
 };
+
+/** Served markup and headers that name a blob URL the page made, the way a site's own server could echo one back. */
+const servedBlob =
+  (kind: "frame" | "meta" | "header"): Route =>
+  (req, res) => {
+    const url = new URL(req.url ?? "/", "http://fixture").searchParams.get("u") ?? "";
+    const headers: Record<string, string> = { "content-type": "text/html; charset=utf-8" };
+    if (kind === "header") headers.refresh = `0;url=${url}`;
+    res.writeHead(200, headers);
+    const body =
+      kind === "frame"
+        ? `<iframe src="${escapeHtml(url)}"></iframe>`
+        : kind === "meta"
+          ? `<meta http-equiv="refresh" content="0;url=${escapeHtml(url)}">`
+          : "<p>header</p>";
+    res.end(page("Served blob", body));
+  };
+
+// A page that breaks the array iterator before its frames are adopted, to reach the jar or navigate unhooked.
+const ITERATOR_ADOPTION = page(
+  "Iterator adoption",
+  `<pre id="results"></pre>
+<script>
+  const results = {};
+  const iterate = Array.prototype[Symbol.iterator];
+  Array.prototype[Symbol.iterator] = function* () {};
+  const first = document.createElement("iframe");
+  document.body.appendChild(first);
+  Array.prototype[Symbol.iterator] = iterate;
+  const request = first.contentWindow.indexedDB.open("__girici");
+  request.onsuccess = () => {
+    results.stores = request.result.objectStoreNames.length;
+    request.result.close();
+    document.getElementById("results").textContent = JSON.stringify(results);
+  };
+  request.onerror = () => {
+    results.stores = "error";
+    document.getElementById("results").textContent = JSON.stringify(results);
+  };
+  Array.prototype[Symbol.iterator] = function () {
+    throw new Error("page");
+  };
+  const second = document.createElement("iframe");
+  second.name = "second";
+  try {
+    document.body.appendChild(second);
+  } catch {
+    // The insertion may fail; the frame must still not navigate around the proxy.
+  }
+  Array.prototype[Symbol.iterator] = iterate;
+  second.contentWindow.open("https://site-b.test/", "_self");
+</script>`,
+);
+
+// A served refresh whose target starts with a quote; the rewritten value must keep it inside the proxy.
+const REFRESH_QUOTE = page(
+  "Refresh quote",
+  "<p>quote</p>",
+  `<meta http-equiv="refresh" content="0; url=&quot;'//site-b.test/&quot;">`,
+);
+const REFRESH_QUOTE_HOST = page(
+  "Refresh quote host",
+  `<pre id="done"></pre><iframe id="quoted" src="/refresh-quote"></iframe>
+<script>
+  setTimeout(() => (document.getElementById("done").textContent = "done"), 2500);
+</script>`,
+);
+
+const SERVED_BLOBS = page(
+  "Served blobs",
+  `<pre id="results"></pre>
+<script>
+  const ran = [];
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("ran:")) ran.push(event.data.slice(4));
+  });
+  for (const kind of ["frame", "meta", "header"]) {
+    const code = '<svg xmlns="http://www.w3.org/2000/svg"><script>top.postMessage("ran:' + kind + '", "*")<\\/script></svg>';
+    const url = URL.createObjectURL(new Blob([code], { type: "image/svg+xml" }));
+    const frame = document.createElement("iframe");
+    frame.src = "/served-blob-" + kind + "?u=" + encodeURIComponent(url);
+    document.body.appendChild(frame);
+  }
+  setTimeout(() => (document.getElementById("results").textContent = JSON.stringify({ ran: ran.sort() })), 3000);
+</script>`,
+);
 
 const SINKS = page(
   "Sinks",
@@ -581,26 +986,307 @@ const PM_SOURCE_CHILD = page(
 </script>`,
 );
 
-// Reading contentWindow installs the runtime into the blank frame before the page gives the frame its src.
+// The page holds the frame's blank window before it names the page to load, as some widget loaders do.
+const PM_TOUCH = page(
+  "PostMessage touch",
+  `<pre id="results"></pre>
+<script>
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const child = frame.contentWindow;
+  frame.src = "https://site-b.test/pm-touch-child";
+  const out = {};
+  window.addEventListener("message", (event) => {
+    if (event.data === "ready") {
+      out.readyOrigin = event.origin;
+      out.readyFromChild = event.source === child;
+      child.postMessage("ping", "https://site-b.test");
+    } else {
+      Object.assign(out, event.data);
+      document.getElementById("results").textContent = JSON.stringify(out);
+    }
+  });
+</script>`,
+);
+
+const TOP_HOST = page(
+  "Top host",
+  `<p id="top"></p><iframe src="https://site-b.test/top-probe"></iframe>
+<script>
+  window.addEventListener("message", (event) => {
+    document.getElementById("top").textContent = String(event.data);
+  });
+</script>`,
+);
+
+const TOP_PROBE = page(
+  "Top probe",
+  `<script>
+  let result = "open";
+  try {
+    top.document.title;
+  } catch (error) {
+    result = error.name;
+  }
+  parent.postMessage(result, "*");
+</script>`,
+);
+
+const CROSS_POPUP = page(
+  "Cross popup",
+  `<button id="open">open</button><button id="check">check</button><pre id="results"></pre>
+<script>
+  let w;
+  const failure = (read) => {
+    try {
+      read();
+      return "open";
+    } catch (error) {
+      return error.name;
+    }
+  };
+  document.getElementById("open").onclick = () => {
+    w = open("https://site-b.test/");
+  };
+  document.getElementById("check").onclick = () => {
+    let posted = true;
+    try {
+      w.postMessage("x", "https://site-b.test");
+    } catch {
+      posted = false;
+    }
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      storage: failure(() => w.localStorage),
+      closed: w.closed,
+      posted,
+    });
+  };
+</script>`,
+);
+
+const FAILURE = `const failure = (read) => {
+    try {
+      read();
+      return "open";
+    } catch (error) {
+      return error.name;
+    }
+  };`;
+
+// Each change shows as [key, newValue, storageArea is this window's localStorage].
+// The blob page reports whether the runtime is there, with a fresh number for each load.
+const BLOB_FRAME = page(
+  "Blob frame",
+  `<iframe id="f"></iframe>
+<script>
+  const html = '<p id="state"></p><script>document.getElementById("state").textContent = typeof window.__g$ + ":" + Math.random();<' + '/script>';
+  document.getElementById("f").src = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+</script>`,
+);
+
+const STORAGE_EVENTS = page(
+  "Storage events",
+  `<pre id="events"></pre>
+<script>
+  addEventListener("storage", (event) => {
+    const line = JSON.stringify([event.key, event.newValue, event.storageArea === localStorage]);
+    document.getElementById("events").textContent += line + "\\n";
+  });
+</script>`,
+);
+
+const XS_HOOKS = page(
+  "Cross-site hooks",
+  `<pre id="results"></pre><iframe id="blank"></iframe><iframe id="b" src="https://site-b.test/xs-child"></iframe>
+<script>
+  ${FAILURE}
+  addEventListener("message", (event) => {
+    if (!event.data || event.data.from !== "xs-child") return;
+    const frame = document.getElementById("b");
+    const blank = document.getElementById("blank").contentWindow;
+    document.getElementById("results").textContent = JSON.stringify({
+      contentDocument: frame.contentDocument === null,
+      svgDocument: typeof frame.getSVGDocument === "function" ? frame.getSVGDocument() === null : "absent",
+      sourceDocument: failure(() => event.source.document),
+      frameElement: event.data.frameElement,
+      history: failure(() => history.pushState.call(blank.history, null, "", location.href)),
+    });
+  });
+</script>`,
+);
+
+const XS_CHILD = page(
+  "Cross-site child",
+  `<script>parent.postMessage({ from: "xs-child", frameElement: window.frameElement === null }, "*");</script>`,
+);
+
+// Every route a cross-site frame has to send code to its top; none of it may run there.
+const XS_JS_HOST = page(
+  "Cross-site javascript host",
+  `<pre id="results"></pre><iframe src="https://site-b.test/xs-js-child"></iframe>
+<script>
+  window.pwned = 0;
+  addEventListener("message", (event) => {
+    if (event.data !== "xs-js-done") return;
+    setTimeout(() => {
+      document.getElementById("results").textContent = JSON.stringify({ pwned: window.pwned });
+    }, 1500);
+  });
+</script>`,
+);
+
+const XS_JS_CHILD = page(
+  "Cross-site javascript child",
+  `<script>
+  const code = "javascript:void(window.pwned = (window.pwned || 0) + 1)";
+  const attempt = (run) => {
+    try {
+      run();
+    } catch {
+      // A refusal may throw; the host only counts what ran.
+    }
+  };
+  attempt(() => {
+    top.location = code;
+  });
+  attempt(() => {
+    parent.location.href = code;
+  });
+  attempt(() => top.location.replace(code));
+  attempt(() => open(code, "_top"));
+  attempt(() => {
+    const link = document.createElement("a");
+    link.href = code;
+    link.target = "_top";
+    document.body.appendChild(link);
+    link.click();
+  });
+  parent.postMessage("xs-js-done", "*");
+</script>`,
+);
+
+const XS_OPENER = page(
+  "Cross-site opener",
+  `<button id="open">open</button><button id="doc-open">document.open</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  let w;
+  document.getElementById("open").onclick = () => {
+    w = open("https://site-b.test/xs-opened");
+  };
+  document.getElementById("doc-open").onclick = () => {
+    w = document.open("https://site-b.test/xs-opened", "xs", "");
+  };
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      closed: w.closed,
+    });
+  };
+</script>`,
+);
+
+const XS_OPENED = page(
+  "Cross-site opened",
+  `<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  document.getElementById("results").textContent = JSON.stringify({
+    runtime: typeof window.__g$ === "object",
+    openerDocument: failure(() => opener.document),
+    openerClosed: opener.closed,
+  });
+</script>`,
+);
+
+const EMBED_STORAGE = page(
+  "Embed storage",
+  `<iframe id="b" src="https://site-b.test/storage"></iframe>
+<iframe id="www" src="https://www.site-a.test/storage"></iframe>`,
+);
+
+// A src set before insertion is the one order in which every browser reuses the blank window for the child page.
 const REUSE = page(
   "Reuse",
   `<pre id="results"></pre>
 <script>
   document.cookie = "a=1; path=/";
   const frame = document.createElement("iframe");
+  frame.src = "https://site-b.test/reuse-child";
   document.body.appendChild(frame);
-  const blank = frame.contentWindow;
+  frame.contentWindow.mark = "reused";
   window.addEventListener("message", (event) => {
     const out = { ...event.data, fromChild: event.source === frame.contentWindow };
     document.getElementById("results").textContent = JSON.stringify(out);
   });
-  frame.src = "https://site-b.test/reuse-child";
 </script>`,
 );
 
+// Same-site children in reused windows: one learns its top from its parent, one only by asking the frame itself.
+const REUSE_SAME = page(
+  "Reuse same site",
+  `<pre id="results"></pre>
+<script>
+  document.cookie = "a=1; path=/";
+  const out = {};
+  const children = {};
+  const make = (key, policy) => {
+    const frame = document.createElement("iframe");
+    if (policy) frame.referrerPolicy = policy;
+    frame.src = "/reuse-same-child?k=" + key;
+    document.body.appendChild(frame);
+    const blank = frame.contentWindow;
+    blank.mark = key;
+    // A write from the blank document first, so the renewed one cannot start from its sequence.
+    blank.document.cookie = key + "-blank=1; path=/";
+    children[key] = frame;
+  };
+  window.addEventListener("message", (event) => {
+    const { key } = event.data;
+    out[key] = { ...event.data, fromChild: event.source === children[key].contentWindow };
+    if (Object.keys(out).length === 2) document.getElementById("results").textContent = JSON.stringify(out);
+  });
+  make("told");
+  make("asked", "no-referrer");
+</script>`,
+);
+
+const REUSE_SAME_CHILD = page(
+  "Reuse same site child",
+  `<script>
+  const key = new URLSearchParams(location.search).get("k");
+  const reused = window.mark === key;
+  document.cookie = key + "=1; path=/";
+  fetch("/cookie/echo")
+    .then((r) => r.text())
+    .then((echo) => parent.postMessage({ key, reused, echo }, "*"));
+</script>`,
+);
+
+// The worker comes from a blank frame, whose own address names no page to bind it to.
+const BLANK_WORKER = page(
+  "Blank worker",
+  `<p id="worker"></p>
+<script>
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const code = 'fetch("/cookie/echo", { credentials: "include" }).then((r) => r.text()).then((t) => postMessage(t));';
+  const blob = frame.contentWindow.URL.createObjectURL(new frame.contentWindow.Blob([code], { type: "text/javascript" }));
+  const worker = new frame.contentWindow.Worker(blob);
+  worker.onmessage = (e) => { document.getElementById("worker").textContent = e.data || "none"; };
+  worker.onerror = () => { document.getElementById("worker").textContent = "error"; };
+</script>`,
+);
+
+// A third-party frame's own write stays out of its mirror only once the window runs on this document's config.
 const REUSE_CHILD = page(
   "Reuse child",
-  `<script>parent.postMessage({ cookie: document.cookie, href: location.href }, "*");</script>`,
+  `<script>
+  document.cookie = "own=1; path=/";
+  parent.postMessage({ cookie: document.cookie, href: location.href, reused: window.mark === "reused" }, "*");
+</script>`,
 );
 
 // Workers come from a blank frame's constructor, the way anti-tamper code reaches for untouched natives.
@@ -652,6 +1338,346 @@ const SRI = page(
 const SRCDOC_ESCAPE = page(
   "Srcdoc escape",
   `<iframe srcdoc="<script>fetch('https://site-b.test/api').catch(function(){})<\/script>"></iframe>`,
+);
+
+/** A srcdoc document whose first script reports whether the runtime is in place and what its realm reaches. */
+const srcdocReport = (id: string): string =>
+  `<p>${id}</p><script>${PROBE}
+(async () => {
+  const hooked = Object.getOwnPropertyDescriptor(window, "__g$") !== undefined;
+  const base = document.baseURI;
+  parent.postMessage(JSON.stringify({ id: ${JSON.stringify(id)}, hooked, base, probe: await girProbe(window) }), "*");
+})();</script>`;
+
+const DOORS_SRCDOC = page(
+  "Doors srcdoc",
+  `<base href="https://cdn.site-a.test/d/"><pre id="results"></pre><pre id="readback"></pre>
+<script>
+  const seen = {};
+  addEventListener("message", (event) => {
+    const report = JSON.parse(event.data);
+    seen[report.id] = { hooked: report.hooked, base: report.base, probe: report.probe };
+    if (Object.keys(seen).length === 3) document.getElementById("results").textContent = JSON.stringify(seen);
+  });
+  const docs = ${JSON.stringify({ property: srcdocReport("property"), attribute: srcdocReport("attribute") }).replace(/<\//g, "<\\/")};
+  const byProperty = document.createElement("iframe");
+  byProperty.srcdoc = docs.property;
+  document.body.appendChild(byProperty);
+  const byAttribute = document.createElement("iframe");
+  byAttribute.setAttribute("srcdoc", docs.attribute);
+  document.body.appendChild(byAttribute);
+  document.getElementById("readback").textContent = JSON.stringify({
+    property: byProperty.srcdoc === docs.property,
+    attribute: byAttribute.getAttribute("srcdoc") === docs.attribute,
+    markup: !document.body.innerHTML.includes("data-" + "girici") && !byProperty.outerHTML.includes("data-" + "girici"),
+  });
+</script>
+<iframe srcdoc="${escapeHtml(srcdocReport("parsed"))}"></iframe>`,
+);
+
+/**
+ * A blob page that reports the address it sees and what its realm reaches; a popup names itself by its opener.
+ * WebKit gives blob documents a cache storage that refuses every call, so a refusal counts as reaching no cache.
+ */
+const blobReport = (id: string): string =>
+  `<!doctype html><p>${id}</p><script>${PROBE}
+(async () => {
+  const keys = () => Promise.resolve().then(() => caches.keys()).catch(() => []);
+  const scope = { indexedDB, BroadcastChannel, caches: { keys } };
+  const report = { id: opener ? "popup" : ${JSON.stringify(id)}, ran: true, href: location.href, probe: await girProbe(scope) };
+  (opener || parent).postMessage(JSON.stringify(report), "*");
+})();</script>`;
+
+const DOORS_BLOBS = page(
+  "Doors blobs",
+  `<button id="start">start</button><pre id="results"></pre>
+<a id="dl" download="x.txt">download</a>
+<script>
+  const docs = ${JSON.stringify({
+    html: blobReport("html"),
+    untyped: blobReport("untyped"),
+    svg: '<svg xmlns="http://www.w3.org/2000/svg"><script>parent.postMessage("svg ran", "*")</script></svg>',
+  }).replace(/<\//g, "<\\/")};
+  const blobUrl = (text, type) => URL.createObjectURL(type === undefined ? new Blob([text]) : new Blob([text], { type }));
+  document.getElementById("dl").href = blobUrl("hello", "text/plain");
+  const seen = {};
+  let svgRan = false;
+  addEventListener("message", (event) => {
+    if (event.data === "svg ran") svgRan = true;
+    else {
+      try {
+        const report = JSON.parse(event.data);
+        seen[report.id] = { ran: report.ran, href: report.href, probe: report.probe };
+      } catch {}
+    }
+  });
+  const frameOf = (set) => {
+    const frame = document.createElement("iframe");
+    set(frame);
+    document.body.appendChild(frame);
+    return frame;
+  };
+  // True when this page can read the SVG document, directly or inside the frame that shows it.
+  const readable = (frame) => {
+    try {
+      if (frame.contentDocument?.querySelector("svg")) return true;
+      const inner = frame.contentWindow.frames[0];
+      return Boolean(inner?.document.querySelector("svg"));
+    } catch {
+      return false;
+    }
+  };
+  document.getElementById("start").onclick = () => {
+    const htmlUrl = blobUrl(docs.html, "text/html");
+    const popup = open(htmlUrl);
+    frameOf((frame) => (frame.src = htmlUrl));
+    const svgFrame = frameOf((frame) => frame.setAttribute("src", blobUrl(docs.svg, "image/svg+xml")));
+    frameOf((frame) => (frame.src = blobUrl(docs.untyped)));
+    const started = Date.now();
+    // The two pages that should run report first; the others get two more seconds to show they stay inert.
+    const finish = () => {
+      if ((!seen.html || !seen.popup) && Date.now() - started < 10000) return void setTimeout(finish, 100);
+      setTimeout(() => {
+        popup?.close();
+        document.getElementById("results").textContent = JSON.stringify({
+          html: seen.html ?? null,
+          svgRan,
+          untypedRan: Boolean(seen.untyped),
+          popup: seen.popup ?? null,
+          svgReadable: readable(svgFrame),
+        });
+      }, 2000);
+    };
+    finish();
+  };
+</script>`,
+);
+
+// Each sink loads an SVG whose script would report its name; a swapped sink shows it sandboxed instead.
+const DOORS_BLOB_SINKS = page(
+  "Doors blob sinks",
+  `<button id="start">start</button><pre id="results"></pre>
+<a id="ctx">context</a>
+<iframe name="t-link"></iframe><iframe name="t-detached"></iframe><iframe name="t-dispatch"></iframe>
+<iframe name="t-svg"></iframe><iframe name="t-xlink"></iframe><iframe name="t-form"></iframe><iframe name="t-request"></iframe>
+<iframe id="nav"></iframe><iframe id="writer"></iframe><iframe name="t-docopen"></iframe>
+<iframe id="meta-attr"></iframe><iframe id="meta-property"></iframe><iframe id="meta-markup"></iframe>
+<iframe id="meta-space"></iframe><iframe id="meta-fraction"></iframe><iframe id="meta-quoted"></iframe>
+<iframe id="meta-web"></iframe><iframe id="meta-quote-web"></iframe>
+<div id="box"></div>
+<script>
+  const ran = [];
+  addEventListener("message", (event) => {
+    if (typeof event.data === "string" && event.data.startsWith("ran:")) ran.push(event.data.slice(4));
+  });
+  const blobOf = (text, type) => URL.createObjectURL(new Blob([text], { type }));
+  const svg = (id) =>
+    blobOf('<svg xmlns="http://www.w3.org/2000/svg"><script>top.postMessage("ran:' + id + '", "*")<\\/script></svg>', "image/svg+xml");
+  document.getElementById("ctx").href = blobOf('<!doctype html><p id="opened">opened</p>', "text/html");
+  const SVG = "http://www.w3.org/2000/svg";
+  const XLINK = "http://www.w3.org/1999/xlink";
+  const byId = (id) => document.getElementById(id);
+  const add = (element, parent = document.body) => parent.appendChild(element);
+  const readBack = {};
+  byId("start").onclick = () => {
+    const property = document.createElement("iframe");
+    const propertyUrl = svg("property");
+    property.src = propertyUrl;
+    add(property);
+    readBack.property = property.src === propertyUrl && property.getAttribute("src") === propertyUrl;
+
+    const byNode = document.createElement("iframe");
+    const node = document.createAttribute("src");
+    const nodeUrl = svg("attr");
+    node.value = nodeUrl;
+    byNode.setAttributeNode(node);
+    add(byNode);
+    readBack.attr = byNode.getAttributeNode("src").value === nodeUrl;
+
+    const object = document.createElement("object");
+    const objectUrl = svg("object");
+    object.data = objectUrl;
+    add(object);
+    readBack.object = object.data === objectUrl;
+    const embed = document.createElement("embed");
+    const embedUrl = svg("embed");
+    embed.src = embedUrl;
+    add(embed);
+    readBack.embed = embed.src === embedUrl;
+
+    byId("nav").contentWindow.location.href = svg("location");
+
+    const box = byId("box");
+    const markupUrl = svg("innerHTML");
+    box.innerHTML = '<iframe src="' + markupUrl + '"></iframe>';
+    readBack.markup = box.innerHTML.includes(markupUrl) && box.firstChild.src === markupUrl;
+    box.insertAdjacentHTML("beforeend", '<iframe src="' + svg("insertAdjacentHTML") + '"></iframe>');
+    add(document.createElement("div"), box).outerHTML = '<iframe src="' + svg("outerHTML") + '"></iframe>';
+    box.appendChild(document.createRange().createContextualFragment('<iframe src="' + svg("fragment") + '"></iframe>'));
+    const parsed = new DOMParser().parseFromString('<iframe src="' + svg("DOMParser") + '"></iframe>', "text/html");
+    box.appendChild(document.adoptNode(parsed.body.firstChild));
+    const written = byId("writer").contentDocument;
+    written.write('<iframe src="' + svg("write") + '"></iframe>');
+    written.close();
+
+    const link = document.createElement("a");
+    const linkUrl = svg("link");
+    link.href = linkUrl;
+    link.target = "t-link";
+    link.addEventListener("click", () => {
+      readBack.link = link.href === linkUrl && link.getAttribute("href") === linkUrl;
+    });
+    add(link).click();
+    const detached = document.createElement("a");
+    detached.href = svg("detached");
+    detached.target = "t-detached";
+    detached.click();
+    const dispatched = document.createElement("a");
+    dispatched.href = svg("dispatch");
+    dispatched.target = "t-dispatch";
+    dispatched.dispatchEvent(new MouseEvent("click"));
+
+    const root = add(document.createElementNS(SVG, "svg"));
+    const svgLink = document.createElementNS(SVG, "a");
+    svgLink.setAttribute("href", svg("svg-href"));
+    svgLink.setAttribute("target", "t-svg");
+    add(svgLink, root).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const xlink = document.createElementNS(SVG, "a");
+    xlink.setAttributeNS(XLINK, "xlink:href", svg("svg-xlink"));
+    xlink.setAttribute("target", "t-xlink");
+    add(xlink, root).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const form = add(document.createElement("form"));
+    form.action = svg("form-submit");
+    form.target = "t-form";
+    form.submit();
+    const requested = add(document.createElement("form"));
+    requested.setAttribute("action", svg("form-request"));
+    requested.target = "t-request";
+    requested.requestSubmit();
+
+    // Each runs in a frame of its own, since it navigates the window it runs in.
+    window.svgBlob = svg;
+    const frameRun = (code) => {
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<script>" + code + "<\\/script>";
+      add(frame);
+    };
+    frameRun("location = parent.svgBlob('location-assign')");
+    frameRun("location &&= parent.svgBlob('location-and')");
+    frameRun("[location] = [parent.svgBlob('location-pattern')]");
+    document.open(svg("document-open"), "t-docopen", "");
+    frameRun("if (window.navigation) Object.getPrototypeOf(navigation).navigate.call(navigation, parent.svgBlob('navigation-proto'))");
+
+    // Parsers the HTML sinks do not see; their nodes meet the insertion backstop.
+    const XHTML = "http://www.w3.org/1999/xhtml";
+    const xml = (markup) => new DOMParser().parseFromString(markup, "application/xml").documentElement;
+    box.appendChild(document.importNode(xml('<iframe xmlns="' + XHTML + '" src="' + svg("xml-parser") + '"/>'), true));
+    const xmlSrcdoc = "&lt;script&gt;location = parent.svgBlob('xml-srcdoc')&lt;/script&gt;";
+    box.appendChild(document.importNode(xml('<iframe xmlns="' + XHTML + '" srcdoc="' + xmlSrcdoc + '"/>'), true));
+    const request = new XMLHttpRequest();
+    request.open("GET", "data:text/html," + encodeURIComponent('<iframe src="' + svg("xhr-document") + '"></iframe>'));
+    request.responseType = "document";
+    request.onload = () => box.appendChild(document.importNode(request.response.body.firstChild, true));
+    request.send();
+
+    const refresh = (id) => byId(id).contentDocument;
+    const byAttribute = refresh("meta-attr").createElement("meta");
+    byAttribute.setAttribute("http-equiv", "refresh");
+    byAttribute.setAttribute("content", "0;url=" + svg("meta-attr"));
+    refresh("meta-attr").head.appendChild(byAttribute);
+    const byProperty = refresh("meta-property").createElement("meta");
+    byProperty.content = "0; url=" + svg("meta-property");
+    byProperty.httpEquiv = "refresh";
+    refresh("meta-property").head.appendChild(byProperty);
+    refresh("meta-markup").body.innerHTML = '<meta http-equiv="refresh" content="0;url=' + svg("meta-markup") + '">';
+    // Spellings the browser's refresh parser accepts.
+    refresh("meta-space").body.innerHTML = '<meta http-equiv="refresh" content="0 url=' + svg("meta-space") + '">';
+    const fraction = refresh("meta-fraction").createElement("meta");
+    fraction.setAttribute("http-equiv", "refresh");
+    fraction.setAttribute("content", ".5;url=" + svg("meta-fraction"));
+    refresh("meta-fraction").head.appendChild(fraction);
+    const quoted = refresh("meta-quoted").createElement("meta");
+    quoted.httpEquiv = "refresh";
+    quoted.content = "0;url='" + svg("meta-quoted") + "' x";
+    refresh("meta-quoted").head.appendChild(quoted);
+    refresh("meta-web").body.innerHTML = '<meta http-equiv="refresh" content="0 url=https://site-b.test/">';
+    // A target that itself starts with a quote, which a rewritten value must not hand back to the parser.
+    const quoteWeb = refresh("meta-quote-web").createElement("meta");
+    quoteWeb.setAttribute("http-equiv", "refresh");
+    quoteWeb.setAttribute("content", '0; url="' + "'//site-b.test/" + '"');
+    refresh("meta-quote-web").head.appendChild(quoteWeb);
+
+    setTimeout(() => (byId("results").textContent = JSON.stringify({ ran: ran.sort(), readBack })), 4000);
+  };
+</script>`,
+);
+
+const ATTR_NODE = page(
+  "Attr node",
+  `<script>
+  const byNode = document.createElement("iframe");
+  const node = document.createAttribute("src");
+  node.value = "https://site-b.test/";
+  byNode.id = "by-node";
+  byNode.setAttributeNode(node);
+  document.body.appendChild(byNode);
+  const byMap = document.createElement("iframe");
+  const named = document.createAttribute("src");
+  named.value = "https://site-b.test/";
+  byMap.id = "by-map";
+  byMap.attributes.setNamedItem(named);
+  document.body.appendChild(byMap);
+  const doc = "<p id='doc'>doc</p><script>document.getElementById('doc').textContent = location.hostname<\\/script>";
+  const bySrcdoc = document.createElement("iframe");
+  const written = document.createAttribute("srcdoc");
+  written.value = doc;
+  bySrcdoc.id = "by-srcdoc";
+  bySrcdoc.setAttributeNode(written);
+  document.body.appendChild(bySrcdoc);
+  const moved = document.createElement("iframe");
+  moved.id = "moved-srcdoc";
+  bySrcdoc.removeAttributeNode(written);
+  moved.setAttributeNode(written);
+  document.body.appendChild(moved);
+  const readback = document.createElement("p");
+  readback.id = "readback";
+  readback.textContent = JSON.stringify({
+    node: written.value === doc,
+    attribute: moved.getAttribute("srcdoc") === doc,
+    property: moved.srcdoc === doc,
+    markup: !moved.outerHTML.includes("data-" + "girici"),
+  });
+  document.body.appendChild(readback);
+</script>`,
+);
+
+/** Replaces the built-ins the engine's URL checks once leaned on, then navigates to site-b every way it can. */
+const DOORS_BUILTINS = page(
+  "Doors built-ins",
+  `<a id="link">b</a><iframe id="frame"></iframe>
+<button id="assign">assign</button><button id="open">open</button><button id="frame-src">frame</button>
+<script>
+  const startsWith = String.prototype.startsWith;
+  String.prototype.startsWith = function (prefix, position) {
+    return prefix === "#" || startsWith.call(this, prefix, position);
+  };
+  const exec = RegExp.prototype.exec;
+  RegExp.prototype.exec = function (text) {
+    return this.source.slice(-2) === "*:" ? ["javascript:"] : exec.call(this, text);
+  };
+  window.URL = class extends URL {
+    get protocol() {
+      return "x:";
+    }
+  };
+  document.getElementById("link").href = "https://site-b.test/";
+  document.getElementById("assign").addEventListener("click", () => location.assign("https://site-b.test/"));
+  document.getElementById("open").addEventListener("click", () => window.open("https://site-b.test/"));
+  document.getElementById("frame-src").addEventListener("click", () => {
+    document.getElementById("frame").src = "https://site-b.test/frame";
+  });
+</script>`,
 );
 
 const NOTIFY = page(
@@ -776,6 +1802,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/echo": cookieEcho,
     "/old-channel": html(OLD_CHANNEL),
     "/cookie/script": html(COOKIE_SCRIPT),
+    "/cookie/click": html(COOKIE_CLICK),
     "/cookie/set-api": cookieApi,
     "/cookie/api-page": html(COOKIE_API_PAGE),
     "/network": html(NETWORK),
@@ -801,7 +1828,28 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
+    "/pm-touch": html(PM_TOUCH),
+    "/top-host": html(TOP_HOST),
+    "/cross-popup": html(CROSS_POPUP),
+    "/storage-events": html(STORAGE_EVENTS),
+    "/blob-frame": html(BLOB_FRAME),
+    "/xs-hooks": html(XS_HOOKS),
+    "/xs-opener": html(XS_OPENER),
+    "/xs-js-host": html(XS_JS_HOST),
+    "/served-blobs": html(SERVED_BLOBS),
+    "/refresh-quote": html(REFRESH_QUOTE),
+    "/refresh-quote-host": html(REFRESH_QUOTE_HOST),
+    "/iterator-adoption": html(ITERATOR_ADOPTION),
+    "/ws-binary": html(WS_BINARY),
+    "/ws-frame": html(WS_FRAME),
+    "/served-blob-frame": servedBlob("frame"),
+    "/served-blob-meta": servedBlob("meta"),
+    "/served-blob-header": servedBlob("header"),
+    "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
+    "/reuse-same": html(REUSE_SAME),
+    "/reuse-same-child": html(REUSE_SAME_CHILD),
+    "/blank-worker": html(BLANK_WORKER),
     "/plain.txt": typed("text/plain", PLAIN_BODY),
     "/doc.svg": typed("image/svg+xml", SVG_BODY),
     "/untyped": typed(null, PLAIN_BODY),
@@ -928,15 +1976,33 @@ const ROUTES: Record<string, Record<string, Route>> = {
       ),
     ),
     "/doors-workers": html(DOORS_WORKERS),
+    "/doors-frames": html(DOORS_FRAMES),
+    "/doors-srcdoc": html(DOORS_SRCDOC),
+    "/doors-builtins": html(DOORS_BUILTINS),
+    "/doors-blobs": html(DOORS_BLOBS),
+    "/doors-blob-sinks": html(DOORS_BLOB_SINKS),
+    "/attr-node": html(ATTR_NODE),
     "/probe-worker.js": script(PROBE_WORKER),
     "/nest.js": script(
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
     ),
+    "/sealed/page": sealedPage,
+    "/sealed/dot.png": png,
+    "/sealed/mod.js": script('document.body.dataset.mod = "1";'),
+    "/sealed/spa": sealedCookie(SEALED_SPA),
+    "/sealed/next": html(page("Sealed next", SEALED_ECHO)),
+    "/sealed/search": sealedSearch,
   },
-  "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
+  "www.site-a.test": {
+    "/landing": html(page("Landing", "<h1>Landing</h1>")),
+    "/cookie/whoami": whoami,
+    "/storage": html(STORAGE),
+    "/sealed/cookie-echo": cookieEcho,
+  },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
+    "/target": html(page("Target", "<h1>Target</h1>")),
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,
@@ -952,6 +2018,12 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/idb-store": html(IDB_STORE),
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
+    "/pm-touch-child": html(PM_SOURCE_CHILD),
+    "/top-probe": html(TOP_PROBE),
+    "/storage-events": html(STORAGE_EVENTS),
+    "/xs-child": html(XS_CHILD),
+    "/xs-opened": html(XS_OPENED),
+    "/xs-js-child": html(XS_JS_CHILD),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(

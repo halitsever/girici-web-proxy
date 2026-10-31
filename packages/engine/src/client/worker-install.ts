@@ -1,4 +1,19 @@
+import { encodeUrl } from "../shared/codec.ts";
 import { prefixFor } from "../shared/partition.ts";
+import {
+  apply,
+  brandOf,
+  define,
+  hrefOf,
+  isWebUrl,
+  joined,
+  mapOf,
+  newUrl,
+  originOf,
+  parseUrl,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
 import { hookConstructor } from "./constructors.ts";
 import { createHelpers } from "./helpers.ts";
@@ -6,10 +21,6 @@ import { createFakeLocation } from "./location.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 import { hookWorkers } from "./worker-bootstrap.ts";
-
-// Taken at load, so a replaced Function.prototype.call or String never receives a native or the URL.
-const apply = Reflect.apply;
-const toText = String;
 
 /** The worker globals this runtime touches; typed narrowly so it needs neither the DOM nor the WebWorker lib. */
 export interface WorkerScope {
@@ -48,7 +59,7 @@ export function installWorker(scope: WorkerScope): void {
   // Taken before hookFetch, which would send the announcement to the proxied site.
   const nativeFetch = scope.fetch;
 
-  Object.defineProperty(scope, "__g$", { value: workerHelpers(scope, ctx) });
+  define(scope, "__g$", { value: workerHelpers(scope, ctx) });
   maskOrigin(scope, ctx);
   installStorageIsolation(scope as unknown as Realm, ctx, () => partition);
   hookImportScripts(scope, ctx);
@@ -73,7 +84,8 @@ export function installWorker(scope: WorkerScope): void {
 /** The bootstrap leaves these on the global; they are removed so the worker's own script never sees them. */
 function takeBoot(scope: WorkerScope): { base?: string; runtimeUrl?: string; partition?: string } {
   const boot = { base: scope.__giriciBase, runtimeUrl: scope.__giriciRuntime, partition: scope.__giriciPartition };
-  for (const name of ["__giriciBase", "__giriciRuntime", "__giriciPartition"]) Reflect.deleteProperty(scope, name);
+  const handed = ["__giriciBase", "__giriciRuntime", "__giriciPartition"];
+  for (let index = 0; index < handed.length; index++) Reflect.deleteProperty(scope, handed[index] as string);
   return boot;
 }
 
@@ -81,26 +93,26 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
   // The bootstrap passes the worker's real URL, since scope.location is the proxy or a blob address.
   const href = base ?? scope.location.href;
   const origin = scope.location.origin;
-  const realBase = (): URL => new URL(href);
+  const realBase = (): URL => newUrl(href);
   return {
     origin,
     realUrl: realBase,
     realBase,
     // A worker loads from a blob address, so a relative URL is resolved against the real base and proxied absolutely.
     toProxy: (raw) => {
-      let absolute: URL;
-      try {
-        absolute = new URL(raw, realBase());
-      } catch {
-        return raw;
-      }
-      if (absolute.protocol !== "http:" && absolute.protocol !== "https:") return raw;
-      const proxied = rewriteUrl(absolute.href, realBase(), origin);
-      return proxied.startsWith("/") ? origin + proxied : proxied;
+      const absolute = parseUrl(raw, realBase());
+      if (!absolute || !isWebUrl(absolute)) return raw;
+      const proxied = rewriteUrl(hrefOf(absolute), realBase(), origin);
+      return startsWith(proxied, "/") ? origin + proxied : proxied;
     },
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
+    // A worker resolves against its real base and never navigates, so it has no sealed address to keep.
+    opaque: () => false,
+    documentAddress: (url) => encodeUrl(url),
+    openSealed: () => null,
     // A worker never loads a second document.
     inherit: () => {},
+    accepts: () => false,
   };
 }
 
@@ -112,22 +124,27 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
   return createHelpers({
     nativeLocation: scope.location,
     fakeLocation,
-    isLocation: (value) => Object.prototype.toString.call(value) === "[object WorkerLocation]",
+    isLocation: (value) => brandOf(value) === "[object WorkerLocation]",
     fakeFor: () => null,
     // A worker has no window or document, so location writes fall through to the native (read-only) property.
     isWindowOrDocument: () => false,
-    toProxy: ctx.toProxy,
+    navigationUrl: ctx.toProxy,
     rewrite: {
       js: (code) => code,
       jsBody: (code) => code,
       html: (html) => html,
+      srcdoc: (markup) => markup,
       unhtml: (html) => html,
+      unsrcdoc: (markup) => markup,
       importSpecifier: ctx.toProxy,
       metaUrl: ctx.fromProxy,
     },
     indirectEval: (code) => scope.eval(code as string),
     // A worker cannot reach a window, so its ports and clients keep their own postMessage.
     messageTarget: (value) => value,
+    wrapWindow: (value) => value,
+    realOrigin: () => originOf(ctx.realBase()),
+    site: () => undefined,
     // A worker never loads a second document.
     renew: () => false,
   });
@@ -136,7 +153,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
 /** self.origin is a separate global from self.location, so it is masked too or integrity checks see the proxy origin. */
 function maskOrigin(scope: WorkerScope, ctx: UrlContext): void {
   try {
-    Object.defineProperty(scope, "origin", { configurable: true, get: () => ctx.realBase().origin });
+    define(scope, "origin", { configurable: true, get: () => ctx.realBase().origin });
   } catch {
     // Some engines make the global origin non-configurable; the leak then stands.
   }
@@ -145,10 +162,9 @@ function maskOrigin(scope: WorkerScope, ctx: UrlContext): void {
 /** Other network sinks a worker can reach, so none of them leaves the proxy or the cookie jar. */
 function hookSubresources(scope: WorkerScope, ctx: UrlContext): void {
   if (scope.EventSource) {
-    scope.EventSource = hookConstructor(scope.EventSource, (input) => [
-      ctx.toProxy(toText(input[0])),
-      ...input.slice(1),
-    ]);
+    scope.EventSource = hookConstructor(scope.EventSource, (input) =>
+      joined([ctx.toProxy(toText(input[0]))], input, 1),
+    );
   }
   const navigator = scope.navigator;
   const sendBeacon = navigator?.sendBeacon;
@@ -165,7 +181,7 @@ function hookImportScripts(scope: WorkerScope, ctx: UrlContext): void {
     apply(
       native,
       scope,
-      urls.map((url) => ctx.toProxy(toText(url))),
+      mapOf(urls, (url) => ctx.toProxy(toText(url))),
     );
 }
 
@@ -190,13 +206,14 @@ function hookXhr(scope: WorkerScope, ctx: UrlContext): void {
   if (!proto) return;
   const open = proto.open;
   proto.open = function (this: unknown, method: unknown, url: unknown, ...rest: unknown[]) {
-    apply(open, this, [method, ctx.toProxy(toText(url)), ...rest]);
+    apply(open, this, joined([method, ctx.toProxy(toText(url))], rest));
   };
 }
 
 /** WebRTC leaks the real address and the socket relays are not here yet, so neither connects from a worker. */
 function blockRealtime(scope: WorkerScope): void {
-  for (const name of ["WebSocketStream", "WebTransport", "RTCPeerConnection"]) Reflect.deleteProperty(scope, name);
+  const removed = ["WebSocketStream", "WebTransport", "RTCPeerConnection"];
+  for (let index = 0; index < removed.length; index++) Reflect.deleteProperty(scope, removed[index] as string);
   if (scope.WebSocket) scope.WebSocket = blockedWebSocket();
 }
 

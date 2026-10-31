@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
+import { MasterSealer } from "../src/shared/sealed-address.ts";
 import { CookieService, type CookieRecordStore } from "../src/sw/cookies/jar.ts";
 import { callerOf, handleSiteData } from "../src/sw/site-data.ts";
 
@@ -101,5 +102,14 @@ describe("callerOf", () => {
   it("names a proxied window by its real address, framed or not", () => {
     const framed = { id: "page-1", type: "window", frameType: "nested", url: `${origin}/~/https/a.test/x` };
     expect(callerOf(framed, origin, known)).toEqual({ kind: "page", url: new URL("https://a.test/x") });
+  });
+
+  it("knows a sealed page as its own site", () => {
+    const master = new MasterSealer(new Uint8Array(32).fill(3));
+    const page = new URL("https://a.test/p?q=1");
+    const sealed = { id: "page-2", type: "window", frameType: "top-level", url: origin + master.seal(page) };
+    const caller = callerOf(sealed, origin, known, master.open);
+    expect(caller.kind === "page" && caller.url.href).toBe(page.href);
+    expect(callerOf(sealed, origin, known)).toEqual({ kind: "other" });
   });
 });

@@ -8,11 +8,13 @@ export interface AuthState {
   setup: boolean;
   authed: boolean;
   public: boolean;
+  sealAddresses: boolean;
   admin?: AdminInfo;
 }
 
 export interface AdminSettings {
   public: boolean;
+  sealAddresses: boolean;
   blockedHosts: string[];
   envBlockedHosts: string[];
 }
@@ -95,6 +97,18 @@ export async function setPublicAccess(on: boolean, currentPassword: string): Pro
   return (await res.json()).public as boolean;
 }
 
+/** The instance switch seals page addresses in every visitor's browser. */
+export async function setSealAddresses(on: boolean, currentPassword: string): Promise<boolean> {
+  const res = await fetch("/_g/admin/settings", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ sealAddresses: on, currentPassword }),
+  });
+  if (!res.ok) throw writeError(res.status, "Could not change address encryption.");
+  invalidate();
+  return (await res.json()).sealAddresses as boolean;
+}
+
 export async function getAdminSettings(): Promise<AdminSettings> {
   const res = await fetch("/_g/admin/settings", { headers: { accept: "application/json" } });
   if (!res.ok) throw new Error("Could not load the admin settings.");
@@ -116,7 +130,7 @@ export async function saveBlockedHosts(hosts: string[], currentPassword: string)
 }
 
 /** Account and admin writes share these answers: 403 is a wrong current password, 429 too many tries. */
-function writeError(status: number, fallback: string): Error {
+export function writeError(status: number, fallback: string): Error {
   if (status === 403) return new Error(WRONG_PASSWORD);
   if (status === 429) return new Error("Too many attempts. Wait a minute and try again.");
   return new Error(fallback);

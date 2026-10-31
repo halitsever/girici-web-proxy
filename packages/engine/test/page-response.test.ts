@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STANDALONE_SHIM } from "../src/rewrite/js.ts";
+import { MasterSealer } from "../src/shared/sealed-address.ts";
 import { SANDBOX_CSP } from "../src/sw/error-page.ts";
 import { buildPageResponse, type PageContext } from "../src/sw/page-response.ts";
 import type { TransportResult } from "../src/sw/transport.ts";
@@ -322,6 +323,71 @@ describe("buildPageResponse", () => {
       ]),
       context({ destination: "document", navigation: true }),
     );
-    expect(res.headers.get("refresh")).toBe("0; url=/~/https/site-b.test/x");
+    expect(res.headers.get("refresh")).toBe("0; url=http://127.0.0.1:41000/~/https/site-b.test/x");
+  });
+
+  it("drops a Refresh header that would load a blob document, which no bootstrap can cover here", async () => {
+    const res = await buildPageResponse(
+      upstream([
+        ["content-type", "text/plain"],
+        ["refresh", "0; url=blob:http://proxy.test/1"],
+      ]),
+      context({ destination: "document", navigation: true }),
+    );
+    expect(res.headers.has("refresh")).toBe(false);
+  });
+
+  it("serves no markup that loads a blob document", async () => {
+    const res = await buildPageResponse(
+      upstream(
+        [["content-type", "text/html"]],
+        '<meta http-equiv="refresh" content="0;url=blob:http://proxy.test/1"><iframe src="blob:http://proxy.test/2"></iframe>' +
+          '<object data=" BLOB:http://proxy.test/3"></object><embed src="blob:http://proxy.test/4"><frame src="blob:x">',
+      ),
+      context({ destination: "document", navigation: true }),
+    );
+    const text = await res.text();
+    expect(text).not.toMatch(/blob:/i);
+    expect(text).toContain('<iframe src="about:blank">');
+    expect(text).toContain('<meta http-equiv="refresh" content="">');
+  });
+});
+
+describe("pages on sealed addresses", () => {
+  const master = new MasterSealer(new Uint8Array(32).fill(3));
+  const target = new URL("https://a.test/dir/page");
+
+  it("gives a sealed page its origin's seal and absolute relative URLs", async () => {
+    const res = await buildPageResponse(
+      upstream(
+        [["content-type", "text/html"]],
+        '<img src="a.png"><a href="#t">t</a><iframe srcdoc="<p>x</p>"></iframe>',
+      ),
+      context({ target, navigation: true, destination: "document", seal: master.originSeal("https://a.test") }),
+    );
+    const text = await res.text();
+    expect(text).toContain("&quot;seal&quot;:{&quot;origin&quot;:&quot;https://a.test&quot;");
+    expect(text).toContain('src="/~/https/a.test/dir/a.png"');
+    expect(text).toContain('href="#t"');
+    const srcdoc = /srcdoc="([^"]*)"/.exec(text)?.[1] ?? "";
+    expect(srcdoc).toContain("data-girici");
+    expect(srcdoc).not.toContain("seal");
+  });
+
+  it("seals the target of an upstream redirect for a top-level load", async () => {
+    const res = await buildPageResponse(
+      upstream([["location", "/next"]], null, 302),
+      context({ target, navigation: true, destination: "document", address: (url) => master.seal(url) }),
+    );
+    expect(res.headers.get("location")).toBe(origin + master.seal(new URL("https://a.test/next")));
+  });
+
+  it("sends the sign-in page a sealed next", async () => {
+    const res = await buildPageResponse(
+      { ok: false, code: "auth", status: 401 },
+      context({ target, navigation: true, destination: "document", address: (url) => master.seal(url) }),
+    );
+    expect(res.status).toBe(303);
+    expect(new URL(res.headers.get("location")!).searchParams.get("next")).toBe(master.seal(target));
   });
 });

@@ -8,3 +8,4 @@ export * from "./target.ts";
 export * from "./ui-settings.ts";
 export * from "./partition.ts";
 export * from "./site-data.ts";
+export { SEALED_PREFIX, isSealedPath, type OpenSealed } from "./sealed-address.ts";

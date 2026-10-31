@@ -1,8 +1,9 @@
-import { decodeUrl } from "../shared/codec.ts";
+import { apply, define as defineOwn, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import { refererFor } from "../shared/referrer.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
-export function installDocument(win: Realm, ctx: UrlContext): void {
+/** Returns the reset a renewed document needs: the domain one document set must not carry over to the next. */
+export function installDocument(win: Realm, ctx: UrlContext): () => void {
   const documentProto = win.Document.prototype;
   const nativeReferrer = getter(documentProto, "referrer");
   const nativeBaseUri = getter(win.Node.prototype, "baseURI");
@@ -24,25 +25,25 @@ export function installDocument(win: Realm, ctx: UrlContext): void {
   });
   define(documentProto, "referrer", {
     get(this: Document) {
-      const value = String(nativeReferrer.call(this));
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        return "";
-      }
-      if (url.origin !== ctx.origin) return value;
-      const previous = decodeUrl(url.pathname + url.search);
+      const value = toText(apply(nativeReferrer, this, []));
+      const url = parseUrl(value);
+      if (!url) return "";
+      if (originOf(url) !== ctx.origin) return value;
+      // Only this origin's sealed addresses open here, so another site's sealed page leaves no referrer.
+      const previous = realUrlOf(value, ctx.origin, ctx.openSealed);
       // The browser saw every proxied page as same-origin, so the real policy default is applied to real URLs.
       return previous ? (refererFor(previous, ctx.realUrl(), "") ?? "") : "";
     },
   });
   define(win.Node.prototype, "baseURI", {
     get(this: Node) {
-      return ctx.fromProxy(String(nativeBaseUri.call(this)));
+      return ctx.fromProxy(toText(apply(nativeBaseUri, this, [])));
     },
   });
-  Object.defineProperty(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });
+  defineOwn(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });
+  return () => {
+    domain = null;
+  };
 }
 
 function getter(proto: object, name: string): (this: unknown) => unknown {
@@ -52,5 +53,5 @@ function getter(proto: object, name: string): (this: unknown) => unknown {
 }
 
 function define(proto: object, name: string, descriptor: PropertyDescriptor): void {
-  Object.defineProperty(proto, name, { configurable: true, enumerable: true, ...descriptor });
+  defineOwn(proto, name, { configurable: true, enumerable: true, ...descriptor });
 }

@@ -46,9 +46,20 @@ export interface CookieSnapshot {
 /** Settings the service worker needs but cannot read from the UI's localStorage. */
 export interface EnginePrefs {
   blockThirdPartyCookies: boolean;
+  /** This browser's own switch for sealed page addresses. */
+  sealAddresses: boolean;
+  /** The admin's switch, which turns sealing on for every visitor. */
+  instanceSeal: boolean;
 }
 
-export const DEFAULT_ENGINE_PREFS: EnginePrefs = { blockThirdPartyCookies: true };
+export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
+  blockThirdPartyCookies: true,
+  sealAddresses: false,
+  instanceSeal: false,
+};
+
+/** The UI asks the service worker for a page's sealed address; the UI never holds the key. */
+export const SEAL_MESSAGE = "girici:seal";
 
 /** One registrable domain's stored data, as the Settings screen lists it. */
 export interface SiteSummary {
@@ -68,6 +79,15 @@ export interface InheritedContext {
   origin: string;
   /** The real URL of the parent page. */
   base: string;
+  /** Set for a blob document's bootstrap: the blob the runtime loads once it is in place. */
+  blob?: string;
+}
+
+/** A sealed document's own origin and its key, base64url; it seals and opens that origin's addresses only. */
+export interface OriginSeal {
+  origin: string;
+  label: string;
+  key: string;
 }
 
 export interface ClientConfig {
@@ -79,6 +99,8 @@ export interface ClientConfig {
   site?: string;
   /** Set for a third-party frame while blocking is on: its document.cookie stays empty whatever other tabs do. */
   cookiesBlocked?: boolean;
+  /** Set for a top-level document on a sealed address. */
+  seal?: OriginSeal;
 }
 
 export type RelayErrorCode =
@@ -98,7 +120,8 @@ export type RelayErrorCode =
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {
   let binary = "";
-  for (const byte of new TextEncoder().encode(value)) binary += String.fromCharCode(byte);
+  const bytes = new TextEncoder().encode(value);
+  for (let index = 0; index < bytes.length; index++) binary += String.fromCharCode(bytes[index] as number);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 

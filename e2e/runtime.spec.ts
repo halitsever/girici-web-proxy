@@ -77,3 +77,12 @@ test("keeps sockets and WebRTC from going around the proxy", async ({ page }) =>
     state: 3,
   });
 });
+
+for (const path of ["/ws-binary", "/ws-frame"]) {
+  test(`delivers a socket's binary frames as a Blob in ${path === "/ws-frame" ? "a frame" : "the top page"}`, async ({
+    page,
+  }) => {
+    await openThroughUi(page, `https://site-a.test${path}`);
+    await expect(page.locator("#type")).toHaveText("blob", { timeout: 15_000 });
+  });
+}

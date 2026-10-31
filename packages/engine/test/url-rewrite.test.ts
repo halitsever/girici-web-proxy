@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { decodeUrl } from "../src/shared/codec.ts";
+import { createOriginSealer, MasterSealer } from "../src/shared/sealed-address.ts";
+import { rewriteJavascriptUrl, rewriteSrcset, rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const base = new URL("https://site.test/dir/page.html");
 const origin = "http://proxy.test";
@@ -30,12 +33,47 @@ describe("rewriteUrl", () => {
       "mailto:a@b.test",
       "tel:1",
       "about:blank",
-      "javascript:void(0)",
       "ftp://x.test/",
       "http://[::1",
     ]) {
       expect(rewriteUrl(raw, base, origin)).toBe(raw);
     }
+  });
+
+  it("runs javascript: URLs through the runtime of the window they navigate", () => {
+    expect(rewriteUrl("javascript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)","https://site.test")');
+    // The browser drops tabs and newlines, trims the ends and percent-decodes the code, so the helper gets what would run.
+    expect(rewriteUrl(" Java\nScript:'<b>%41</b>' ", base, origin)).toBe(
+      `javascript:__g$.J("'<b>A</b>'","https://site.test")`,
+    );
+    expect(rewriteUrl("javascript:'100%25'", base, origin)).toBe(`javascript:__g$.J("'100%25'","https://site.test")`);
+    expect(rewriteUrl("javascript:'%E2%9C%93 %ZZ'", base, origin)).toBe(
+      `javascript:__g$.J("'\u2713 %25ZZ'","https://site.test")`,
+    );
+  });
+
+  it("wraps a javascript: URL once, and only one that calls the helper with its own owner", () => {
+    const wrapped = rewriteUrl("javascript:'%'", base, origin);
+    expect(rewriteUrl(wrapped, base, origin)).toBe(wrapped);
+    const smuggled = `javascript:__g$.J("1","https://site.test"),'<script>x</script>'`;
+    expect(rewriteJavascriptUrl(smuggled, "https://site.test")).toBe(
+      `javascript:__g$.J(${JSON.stringify(smuggled.slice(11))},"https://site.test")`,
+    );
+    expect(rewriteJavascriptUrl("https://x.test/", "https://site.test")).toBeNull();
+  });
+
+  it("wraps again a URL written for another owner, so it runs with the writer's origin", () => {
+    const borrowed = 'javascript:__g$.J("x","https://victim.test")';
+    expect(rewriteJavascriptUrl(borrowed, "https://evil.test")).toBe(
+      `javascript:__g$.J(${JSON.stringify(borrowed.slice(11))},"https://evil.test")`,
+    );
+    expect(rewriteUrl("javascript:x", new URL("https://cdn.test/"), origin, "https://site.test")).toBe(
+      'javascript:__g$.J("x","https://site.test")',
+    );
+  });
+
+  it("gives a wrapped javascript: URL back as the page wrote it", () => {
+    expect(unrewriteUrl(rewriteUrl("javascript:'50%25 off'", base, origin), base, origin)).toBe("javascript:'50% off'");
   });
 
   it("is idempotent for URLs that are already ours", () => {
@@ -52,7 +90,7 @@ describe("rewriteUrl", () => {
   });
 
   it("never throws on URLs or bases that are not web URLs", () => {
-    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe("java\nscript:void(0)");
+    expect(rewriteUrl("java\nscript:void(0)", base, origin)).toBe('javascript:__g$.J("void(0)","https://site.test")');
     expect(rewriteUrl("/x", new URL("ftp://x.test/"), origin)).toBe("/x");
     expect(rewriteUrl("http://proxy.test/other", new URL("about:blank"), origin)).toBe("http://proxy.test/other");
     expect(rewriteUrl("https://other.test/", new URL("about:blank"), origin)).toBe("/~/https/other.test/");
@@ -87,5 +125,60 @@ describe("rewriteSrcset", () => {
     expect(rewriteSrcset("  a.png  ,b.png 480w ", mark)).toBe("[a.png], [b.png] 480w");
     expect(rewriteSrcset("data:image/png;base64,AA== 1x", mark)).toBe("[data:image/png;base64,AA==] 1x");
     expect(rewriteSrcset("", mark)).toBe("");
+  });
+});
+
+describe("with built-ins the page replaced", () => {
+  const smuggled = `javascript:__g$.J("1","https://site.test"),'<script>x</script>'`;
+  const javascriptCases = () => [
+    rewriteUrl(" Java\nScript:'%E2%9C%93 %ZZ \u{1F600}' ", base, origin),
+    rewriteJavascriptUrl(smuggled, "https://site.test"),
+    unrewriteUrl(`javascript:__g$.J("'50%2525'","https://site.test")`, base, origin),
+  ];
+  const javascriptExpected = javascriptCases();
+  const JAVASCRIPT_BUILTINS: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+    ...REPLACED_BUILTINS,
+    ["JSON.stringify", JSON, "stringify", { value: () => '"");alert(1' }],
+    ["JSON.parse", JSON, "parse", { value: () => "x" }],
+    ["String.prototype.endsWith", String.prototype, "endsWith", { value: () => true }],
+    ["String.prototype.includes", String.prototype, "includes", { value: () => false }],
+    ["String.prototype.codePointAt", String.prototype, "codePointAt", { value: () => 0x41 }],
+    ["TextDecoder.prototype.decode", TextDecoder.prototype, "decode", { value: () => '"x"' }],
+    ["globalThis.parseInt", globalThis, "parseInt", { value: () => 0 }],
+  ];
+  for (const [name, target, key, replacement] of JAVASCRIPT_BUILTINS) {
+    it(`wraps javascript: URLs when ${name} is replaced`, () => {
+      expect(withReplaced(target, key, replacement, javascriptCases)).toEqual(javascriptExpected);
+    });
+  }
+
+  for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
+    it(`keeps proxying URLs when ${name} is replaced`, () => {
+      const results = withReplaced(target, key, replacement, () => [
+        rewriteUrl("https://other.test/a?b=1", base, origin),
+        decodeUrl("/~/https/other.test/a?b=1")?.href,
+        unrewriteUrl("/~/https/other.test/a", base, origin),
+      ]);
+      expect(results).toEqual(["/~/https/other.test/a?b=1", "https://other.test/a?b=1", "https://other.test/a"]);
+    });
+  }
+});
+
+describe("documents with a sealed address", () => {
+  const base = new URL("https://a.test/dir/page");
+  it("writes relative URLs as absolute proxy URLs", () => {
+    expect(rewriteUrl("img/x.png", base, origin, undefined, true)).toBe("/~/https/a.test/dir/img/x.png");
+    expect(rewriteUrl("../up", base, origin, undefined, true)).toBe("/~/https/a.test/up");
+    expect(rewriteUrl("img/x.png", base, origin)).toBe("img/x.png");
+  });
+  it("leaves hash and query links relative to the document", () => {
+    for (const value of ["#top", "?page=2", ""]) expect(rewriteUrl(value, base, origin, undefined, true)).toBe(value);
+  });
+  it("reads a sealed address of the page's own origin back as its real URL", () => {
+    const own = createOriginSealer(new MasterSealer(new Uint8Array(32).fill(1)).originSeal("https://a.test"))!;
+    const native = `${origin}${own.seal(new URL("https://a.test/dir/page"))}?page=2#x`;
+    expect(unrewriteUrl(native, base, origin, own.open)).toBe("https://a.test/dir/page?page=2#x");
+    const other = new MasterSealer(new Uint8Array(32).fill(2)).seal(new URL("https://a.test/dir/page"));
+    expect(unrewriteUrl(`${origin}${other}`, base, origin, own.open)).toBe(`https://a.test${other}`);
   });
 });

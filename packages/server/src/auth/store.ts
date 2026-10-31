@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import type { LogoType } from "../brand/logo.ts";
 import { hashPassword, verifyPassword } from "./password.ts";
 
 interface AdminRow {
@@ -134,6 +135,15 @@ export class AuthStore {
     this.#setSetting("public_access", on ? "1" : "0");
   }
 
+  /** The admin's switch that seals page addresses in every visitor's browser. */
+  sealAddresses(): boolean {
+    return this.#setting("seal_addresses") === "1";
+  }
+
+  setSealAddresses(on: boolean): void {
+    this.#setSetting("seal_addresses", on ? "1" : "0");
+  }
+
   /** Normalized host entries the admin blocked in Settings; an unreadable value counts as none. */
   blockedHosts(): string[] {
     const raw = this.#setting("blocked_hosts");
@@ -148,6 +158,34 @@ export class AuthStore {
 
   setBlockedHosts(hosts: readonly string[]): void {
     this.#setSetting("blocked_hosts", JSON.stringify(hosts));
+  }
+
+  brandName(): string | null {
+    return this.#setting("brand_name");
+  }
+
+  setBrandName(name: string | null): void {
+    if (name === null) this.#db.prepare("DELETE FROM settings WHERE key = 'brand_name'").run();
+    else this.#setSetting("brand_name", name);
+  }
+
+  /** An unreadable value counts as no logo. */
+  brandLogo(): { type: LogoType; sha256: string } | null {
+    const raw = this.#setting("brand_logo");
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as { type?: unknown; sha256?: unknown };
+      return typeof parsed.type === "string" && typeof parsed.sha256 === "string"
+        ? { type: parsed.type as LogoType, sha256: parsed.sha256 }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  setBrandLogo(meta: { type: LogoType; sha256: string } | null): void {
+    if (meta === null) this.#db.prepare("DELETE FROM settings WHERE key = 'brand_logo'").run();
+    else this.#setSetting("brand_logo", JSON.stringify(meta));
   }
 
   #adminRow(): AdminRow | null {

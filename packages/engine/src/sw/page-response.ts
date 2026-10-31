@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   type ClientConfig,
   type CookieSnapshot,
+  type OriginSeal,
   type RelayErrorCode,
 } from "../shared/protocol.ts";
 import {
@@ -40,6 +41,10 @@ export interface PageContext {
   cookiesBlocked?: boolean;
   /** Resolves false when the page runtime cannot be verified, so no page is served without it. */
   runtimeAvailable?: () => Promise<boolean>;
+  /** Set for a document on a sealed address: its runtime gets this, and its relative URLs are written absolute. */
+  seal?: OriginSeal;
+  /** Set for a top-level load while sealing is on: the address its redirects and sign-in `next` point to. */
+  address?: (url: URL) => string;
 }
 
 const rewrites = new RewriteMemo();
@@ -103,7 +108,9 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      headers.append(name, name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin) : value);
+      const next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin, !!ctx.seal) : value;
+      // An empty refresh is one that would have loaded a blob document.
+      if (next !== "" || value === "") headers.append(name, next);
     } catch {
       // A value the Headers API rejects would otherwise fail the whole response.
     }
@@ -161,8 +168,12 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
         site: schemefulSite(ctx.target),
       };
       if (ctx.cookiesBlocked) config.cookiesBlocked = true;
-      const inject = clientTag(new URL(ctx.clientScript, ctx.origin).href, config);
-      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject });
+      const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
+      const inject = clientTag(clientUrl, ctx.seal ? { ...config, seal: ctx.seal } : config);
+      // A srcdoc frame has no sealed address of its own, so it never gets the key.
+      const frameInject = (base: URL) =>
+        clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
+      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject, frameInject, opaque: !!ctx.seal });
     }
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
@@ -196,14 +207,15 @@ function redirectTo(location: string, status: number, ctx: PageContext): Respons
     return failure("connect", 502, ctx);
   }
   const web = resolved.protocol === "http:" || resolved.protocol === "https:";
-  return Response.redirect(web ? new URL(encodeUrl(resolved), ctx.origin).href : resolved.href, status);
+  const address = ctx.address ?? encodeUrl;
+  return Response.redirect(web ? new URL(address(resolved), ctx.origin).href : resolved.href, status);
 }
 
 function failure(code: RelayErrorCode, status: number, ctx: PageContext): Response {
   if (!ctx.navigation) return Response.error();
   if (code === "auth") {
     const login = new URL(LOGIN_PATH, ctx.origin);
-    login.searchParams.set("next", ctx.target.href);
+    login.searchParams.set("next", ctx.address ? ctx.address(ctx.target) : ctx.target.href);
     return Response.redirect(login.href, 303);
   }
   return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target);

@@ -1,6 +1,7 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
-import { rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
+import { isWebUrl, lowerCase, originOf, setHas, trim } from "../shared/primordials.ts";
+import { isBlobUrl, rewriteJavascriptUrl, rewriteSrcset, rewriteUrl } from "../shared/url-rewrite.ts";
 import { rewriteCss } from "./css.ts";
 import { rewriteJs } from "./js.ts";
 import { rewriteRefresh } from "./refresh.ts";
@@ -10,6 +11,14 @@ export interface HtmlRewriteOptions {
   origin: string;
   inject?: string;
   scripts?: boolean;
+  /** Runtime tag for a srcdoc document, which has no address of its own to load the runtime through. */
+  frameInject?: (base: URL) => string;
+  /** The runtime's blob swap for URLs that load a document, so a blob page starts with the runtime in place. */
+  swapBlob?: (url: string) => string;
+  /** The document's real origin, which its javascript: URLs carry; a `<base>` does not change it. */
+  owner?: string;
+  /** The document has a sealed address, so relative URLs are written absolute; a srcdoc inside inherits it. */
+  opaque?: boolean;
 }
 
 interface Attribute {
@@ -22,6 +31,7 @@ interface Attribute {
 type ScriptKind = "classic" | "module" | "importmap" | "remove" | "none";
 
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "poster", "background", "xlink:href"]);
+const DOCUMENT_URLS = new Set(["iframe src", "frame src", "embed src", "object data"]);
 const SRCSET_ATTRIBUTES = new Set(["srcset", "imagesrcset"]);
 const DROPPED_ATTRIBUTES = new Set(["integrity", "nonce", "ping"]);
 const FETCHED_LINK_RELS = new Set([
@@ -44,7 +54,6 @@ const DROPPED_META = new Set([
   "origin-trial",
 ]);
 const JS_TYPE = /^(?:(?:text|application)\/(?:x-)?(?:java|ecma)script(?:1\.[0-5])?|text\/(?:jscript|livescript))$/i;
-const JAVASCRIPT_URL = /^\s*javascript:/i;
 
 /** Edits attribute and inline code ranges in place; the document is never re-serialised, so markup quirks survive. */
 export function rewriteHtml(html: string, options: HtmlRewriteOptions): string {
@@ -57,9 +66,12 @@ class HtmlRewriter {
   readonly #scripts: boolean;
   readonly #output: MagicString;
   #base: URL;
+  readonly #owner: string;
+  readonly #opaque: boolean;
   #baseSeen = false;
   #injectAt = 0;
   #injectFrozen = false;
+  #carried = false;
   #attributes: Attribute[] = [];
   #script: { start: number; contentStart: number; kind: ScriptKind } | null = null;
   #styleStart = -1;
@@ -70,6 +82,8 @@ class HtmlRewriter {
     this.#scripts = options.scripts ?? true;
     this.#output = new MagicString(html);
     this.#base = options.url;
+    this.#owner = options.owner ?? (isWebUrl(options.url) ? originOf(options.url) : "null");
+    this.#opaque = options.opaque ?? false;
   }
 
   run(): string {
@@ -97,11 +111,24 @@ class HtmlRewriter {
       { decodeEntities: true },
     );
     parser.end(this.#html);
-    if (this.#options.inject) this.#output.appendLeft(this.#injectAt, this.#options.inject);
+    if (this.#options.inject && !this.#carried) this.#output.appendLeft(this.#injectAt, this.#options.inject);
     return this.#output.hasChanged() ? this.#output.toString() : this.#html;
   }
 
   #openTag(name: string, attribs: Record<string, string>, attributes: Attribute[], start: number, end: number): void {
+    // Markup that already starts with the tag (a re-attached srcdoc) keeps that copy, untouched.
+    const { inject } = this.#options;
+    if (
+      inject &&
+      name === "script" &&
+      !this.#injectFrozen &&
+      start === this.#injectAt &&
+      this.#html.startsWith(inject, start)
+    ) {
+      this.#carried = true;
+      this.#injectFrozen = true;
+      return;
+    }
     if (!this.#injectFrozen) {
       // The runtime must run before any script, so it goes in as early as the doctype, <html> and <head> allow.
       if (name === "html" || name === "head") this.#injectAt = end + 1;
@@ -127,22 +154,24 @@ class HtmlRewriter {
       if (kind === "remove") this.#output.remove(scriptStart, end + 1);
       else this.#rewriteRange(contentStart, start, (text) => this.#rewriteScript(text, kind));
     } else if (name === "style" && this.#styleStart >= 0) {
-      this.#rewriteRange(this.#styleStart, start, (text) => rewriteCss(text, this.#base, this.#options.origin));
+      this.#rewriteRange(this.#styleStart, start, (text) =>
+        rewriteCss(text, this.#base, this.#options.origin, this.#opaque),
+      );
       this.#styleStart = -1;
     }
   }
 
   #removesElement(name: string, attribs: Record<string, string>): boolean {
     if (name === "link") return tokens(attribs.rel).some((rel) => DROPPED_LINK_RELS.has(rel));
-    if (name === "meta") return DROPPED_META.has((attribs["http-equiv"] ?? "").trim().toLowerCase());
-    if (name === "script") return (attribs.type ?? "").trim().toLowerCase() === "speculationrules";
+    if (name === "meta") return setHas(DROPPED_META, keyword(attribs["http-equiv"]));
+    if (name === "script") return keyword(attribs.type) === "speculationrules";
     return false;
   }
 
   #rewriteAttribute(tag: string, attribs: Record<string, string>, attribute: Attribute): void {
     const { name, value } = attribute;
     if (
-      DROPPED_ATTRIBUTES.has(name) ||
+      setHas(DROPPED_ATTRIBUTES, name) ||
       (tag === "iframe" && (name === "csp" || name === "credentialless")) ||
       (tag === "html" && name === "manifest")
     ) {
@@ -151,7 +180,11 @@ class HtmlRewriter {
     }
     const rewritten = this.#rewriteValue(tag, attribs, name, value);
     if (rewritten !== value) {
-      this.#output.overwrite(attribute.start, attribute.end, `${name}="${escapeAttribute(rewritten)}"`);
+      // Only a srcdoc that gets the runtime tag is written with `<` escaped.
+      const text = escapeAttribute(rewritten);
+      const escaped =
+        tag === "iframe" && name === "srcdoc" && this.#options.frameInject ? text.replace(/</g, "&lt;") : text;
+      this.#output.overwrite(attribute.start, attribute.end, `${name}="${escaped}"`);
     }
   }
 
@@ -162,12 +195,13 @@ class HtmlRewriter {
       if (tokens(value).includes("allow-same-origin")) return value;
       return [value.trim(), "allow-same-origin"].filter(Boolean).join(" ");
     }
-    if (URL_ATTRIBUTES.has(name) || (name === "data" && tag === "object")) {
+    if (setHas(URL_ATTRIBUTES, name) || (name === "data" && tag === "object")) {
       if (tag === "link" && name === "href" && !tokens(attribs.rel).some((rel) => FETCHED_LINK_RELS.has(rel))) {
         return value;
       }
-      if (JAVASCRIPT_URL.test(value)) return this.#scripts ? rewriteJavascriptUrl(value) : value;
-      const rewritten = rewriteUrl(value, this.#base, origin);
+      // A javascript: URL is left as written where scripts are not rewritten.
+      if (!this.#scripts && rewriteJavascriptUrl(value, this.#owner) !== null) return value;
+      const rewritten = rewriteUrl(value, this.#base, origin, this.#owner, this.#opaque);
       if (tag === "base" && name === "href" && !this.#baseSeen) {
         this.#baseSeen = true;
         try {
@@ -178,22 +212,47 @@ class HtmlRewriter {
           // Browsers ignore a base URL they cannot parse, and so do we.
         }
       }
-      return rewritten;
+      if (!setHas(DOCUMENT_URLS, `${tag} ${name}`)) return rewritten;
+      const { swapBlob } = this.#options;
+      if (swapBlob) return swapBlob(rewritten);
+      // The service worker cannot make a bootstrap in the page's realm, so a blob document stays unloaded.
+      return isBlobUrl(rewritten) ? "about:blank" : rewritten;
     }
-    if (SRCSET_ATTRIBUTES.has(name)) {
+    if (setHas(SRCSET_ATTRIBUTES, name)) {
       let changed = false;
       const rewritten = rewriteSrcset(value, (url) => {
-        const next = rewriteUrl(url, this.#base, origin);
+        const next = rewriteUrl(url, this.#base, origin, undefined, this.#opaque);
         if (next !== url) changed = true;
         return next;
       });
       return changed ? rewritten : value;
     }
-    if (name === "style") return rewriteCss(value, this.#base, origin);
+    if (name === "style") return rewriteCss(value, this.#base, origin, this.#opaque);
     if (name.startsWith("on")) return this.#scripts ? rewriteJs(value, { kind: "handler" }) : value;
-    if (name === "srcdoc") return rewriteHtml(value, { url: this.#base, origin, scripts: false });
-    if (tag === "meta" && name === "content" && (attribs["http-equiv"] ?? "").trim().toLowerCase() === "refresh") {
-      return rewriteRefresh(value, this.#base, origin);
+    if (tag === "iframe" && name === "srcdoc") {
+      const { frameInject } = this.#options;
+      if (!frameInject) {
+        return rewriteHtml(value, {
+          url: this.#base,
+          origin,
+          scripts: false,
+          owner: this.#owner,
+          opaque: this.#opaque,
+        });
+      }
+      return rewriteHtml(value, {
+        url: this.#base,
+        origin,
+        scripts: true,
+        inject: frameInject(this.#base),
+        frameInject,
+        swapBlob: this.#options.swapBlob,
+        owner: this.#owner,
+        opaque: this.#opaque,
+      });
+    }
+    if (tag === "meta" && name === "content" && keyword(attribs["http-equiv"]) === "refresh") {
+      return rewriteRefresh(value, this.#base, origin, this.#opaque);
     }
     return value;
   }
@@ -205,7 +264,7 @@ class HtmlRewriter {
   }
 
   #scriptKind(type: string | undefined): ScriptKind {
-    const value = (type ?? "").trim().toLowerCase();
+    const value = keyword(type);
     if (value === "importmap") return "importmap";
     if (!this.#scripts) return "none";
     if (value === "") return "classic";
@@ -215,7 +274,7 @@ class HtmlRewriter {
 
   #rewriteScript(text: string, kind: ScriptKind): string {
     if (kind === "classic" || kind === "module") return rewriteJs(text, { kind });
-    if (kind === "importmap") return rewriteImportMap(text, this.#base, this.#options.origin);
+    if (kind === "importmap") return rewriteImportMap(text, this.#base, this.#options.origin, this.#opaque);
     return text;
   }
 
@@ -227,21 +286,8 @@ class HtmlRewriter {
   }
 }
 
-/** The browser percent-decodes javascript: URLs before running them, so any % in the rewritten code is escaped again. */
-function rewriteJavascriptUrl(value: string): string {
-  const prefix = value.slice(0, value.indexOf(":") + 1);
-  let code: string;
-  try {
-    code = decodeURIComponent(value.slice(prefix.length));
-  } catch {
-    return value;
-  }
-  const rewritten = rewriteJs(code);
-  return rewritten === code ? value : prefix + rewritten.replace(/%/g, "%25");
-}
-
 /** Bare specifiers in "imports" stay keys; URL values and scope prefixes have to point at the proxy. */
-function rewriteImportMap(text: string, base: URL, origin: string): string {
+function rewriteImportMap(text: string, base: URL, origin: string, opaque: boolean): string {
   let map: unknown;
   try {
     map = JSON.parse(text);
@@ -251,7 +297,7 @@ function rewriteImportMap(text: string, base: URL, origin: string): string {
   if (!isRecord(map)) return text;
   let changed = false;
   const rewrite = (url: string) => {
-    const next = rewriteUrl(url, base, origin);
+    const next = rewriteUrl(url, base, origin, undefined, opaque);
     if (next !== url) changed = true;
     return next;
   };
@@ -270,6 +316,11 @@ function rewriteImportMap(text: string, base: URL, origin: string): string {
     );
   }
   return changed ? JSON.stringify(result) : text;
+}
+
+/** An attribute keyword as the browser compares it, through methods a page cannot replace. */
+export function keyword(value: string | undefined | null): string {
+  return lowerCase(trim(value ?? ""));
 }
 
 function tokens(value: string | undefined): string[] {

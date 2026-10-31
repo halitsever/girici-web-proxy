@@ -1,10 +1,14 @@
+import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { adminRouter } from "../src/routes/admin.ts";
 import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
+import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { HostBlocklist } from "../src/upstream/blocklist.ts";
 
@@ -20,7 +24,9 @@ async function withAdmin(
   const admin = store.createAdmin(setup);
   const blocklist = new HostBlocklist(options.envBlocked ?? [], store.blockedHosts());
   const app = express();
-  app.use(adminRouter(store, blocklist));
+  app.use(
+    adminRouter(store, blocklist, new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), store)),
+  );
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -106,11 +112,60 @@ describe("adminRouter settings", () => {
     expect(store.publicAccess()).toBe(true);
   });
 
+  it("turns address encryption on for everyone only with the current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    expect((await post(base, "/_g/admin/settings", { sealAddresses: true }, cookie)).status).toBe(403);
+    expect(store.sealAddresses()).toBe(false);
+    const bad = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: "yes", currentPassword: setup.password },
+      cookie,
+    );
+    expect(bad.status).toBe(400);
+    const res = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: true, currentPassword: setup.password },
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ sealAddresses: true });
+    expect(store.sealAddresses()).toBe(true);
+    const read = await fetch(`${base}/_g/admin/settings`, { headers: { cookie } });
+    expect(await read.json()).toMatchObject({ sealAddresses: true });
+  });
+
+  it("keeps the instance name and the instance switches apart in the settings store", async () => {
+    const { base, store, cookie } = await withAdmin();
+    const brand = await post(base, "/_g/admin/brand", { name: "Kurulum", currentPassword: setup.password }, cookie);
+    expect(brand.status).toBe(200);
+    const settings = await post(
+      base,
+      "/_g/admin/settings",
+      { sealAddresses: true, publicAccess: true, currentPassword: setup.password },
+      cookie,
+    );
+    expect(settings.status).toBe(200);
+    expect(store.brandName()).toBe("Kurulum");
+    expect((await post(base, "/_g/admin/brand", { name: null, currentPassword: setup.password }, cookie)).status).toBe(
+      200,
+    );
+    expect(store.brandName()).toBeNull();
+    expect(store.sealAddresses()).toBe(true);
+    expect(store.publicAccess()).toBe(true);
+  });
+
   it("returns the settings with the stored and env blocklists", async () => {
     const { base, cookie } = await withAdmin({ envBlocked: ["env.example"] });
     const res = await fetch(`${base}/_g/admin/settings`, { headers: { cookie } });
     expect(res.headers.get("cache-control")).toBe("no-store");
-    expect(await res.json()).toEqual({ public: false, blockedHosts: [], envBlockedHosts: ["env.example"] });
+    expect(await res.json()).toEqual({
+      public: false,
+      blockedHosts: [],
+      envBlockedHosts: ["env.example"],
+      sealAddresses: false,
+    });
   });
 
   it("refuses the settings to anyone but the admin", async () => {

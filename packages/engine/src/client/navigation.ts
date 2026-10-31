@@ -1,10 +1,40 @@
 import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
+import {
+  append,
+  apply,
+  define,
+  hrefOf,
+  isWebUrl,
+  listIncludes,
+  newUrl,
+  originOf,
+  pathnameOf,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
+import { rewriteJavascriptUrl } from "../shared/url-rewrite.ts";
+import type { BlobDocuments } from "./blob-documents.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
+import { maskNative } from "./native-mask.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+import { openedOrigin, type WindowGuard } from "./windows.ts";
 
-const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
+/** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
+const LATER_EVENTS = ["contextmenu", "dragstart"];
+const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
+
+// Taken at load: these hooks run on page calls, after page code may have replaced them.
+const ownDescriptor = Object.getOwnPropertyDescriptor;
+
+export interface NavigationHooks extends DocumentListeners {
+  /** The hooked window.open, which owns proxying, the blob swap and the guard for every window opened by URL. */
+  open: (this: unknown, ...args: unknown[]) => unknown;
+}
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
 export function installNavigation(
@@ -12,63 +42,133 @@ export function installNavigation(
   ctx: UrlContext,
   cookies: CookieBridge,
   invoke: Invoke,
-): DocumentListeners {
+  guard: WindowGuard,
+  blobs: Pick<BlobDocuments, "swap" | "swapLink" | "restoreLinks" | "swapForm">,
+): NavigationHooks {
   const history = win.History.prototype;
-  for (const method of ["pushState", "replaceState"] as const) {
+  const historyOf = ownDescriptor(win, "history")?.get;
+  // Every loop here is indexed: adopting a frame installs this inside a page call, after the page may have replaced
+  // the array iterator.
+  const historyMethods = ["pushState", "replaceState"] as const;
+  for (let index = 0; index < historyMethods.length; index++) {
+    const method = historyMethods[index] as (typeof historyMethods)[number];
     const native = history[method];
     history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      if (url === undefined || url === null) return native.call(this, data, unused, url);
+      // Another window's History would let a frame rename a page it cannot otherwise touch.
+      if (historyOf && this !== apply(historyOf, win, [])) {
+        throw new win.DOMException(`Failed to execute '${method}' on 'History': access denied.`, "SecurityError");
+      }
+      if (url === undefined || url === null) return apply(native, this, [data, unused, url]);
       const current = ctx.realUrl();
-      const target = new URL(String(url), current);
-      if (target.origin !== current.origin) {
+      const target = newUrl(toText(url), current);
+      if (originOf(target) !== originOf(current)) {
         throw new win.DOMException(
-          `A history state with URL '${target.href}' cannot be created in a document with origin '${current.origin}'.`,
+          `A history state with URL '${hrefOf(target)}' cannot be created in a document with origin '${originOf(current)}'.`,
           "SecurityError",
         );
       }
-      return native.call(this, data, unused, encodeUrl(target));
+      return apply(native, this, [data, unused, ctx.documentAddress(target)]);
     };
   }
 
   const nativeOpen = win.open;
-  win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
-    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(String(url));
-    return nativeOpen.call(this ?? win, proxied, target, features);
-  };
+  const hookedOpen = maskNative(function (this: unknown, url?: unknown, target?: unknown, features?: unknown) {
+    const proxied = url === undefined || url === null || url === "" ? url : blobs.swap(ctx.toProxy(toText(url)));
+    const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
+    // Until the page it was opened for arrives, a popup shows a blank page of this origin.
+    return guard.wrap(opened, openedOrigin(proxied, ctx.origin)) as Window | null;
+  }, nativeOpen);
+  win.open = hookedOpen as typeof win.open;
 
-  // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.
-  const navigation = (win as unknown as { navigation?: { navigate?: (url: string, options?: unknown) => unknown } })
-    .navigation;
-  if (navigation && typeof navigation.navigate === "function") {
-    const nativeNavigate = navigation.navigate.bind(navigation);
-    navigation.navigate = (url: string, options?: unknown) => nativeNavigate(ctx.toProxy(String(url)), options);
+  // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first. The
+  // prototype is hooked, since a page can call its method on the instance directly.
+  const navigationProto = (win as unknown as { Navigation?: { prototype: object } }).Navigation?.prototype;
+  const navigateDescriptor = navigationProto && ownDescriptor(navigationProto, "navigate");
+  const nativeNavigate = navigateDescriptor?.value as ((...args: unknown[]) => unknown) | undefined;
+  if (navigationProto && navigateDescriptor && typeof nativeNavigate === "function") {
+    define(navigationProto, "navigate", {
+      ...navigateDescriptor,
+      value: maskNative(function (this: unknown, url: unknown, options?: unknown) {
+        return apply(nativeNavigate, this, [blobs.swap(ctx.toProxy(toText(url))), options]);
+      }, nativeNavigate),
+    });
   }
 
+  // Taken here, since the listeners below decide on every user click and submit after page code has run. Frames
+  // adopted from a parent run this code too, so nothing below may test values with this realm's own classes.
+  const elementProto = win.Element.prototype;
+  const { getAttributeNode, getAttribute, hasAttribute } = elementProto;
+  const localNameOf = ownDescriptor(elementProto, "localName")?.get;
+  const namespaceOf = ownDescriptor(elementProto, "namespaceURI")?.get;
+  const attrValue = win.Attr ? ownDescriptor(win.Attr.prototype, "value") : undefined;
+  const eventProto = win.Event?.prototype;
+  const composedPathOf = eventProto?.composedPath;
+  const eventGetter = (name: string) => (eventProto ? ownDescriptor(eventProto, name)?.get : undefined);
+  const typeOf = eventGetter("type");
+  const targetOf = eventGetter("target");
+  const preventedOf = eventGetter("defaultPrevented");
+  const preventDefault = eventProto?.preventDefault;
+  const submitterOf = win.SubmitEvent ? ownDescriptor(win.SubmitEvent.prototype, "submitter")?.get : undefined;
+  const plainClick = clickCheck(win);
+  const read = (get: (() => unknown) | undefined, object: unknown, key: string): unknown =>
+    get ? apply(get, object, []) : (object as Record<string, unknown>)[key];
+  const kindOf = (target: unknown): "link" | "svg link" | "form" | null => {
+    try {
+      const name = read(localNameOf, target, "localName");
+      const namespace = read(namespaceOf, target, "namespaceURI");
+      if (namespace === SVG_NAMESPACE) return name === "a" ? "svg link" : null;
+      if (namespace !== HTML_NAMESPACE) return null;
+      return name === "a" || name === "area" ? "link" : name === "form" ? "form" : null;
+    } catch {
+      return null;
+    }
+  };
+  const pathOf = (event: Event): unknown[] => {
+    try {
+      return (composedPathOf ? apply(composedPathOf, event, []) : event.composedPath()) as unknown[];
+    } catch {
+      return [];
+    }
+  };
+  const attributeOf = (element: unknown, name: string): string | null =>
+    apply(getAttribute, element, [name]) as string | null;
+
   // Links and forms that slipped past rewriting are fixed just before the browser follows them.
-  const fix = (element: Element, name: string) => {
-    const attribute = element.getAttributeNode(name);
-    if (attribute && escapes(attribute.value, ctx)) attribute.value = ctx.toProxy(attribute.value);
+  const fix = (element: unknown, name: string) => {
+    const attribute = apply(getAttributeNode, element, [name]) as Attr | null;
+    if (!attribute) return;
+    const value = toText(read(attrValue?.get, attribute, "value"));
+    if (!escapes(value, ctx)) return;
+    if (attrValue?.set) apply(attrValue.set, attribute, [ctx.toProxy(value)]);
+    else attribute.value = ctx.toProxy(value);
   };
   const listeners: Array<[string, (event: Event) => void, boolean]> = [];
   const fixLink = (event: Event) => {
-    for (const target of event.composedPath()) {
-      if (target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement) {
-        fix(target, "href");
-        return;
-      }
-      if (target instanceof win.SVGAElement) {
-        fix(target, "href");
-        fix(target, "xlink:href");
-        return;
-      }
+    const path = pathOf(event);
+    for (let index = 0; index < path.length; index++) {
+      const target = path[index];
+      const kind = kindOf(target);
+      if (kind !== "link" && kind !== "svg link") continue;
+      fix(target, "href");
+      if (kind === "svg link") fix(target, "xlink:href");
+      blobs.swapLink(target, listIncludes(LATER_EVENTS, read(typeOf, event, "type") as string));
+      return;
     }
   };
-  for (const type of LINK_EVENTS) listeners.push([type, fixLink, true]);
-  listeners.push([
+  for (let index = 0; index < LINK_EVENTS.length; index++)
+    append(listeners, [LINK_EVENTS[index] as string, fixLink, true]);
+  for (let index = 0; index < INTERACTIONS.length; index++) {
+    append(listeners, [INTERACTIONS[index] as string, () => blobs.restoreLinks(), true]);
+  }
+  append(listeners, [
     "submit",
     (event) => {
-      if (event.target instanceof win.HTMLFormElement) fix(event.target, "action");
-      const submitter = (event as SubmitEvent).submitter;
+      const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
+      const target = read(targetOf, event, "target");
+      if (kindOf(target) === "form") {
+        fix(target, "action");
+        blobs.swapForm(target, submitter);
+      }
       if (submitter) fix(submitter, "formaction");
     },
     true,
@@ -78,79 +178,110 @@ export function installNavigation(
   const { submit, requestSubmit } = form;
   form.submit = function (this: HTMLFormElement) {
     fix(this, "action");
-    submit.call(this);
+    blobs.swapForm(this);
+    apply(submit, this, []);
   };
   form.requestSubmit = function (this: HTMLFormElement, submitter?: HTMLElement | null) {
     fix(this, "action");
     if (submitter) fix(submitter, "formaction");
-    requestSubmit.call(this, submitter);
+    apply(requestSubmit, this, [submitter]);
   };
 
   // These run after the page's own handlers, so links and forms a page handles itself are left alone.
-  listeners.push([
+  append(listeners, [
     "click",
     (event) => {
       const writes = cookies.pendingWrites();
-      if (!writes || event.defaultPrevented || !isPlainClick(event)) return;
-      const link = event
-        .composedPath()
-        .find((target) => target instanceof win.HTMLAnchorElement || target instanceof win.HTMLAreaElement);
-      if (!link || (link.target && link.target !== "_self") || link.hasAttribute("download")) return;
-      const url = resolve(link.getAttributeNode("href")?.value, ctx);
+      if (!writes || read(preventedOf, event, "defaultPrevented") || !plainClick(event)) return;
+      const path = pathOf(event);
+      let link: unknown = null;
+      for (let index = 0; index < path.length && !link; index++) if (kindOf(path[index]) === "link") link = path[index];
+      if (!link) return;
+      const target = attributeOf(link, "target");
+      if ((target && target !== "_self") || apply(hasAttribute, link, ["download"])) return;
+      const attribute = apply(getAttributeNode, link, ["href"]) as Attr | null;
+      const url = resolve(attribute ? toText(read(attrValue?.get, attribute, "value")) : undefined, ctx);
       if (!url) return;
-      event.preventDefault();
-      // The next page must already see cookies this one has just written.
-      void writes.then(() => invoke(win.location.assign, win.location, [url]));
+      if (preventDefault) apply(preventDefault, event, []);
+      else event.preventDefault();
+      // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
+      void writes.then(() => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
     },
     false,
   ]);
-  listeners.push([
+  append(listeners, [
     "submit",
     (event) => {
       const writes = cookies.pendingWrites();
-      const target = event.target;
-      if (!writes || event.defaultPrevented || !(target instanceof win.HTMLFormElement)) return;
-      const submitter = (event as SubmitEvent).submitter;
-      if ((target.target && target.target !== "_self") || overridesForm(submitter)) return;
-      event.preventDefault();
+      const target = read(targetOf, event, "target") as HTMLFormElement;
+      if (!writes || read(preventedOf, event, "defaultPrevented") || kindOf(target) !== "form") return;
+      const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
+      const formTarget = attributeOf(target, "target");
+      if ((formTarget && formTarget !== "_self") || overridesForm(submitter)) return;
+      if (preventDefault) apply(preventDefault, event, []);
+      else event.preventDefault();
       void writes.then(() => {
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");
-        submit.call(target);
+        blobs.swapForm(target);
+        apply(submit, target, []);
         extra?.remove();
       });
     },
     false,
   ]);
 
-  const addListener = win.addEventListener.bind(win);
+  const addListener = win.addEventListener;
+  // Runs again after document.open, inside a page call, so it reads the list by index.
   const listen = () => {
-    for (const [type, listener, capture] of listeners) addListener(type, listener, capture);
+    for (let index = 0; index < listeners.length; index++) {
+      const entry = listeners[index] as [string, (event: Event) => void, boolean];
+      apply(addListener, win, [entry[0], entry[1], entry[2]]);
+    }
   };
   listen();
-  return { listen };
+  return { listen, open: hookedOpen };
 }
 
-function isPlainClick(event: Event): boolean {
-  return (
-    event instanceof MouseEvent &&
-    event.button === 0 &&
-    !event.metaKey &&
-    !event.ctrlKey &&
-    !event.shiftKey &&
-    !event.altKey
-  );
+/**
+ * A primary click with no modifier keys. MouseEvent's own getters throw for anything else, so the check holds for
+ * events of an adopted frame too, where this realm's MouseEvent is not theirs.
+ */
+function clickCheck(win: Realm): (event: unknown) => boolean {
+  const proto = win.MouseEvent?.prototype;
+  const getter = (name: string) => (proto ? ownDescriptor(proto, name)?.get : undefined);
+  const button = getter("button");
+  const keys = [getter("metaKey"), getter("ctrlKey"), getter("shiftKey"), getter("altKey")];
+  return (event) => {
+    if (!button) return false;
+    try {
+      if (apply(button, event, []) !== 0) return false;
+      for (let index = 0; index < keys.length; index++) {
+        const key = keys[index];
+        if (key && apply(key, event, [])) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function resolve(raw: string | undefined, ctx: UrlContext): string | null {
   if (!raw) return null;
   try {
-    const url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    const url = newUrl(raw, newUrl(encodeUrl(ctx.realBase()), ctx.origin));
+    return isWebUrl(url) ? hrefOf(url) : null;
   } catch {
     return null;
   }
+}
+
+/** The address a link this window follows loads at, sealed for its own origin while the page holds a seal. */
+function addressOf(url: string, ctx: UrlContext): string {
+  const real = newUrl(ctx.fromProxy(url));
+  return originOf(real) === ctx.origin ? ctx.toProxy(url) : ctx.documentAddress(real);
 }
 
 /** A submitter that redirects the form elsewhere is left to the browser rather than replayed without its overrides. */
@@ -173,13 +304,16 @@ function submitterField(win: Realm, submitter: HTMLElement | null): HTMLInputEle
 }
 
 function escapes(raw: string, ctx: UrlContext): boolean {
+  const script = rewriteJavascriptUrl(raw, originOf(ctx.realUrl()));
+  if (script !== null) return script !== raw;
   let url: URL;
   try {
-    url = new URL(raw, new URL(encodeUrl(ctx.realBase()), ctx.origin));
+    url = newUrl(raw, newUrl(encodeUrl(ctx.realBase()), ctx.origin));
   } catch {
     return false;
   }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  if (url.origin !== ctx.origin) return true;
-  return !url.pathname.startsWith(PROXY_PREFIX) && !isReservedPath(url.pathname);
+  if (!isWebUrl(url)) return false;
+  if (originOf(url) !== ctx.origin) return true;
+  const pathname = pathnameOf(url);
+  return !startsWith(pathname, PROXY_PREFIX) && !isReservedPath(pathname);
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { getRandomInternetFact, type InternetFact } from "@/data/internetFacts";
+import SourceLink from "./SourceLink.vue";
 
 const fact = ref<InternetFact>({ text: "", source: "" });
 
@@ -25,6 +26,6 @@ onMounted(() => {
         Source
       </a>
     </p>
-    <a href="/_g/source" class="text-muted-foreground no-underline hover:text-foreground"> Source code · AGPL-3.0 </a>
+    <SourceLink />
   </footer>
 </template>
