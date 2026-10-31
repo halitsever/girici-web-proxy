@@ -1,4 +1,4 @@
-import { apply, isWebUrl, originOf, parseUrl, toText } from "../shared/primordials.ts";
+import { apply, define, isWebUrl, originOf, parseUrl, toText } from "../shared/primordials.ts";
 import type { Invoke } from "./invoke.ts";
 import { realOriginOf, type Realm, type UrlContext } from "./url-context.ts";
 import type { WindowGuard } from "./windows.ts";
@@ -7,7 +7,6 @@ export type Send = (...args: unknown[]) => void;
 
 // Taken at load: the event getters run on page calls, after page code may have replaced these.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 
 /** Every proxied page runs on our origin, so postMessage targets and the origin reported to receivers are translated. */
 export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, guard: WindowGuard): void {
@@ -23,7 +22,7 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, gu
   const sourceOf = (event: unknown): unknown =>
     nativeSource ? apply(nativeSource, event, []) : (event as { source: unknown }).source;
   if (sourceDescriptor && nativeSource) {
-    defineProperty(proto, "source", {
+    define(proto, "source", {
       ...sourceDescriptor,
       get(this: MessageEvent) {
         return guard.wrap(apply(nativeSource, this, []));
@@ -34,7 +33,7 @@ export function installMessaging(win: Realm, ctx: UrlContext, invoke: Invoke, gu
   const descriptor = ownDescriptor(proto, "origin");
   const nativeOrigin = descriptor?.get;
   if (!nativeOrigin) return;
-  defineProperty(proto, "origin", {
+  define(proto, "origin", {
     ...descriptor,
     get(this: MessageEvent) {
       const origin = toText(apply(nativeOrigin, this, []));

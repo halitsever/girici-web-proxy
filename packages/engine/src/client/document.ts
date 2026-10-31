@@ -1,4 +1,5 @@
 import { decodeUrl } from "../shared/codec.ts";
+import { define as defineOwn } from "../shared/primordials.ts";
 import { refererFor } from "../shared/referrer.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -43,7 +44,7 @@ export function installDocument(win: Realm, ctx: UrlContext): () => void {
       return ctx.fromProxy(String(nativeBaseUri.call(this)));
     },
   });
-  Object.defineProperty(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });
+  defineOwn(win, "origin", { get: () => ctx.realUrl().origin, configurable: true, enumerable: true });
   return () => {
     domain = null;
   };
@@ -56,5 +57,5 @@ function getter(proto: object, name: string): (this: unknown) => unknown {
 }
 
 function define(proto: object, name: string, descriptor: PropertyDescriptor): void {
-  Object.defineProperty(proto, name, { configurable: true, enumerable: true, ...descriptor });
+  defineOwn(proto, name, { configurable: true, enumerable: true, ...descriptor });
 }

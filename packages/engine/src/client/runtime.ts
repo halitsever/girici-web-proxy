@@ -2,6 +2,7 @@ import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
 import {
   brandOf,
+  define,
   hashOf,
   hrefOf,
   isWebUrl,
@@ -45,7 +46,6 @@ import { createWindowGuard, installWindowLinks } from "./windows.ts";
 // Taken at load: install also runs when a page inserts a frame, after page code may have replaced these.
 const apply = Reflect.apply;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 const freeze = Object.freeze;
 
 /**
@@ -147,7 +147,8 @@ export function install(
   };
   const rewrite = createRewriteBridge(ctx, (base) => {
     const child = childConfig();
-    return clientTag(clientUrl, { ...child, inherit: { origin: ctx.origin, base: hrefOf(base) } });
+    const inherit = { __proto__: null, origin: ctx.origin, base: hrefOf(base) };
+    return clientTag(clientUrl, { __proto__: null, ...child, inherit } as ClientConfig);
   });
   const partition = () => {
     // top cannot be redefined by a page, and neither can the address read from it.
@@ -181,7 +182,7 @@ export function install(
     renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit)),
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
-  defineProperty(win, "__g$", { value: freeze(helpers), enumerable: false });
+  define(win, "__g$", { value: freeze(helpers), enumerable: false });
 
   const childConfig = createChildConfig(ctx, () => cookies.snapshot(), steps, config);
 

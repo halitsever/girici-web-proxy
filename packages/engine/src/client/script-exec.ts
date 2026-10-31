@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm } from "./url-context.ts";
 
@@ -26,7 +27,7 @@ export function installScriptExec(
   const hookedFunction = wrapConstructor(FunctionCtor);
   win.Function = hookedFunction as unknown as FunctionConstructor;
   // `(function(){}).constructor` reaches the native ctor through the shared prototype, so route it too.
-  Object.defineProperty(win.Function.prototype, "constructor", {
+  define(win.Function.prototype, "constructor", {
     configurable: true,
     writable: true,
     value: hookedFunction,
@@ -35,7 +36,7 @@ export function installScriptExec(
   // Generator and async constructors are reached through a sample function's `constructor`, not a global.
   for (const sample of [function* () {}, async function () {}, async function* () {}]) {
     const proto = Object.getPrototypeOf(sample) as { constructor: AnyFunction };
-    Object.defineProperty(proto, "constructor", {
+    define(proto, "constructor", {
       configurable: true,
       writable: true,
       value: wrapConstructor(proto.constructor),

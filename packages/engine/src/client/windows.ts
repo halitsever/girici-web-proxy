@@ -1,7 +1,16 @@
 import type { Invoke } from "./invoke.ts";
 import { post } from "./messaging.ts";
 import { maskNative } from "./native-mask.ts";
-import { apply, hrefOf, NativeWeakMap, NativeWeakSet, originOf, parseUrl, toText } from "../shared/primordials.ts";
+import {
+  apply,
+  define,
+  hrefOf,
+  NativeWeakMap,
+  NativeWeakSet,
+  originOf,
+  parseUrl,
+  toText,
+} from "../shared/primordials.ts";
 import { realOriginOf, realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
 
 export { realOriginOf };
@@ -24,7 +33,6 @@ const reflectDefine = Reflect.defineProperty;
 const reflectDelete = Reflect.deleteProperty;
 const reflectProto = Reflect.getPrototypeOf;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 const create = Object.create;
 const NativeProxy = Proxy;
 const mapGet = WeakMap.prototype.get;
@@ -234,7 +242,11 @@ export function createWindowGuard(win: Realm, ctx: UrlContext, invoke: Invoke): 
         getOwnPropertyDescriptor: (_dummy, property) => {
           if (!allowed(property) && !sameOrigin(target)) return deny();
           // Reported configurable, since the wrapper's own target never holds these.
-          return { value: allowed(property) ? crossOrigin(property) : passthrough(property), configurable: true };
+          return {
+            __proto__: null,
+            value: allowed(property) ? crossOrigin(property) : passthrough(property),
+            configurable: true,
+          } as PropertyDescriptor;
         },
         defineProperty: (_dummy, property, descriptor) =>
           sameOrigin(target) ? reflectDefine(target, property, descriptor) : deny(),
@@ -266,7 +278,7 @@ export function installWindowLinks(win: Realm, ctx: UrlContext, guard: WindowGua
     const hooked = function (): unknown {
       return guard.wrap(apply(get, win, []));
     };
-    defineProperty(win, name, { ...descriptor, get: maskNative(hooked, get) });
+    define(win, name, { ...descriptor, get: maskNative(hooked, get) });
   }
   const frameElement = ownDescriptor(win, "frameElement");
   const getElement = frameElement?.get;
@@ -277,6 +289,6 @@ export function installWindowLinks(win: Realm, ctx: UrlContext, guard: WindowGua
       const parent: unknown = apply(parentOf, win, []);
       return realOriginOf(parent, ctx.origin) === originOf(ctx.realUrl()) ? element : null;
     };
-    defineProperty(win, "frameElement", { ...frameElement, get: maskNative(hooked, getElement) });
+    define(win, "frameElement", { ...frameElement, get: maskNative(hooked, getElement) });
   }
 }

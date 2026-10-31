@@ -4,6 +4,7 @@ import { DocumentSteps } from "../src/client/renewal.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
+import { DESCRIPTOR_ADDITIONS, withPrototypeAdditions } from "./replaced-builtins.ts";
 
 describe("createFrameWalker", () => {
   it("walks only when a mutation changed the number of child windows", () => {
@@ -227,6 +228,25 @@ describe("installFrames", () => {
     steps.run({ v: PROTOCOL_VERSION, cookies: [] });
     (ctors.Document!.prototype.open as (this: unknown) => unknown).call(win.document);
     expect(seen).toEqual(["listeners", "cookies", "listeners"]);
+  });
+});
+
+describe("with page additions to Object.prototype", () => {
+  it("still hooks a child realm's prototypes", () => {
+    const { win, ctors, installed } = withPrototypeAdditions(DESCRIPTOR_ADDITIONS, () => setup());
+    (ctors.Document!.prototype.open as (...args: unknown[]) => unknown).call(win.document, "https://x.test/", "n", "");
+    expect(installed).toEqual([{ child: { popup: "/~/https://x.test/" }, navigating: true }]);
+  });
+
+  it("keeps a child's config fields when setters for them sit on Object.prototype", () => {
+    const steps = new DocumentSteps();
+    const ctx = { origin: "http://proxy.test", realUrl: () => new URL("https://a.test/") };
+    const initial = { v: PROTOCOL_VERSION, cookies: [], site: "https://a.test", cookiesBlocked: true };
+    const childConfig = createChildConfig(ctx, () => [], steps, initial);
+    const swallow = { set: () => {} };
+    const child = withPrototypeAdditions({ site: swallow, cookiesBlocked: swallow, inherit: swallow }, childConfig);
+    expect(Object.getOwnPropertyNames(child).sort()).toEqual(["cookies", "cookiesBlocked", "inherit", "site", "v"]);
+    expect(JSON.parse(JSON.stringify(child))).toMatchObject({ site: "https://a.test", cookiesBlocked: true });
   });
 });
 

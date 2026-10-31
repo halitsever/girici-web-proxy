@@ -31,6 +31,9 @@ const utf8Decoder = new TextDecoder();
 const nativeExec = RegExp.prototype.exec;
 const nativeSetHas = Set.prototype.has;
 const objectToString = Object.prototype.toString;
+const objectDefine = Object.defineProperty;
+const hasOwn = Object.prototype.hasOwnProperty;
+const DESCRIPTOR_FIELDS = ["value", "writable", "get", "set", "enumerable", "configurable"];
 
 /** For tables made inside page calls, where a page's own WeakMap or WeakSet would break the captured methods. */
 export const NativeWeakMap = WeakMap;
@@ -129,6 +132,27 @@ export function newBytes(size: number): Uint8Array {
 /** The first `length` bytes as UTF-8, with U+FFFD for invalid sequences. */
 export function utf8Text(bytes: Uint8Array, length: number): string {
   return apply(nativeDecode, utf8Decoder, [new NativeUint8Array(apply(bufferOf, bytes, []), 0, length)]);
+}
+
+/** Object.defineProperty that reads only the descriptor's own fields, so none comes from a page's Object.prototype. */
+export function define<T>(target: T, key: PropertyKey, descriptor: PropertyDescriptor): T {
+  const own = { __proto__: null } as Record<string, unknown>;
+  for (let index = 0; index < DESCRIPTOR_FIELDS.length; index++) {
+    const field = DESCRIPTOR_FIELDS[index] as keyof PropertyDescriptor;
+    if (apply(hasOwn, descriptor, [field])) own[field] = descriptor[field];
+  }
+  return objectDefine(target, key, own as PropertyDescriptor);
+}
+
+/** Adds to the end of `list` without Array.prototype.push or an index setter a page put on Array.prototype. */
+export function append<T>(list: T[], item: T): void {
+  defineProperty(list, list.length, {
+    __proto__: null,
+    value: item,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  } as PropertyDescriptor);
 }
 
 export function setHas<T>(set: Set<T>, value: T): boolean {

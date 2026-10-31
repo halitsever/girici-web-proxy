@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import { PROXY_PREFIX } from "../shared/codec.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -26,7 +27,7 @@ function wrapGetter(proto: object | undefined, name: string, map: (value: string
   const descriptor = Object.getOwnPropertyDescriptor(proto, name);
   const get = descriptor?.get;
   if (!get) return;
-  Object.defineProperty(proto, name, {
+  define(proto, name, {
     ...descriptor,
     get(this: unknown) {
       const value = get.call(this);

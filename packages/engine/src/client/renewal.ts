@@ -1,4 +1,4 @@
-import { listIncludes } from "../shared/primordials.ts";
+import { append, listIncludes } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { parseConfig } from "./config.ts";
 import type { Realm } from "./url-context.ts";
@@ -85,7 +85,8 @@ export class DocumentSteps {
   #config: ClientConfig | null = null;
 
   add(name: string, step: (config: ClientConfig) => void): void {
-    this.#steps.push([name, step]);
+    // Install runs on page calls for a new frame, after the page may have replaced Array.prototype.push.
+    append(this.#steps, [name, step]);
   }
 
   run(config: ClientConfig): void {

@@ -2,6 +2,7 @@ import { prefixFor } from "../shared/partition.ts";
 import {
   apply,
   brandOf,
+  define,
   hrefOf,
   isWebUrl,
   mapOf,
@@ -56,7 +57,7 @@ export function installWorker(scope: WorkerScope): void {
   // Taken before hookFetch, which would send the announcement to the proxied site.
   const nativeFetch = scope.fetch;
 
-  Object.defineProperty(scope, "__g$", { value: workerHelpers(scope, ctx) });
+  define(scope, "__g$", { value: workerHelpers(scope, ctx) });
   maskOrigin(scope, ctx);
   installStorageIsolation(scope as unknown as Realm, ctx, () => partition);
   hookImportScripts(scope, ctx);
@@ -144,7 +145,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
 /** self.origin is a separate global from self.location, so it is masked too or integrity checks see the proxy origin. */
 function maskOrigin(scope: WorkerScope, ctx: UrlContext): void {
   try {
-    Object.defineProperty(scope, "origin", { configurable: true, get: () => ctx.realBase().origin });
+    define(scope, "origin", { configurable: true, get: () => ctx.realBase().origin });
   } catch {
     // Some engines make the global origin non-configurable; the leak then stands.
   }

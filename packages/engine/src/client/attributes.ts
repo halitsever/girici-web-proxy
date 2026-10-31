@@ -1,5 +1,6 @@
 import {
   apply,
+  define,
   hrefOf,
   indexOf,
   NativeWeakMap,
@@ -49,7 +50,6 @@ const XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
 
 // Taken at load: the Attr hooks run inside page calls, after page code may have replaced these.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
 const RUNTIME_ATTRIBUTE = "data-girici=";
@@ -127,7 +127,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     const descriptor = findAccessor(win.Attr.prototype, name);
     if (!descriptor?.get || !descriptor.set) continue;
     const { get, set } = descriptor;
-    Object.defineProperty(win.Attr.prototype, name, {
+    define(win.Attr.prototype, name, {
       configurable: true,
       enumerable: descriptor.enumerable ?? true,
       get(this: Attr) {
@@ -178,7 +178,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
   const attributes = ownDescriptor(element, "attributes");
   if (attributes?.get) {
     const read = attributes.get;
-    defineProperty(element, "attributes", {
+    define(element, "attributes", {
       configurable: true,
       enumerable: attributes.enumerable ?? true,
       get: maskNative(function (this: Element) {
@@ -206,7 +206,7 @@ export function installAttributes(win: Realm, ctx: UrlContext, markup: SrcdocBri
     const descriptor = proto && ownDescriptor(proto, "srcdoc");
     if (!proto || !descriptor?.get) return;
     const { get, set } = descriptor;
-    defineProperty(proto, "srcdoc", {
+    define(proto, "srcdoc", {
       configurable: true,
       enumerable: descriptor.enumerable ?? true,
       get: maskNative(function (this: Element) {
@@ -253,7 +253,7 @@ function wrap(
   const descriptor = proto && Object.getOwnPropertyDescriptor(proto, property);
   if (!proto || !descriptor?.get) return;
   const { get, set } = descriptor;
-  Object.defineProperty(proto, property, {
+  define(proto, property, {
     configurable: true,
     enumerable: descriptor.enumerable ?? true,
     get(this: unknown) {
@@ -273,7 +273,7 @@ function installLinkParts(win: Realm, constructorName: string): void {
   if (!proto) return;
   // A link without a parsable href reports empty parts, as browsers do.
   const realUrl = (link: object): URL | null => parseUrl(toText((link as { href: string }).href));
-  Object.defineProperty(proto, "origin", {
+  define(proto, "origin", {
     configurable: true,
     enumerable: true,
     get(this: object) {
@@ -282,7 +282,7 @@ function installLinkParts(win: Realm, constructorName: string): void {
     },
   });
   for (const part of LINK_PARTS) {
-    Object.defineProperty(proto, part, {
+    define(proto, part, {
       configurable: true,
       enumerable: true,
       get(this: object) {
@@ -297,7 +297,7 @@ function installLinkParts(win: Realm, constructorName: string): void {
       },
     });
   }
-  Object.defineProperty(proto, "toString", {
+  define(proto, "toString", {
     configurable: true,
     writable: true,
     value(this: object) {

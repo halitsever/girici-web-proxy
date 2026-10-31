@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
   COOKIE_MESSAGE,
@@ -87,7 +88,7 @@ export function installCookies(
     pending = pending ? Promise.all([pending, request]).then(() => {}) : request;
   };
 
-  Object.defineProperty(win.Document.prototype, "cookie", {
+  define(win.Document.prototype, "cookie", {
     configurable: true,
     enumerable: true,
     get: () => cookieString(mirror, ctx.realUrl(), Date.now()),

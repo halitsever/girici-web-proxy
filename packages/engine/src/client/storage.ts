@@ -1,5 +1,5 @@
 import { prefixFor, sameSite } from "../shared/partition.ts";
-import { originOf } from "../shared/primordials.ts";
+import { define, originOf } from "../shared/primordials.ts";
 import type { Realm } from "./url-context.ts";
 
 export { prefixFor };
@@ -122,7 +122,7 @@ export function installStorage(win: Realm, partition: () => string): void {
     if (!getNative) continue;
     // One object per partition keeps `localStorage === localStorage` true.
     const byPartition = new Map<string, Storage>();
-    Object.defineProperty(win, name, {
+    define(win, name, {
       configurable: true,
       enumerable: true,
       get: () => {

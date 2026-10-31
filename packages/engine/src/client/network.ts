@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import { HEADER } from "../shared/protocol.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { CookieBridge } from "./cookies.ts";
@@ -82,7 +83,7 @@ function wrapGetter(proto: object, name: string, read: (value: string) => string
   const descriptor = Object.getOwnPropertyDescriptor(proto, name);
   const get = descriptor?.get;
   if (!get) return;
-  Object.defineProperty(proto, name, {
+  define(proto, name, {
     ...descriptor,
     get(this: unknown) {
       return read(toText(apply(get, this, [])));

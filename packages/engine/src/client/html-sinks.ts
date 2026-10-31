@@ -1,3 +1,4 @@
+import { define } from "../shared/primordials.ts";
 import type { Realm } from "./url-context.ts";
 
 // Taken at load, so a page that replaced them never receives a native or the markup on its way in.
@@ -5,7 +6,6 @@ const apply = Reflect.apply;
 const toText = String;
 const lowerCase = String.prototype.toLowerCase;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 
 type Method = (...args: unknown[]) => unknown;
 
@@ -96,7 +96,7 @@ function wrapHtmlProperty(
   const descriptor = ownDescriptor(proto, name);
   if (!descriptor?.set) return;
   const { get, set } = descriptor;
-  defineProperty(proto, name, {
+  define(proto, name, {
     configurable: true,
     enumerable: descriptor.enumerable ?? true,
     get: get

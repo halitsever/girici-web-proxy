@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { createWindowGuard, realOriginOf } from "../src/client/windows.ts";
-import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+import { DESCRIPTOR_ADDITIONS, REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const proxy = "http://proxy.test";
 const direct: Invoke = (fn, self, args) => Reflect.apply(fn, self, args);
@@ -177,6 +177,15 @@ describe("createWindowGuard", () => {
       ["replace", `${proxy}/~/proxied//d`],
       ["href", `${proxy}/~/proxied/https://e.test/`],
     ]);
+  });
+
+  it("describes a wrapper's members whatever the page added to Object.prototype", () => {
+    const guard = guardFor("https://a.test");
+    const wrapped = guard.wrap(fakeWindow(`${proxy}/~/https/b.test/`)) as object;
+    const described = withPrototypeAdditions(DESCRIPTOR_ADDITIONS, () =>
+      Object.getOwnPropertyDescriptor(wrapped, "closed"),
+    );
+    expect(described).toMatchObject({ value: false, configurable: true });
   });
 
   it("ignores proxy traps a page adds to Object.prototype", () => {

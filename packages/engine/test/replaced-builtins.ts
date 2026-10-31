@@ -45,3 +45,28 @@ export const REPLACED_BUILTINS: Array<[string, object, PropertyKey, PropertyDesc
   ["URL.prototype.protocol", URL.prototype, "protocol", { get: () => "x:" }],
   ["URL.prototype.origin", URL.prototype, "origin", { get: () => "http://proxy.test" }],
 ];
+
+/** Runs `run` while Object.prototype carries the page's own `properties`, and removes them before anything else runs. */
+export function withPrototypeAdditions<T>(properties: PropertyDescriptorMap, run: () => T): T {
+  const proto = Object.prototype as Record<string, unknown>;
+  const names = Object.keys(properties);
+  try {
+    // Null-prototype descriptors, since each addition would otherwise leak into the next one's descriptor.
+    for (const name of names) {
+      Object.defineProperty(proto, name, {
+        __proto__: null,
+        configurable: true,
+        ...properties[name],
+      } as PropertyDescriptor);
+    }
+    return run();
+  } finally {
+    for (const name of names) delete proto[name];
+  }
+}
+
+/** Descriptor fields a page can add to Object.prototype, which every plain descriptor object would inherit. */
+export const DESCRIPTOR_ADDITIONS: PropertyDescriptorMap = {
+  get: { value: () => "page", writable: true },
+  set: { value: () => {}, writable: true },
+};

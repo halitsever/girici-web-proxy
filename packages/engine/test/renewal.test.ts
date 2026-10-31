@@ -55,6 +55,19 @@ describe("DocumentSteps", () => {
     expect(seen).toEqual(["https://a.test", "https://b.test"]);
   });
 
+  it("keeps every step when the page replaced Array.prototype.push", () => {
+    const seen: string[] = [];
+    const steps = withReplaced(Array.prototype, "push", { value: () => 0 }, () => {
+      const made = new DocumentSteps();
+      made.add("listeners", () => {
+        seen[seen.length] = "listeners";
+      });
+      return made;
+    });
+    steps.run({ v: 2, cookies: [] });
+    expect(seen).toEqual(["listeners"]);
+  });
+
   it("runs the named steps again when the page replaced the array iterator and includes", () => {
     const seen: string[] = [];
     const steps = new DocumentSteps();

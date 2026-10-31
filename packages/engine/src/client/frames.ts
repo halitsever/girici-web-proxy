@@ -1,4 +1,4 @@
-import { hrefOf, NativeWeakSet } from "../shared/primordials.ts";
+import { define, hrefOf, NativeWeakSet } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
@@ -48,7 +48,6 @@ const PLUGIN_WALKS = [16, 50, 100, 250, 500, 1000, 2000];
 // Taken at load: adoption runs inside page calls, after page code may have replaced these.
 const apply = Reflect.apply;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
-const defineProperty = Object.defineProperty;
 const toText = String;
 const then = Promise.prototype.then;
 const weakHas = WeakSet.prototype.has;
@@ -106,14 +105,15 @@ export function createChildConfig(
     current = next;
   });
   return () => {
-    const child: ClientConfig = {
+    // Null prototypes, so setters or a toJSON a page put on Object.prototype never see or change the config.
+    return {
+      __proto__: null,
       v: PROTOCOL_VERSION,
       cookies: cookies(),
-      inherit: { origin: ctx.origin, base: hrefOf(ctx.realUrl()) },
-    };
-    if (current.cookiesBlocked !== undefined) child.cookiesBlocked = current.cookiesBlocked;
-    if (current.site !== undefined) child.site = current.site;
-    return child;
+      inherit: { __proto__: null, origin: ctx.origin, base: hrefOf(ctx.realUrl()) },
+      ...(current.cookiesBlocked !== undefined ? { cookiesBlocked: current.cookiesBlocked } : undefined),
+      ...(current.site !== undefined ? { site: current.site } : undefined),
+    } as ClientConfig;
   };
 }
 
@@ -214,7 +214,7 @@ export function installFrames(
       const hooked = function (this: unknown, ...args: unknown[]): unknown {
         return mutateIn(targetView(this), () => apply(native, this, args));
       };
-      defineProperty(proto, method, { ...descriptor, value: maskNative(hooked, native) });
+      define(proto, method, { ...descriptor, value: maskNative(hooked, native) });
     }
   }
   for (const [name, properties] of SETTER_HOOKS) {
@@ -227,7 +227,7 @@ export function installFrames(
       const hooked = function (this: unknown, value: unknown): void {
         mutateIn(viewOf(this), () => apply(set, this, [value]));
       };
-      defineProperty(proto, property, { ...descriptor, set: maskNative(hooked, set) });
+      define(proto, property, { ...descriptor, set: maskNative(hooked, set) });
     }
   }
 
@@ -268,7 +268,7 @@ export function installFrames(
       const hooked = function (this: unknown): unknown {
         return settle(apply(get, this, []));
       };
-      defineProperty(proto, property, { ...descriptor, get: maskNative(hooked, get) });
+      define(proto, property, { ...descriptor, get: maskNative(hooked, get) });
     }
   }
   for (const name of SVG_DOCUMENT_ELEMENTS) {
@@ -279,7 +279,7 @@ export function installFrames(
     const hooked = function (this: unknown): unknown {
       return visibleDocument(apply(native, this, []));
     };
-    defineProperty(proto, "getSVGDocument", { ...descriptor, value: maskNative(hooked, native) });
+    define(proto, "getSVGDocument", { ...descriptor, value: maskNative(hooked, native) });
   }
 
   const open = win.open;
@@ -381,7 +381,7 @@ function hookDocumentOpen(
     reopened(this);
     return result;
   };
-  defineProperty(proto, "open", { ...descriptor, value: maskNative(hooked, native) });
+  define(proto, "open", { ...descriptor, value: maskNative(hooked, native) });
 }
 
 /** Chromium's Document Picture-in-Picture window shares this origin and starts blank. */
@@ -401,7 +401,7 @@ function hookPictureInPicture(win: Realm, adopt: (child: unknown) => void): void
         },
       ]);
     };
-    defineProperty(pip, "requestWindow", { ...request, value: maskNative(hooked, native) });
+    define(pip, "requestWindow", { ...request, value: maskNative(hooked, native) });
   }
   const event = (win as unknown as Record<string, { prototype?: object } | undefined>).DocumentPictureInPictureEvent
     ?.prototype;
@@ -414,6 +414,6 @@ function hookPictureInPicture(win: Realm, adopt: (child: unknown) => void): void
       adopt(opened);
       return opened;
     };
-    defineProperty(proto, "window", { ...current, get: maskNative(hooked, get) });
+    define(proto, "window", { ...current, get: maskNative(hooked, get) });
   }
 }
