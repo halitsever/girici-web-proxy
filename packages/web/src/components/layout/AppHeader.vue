@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Search, SlidersHorizontal, User } from "lucide-vue-next";
 import { RouterLink, useRoute } from "vue-router";
+import BrandMark from "./BrandMark.vue";
 
 const route = useRoute();
 const tabs = [
@@ -13,9 +14,8 @@ const tabs = [
 <template>
   <header class="sticky top-0 z-20 border-b border-[#18181b] bg-background/85 backdrop-blur-md">
     <div class="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-3 px-3 py-3">
-      <RouterLink to="/" class="inline-flex items-center gap-2 no-underline">
-        <img src="@/assets/brand/girici-icon-dark.svg" class="h-6 w-6" alt="" />
-        <span class="text-[18px] font-bold tracking-[-0.03em] text-foreground">Girici</span>
+      <RouterLink to="/" class="no-underline">
+        <BrandMark />
       </RouterLink>
       <nav class="flex items-center gap-0.5 rounded-[10px] border border-border bg-card p-[3px]">
         <RouterLink

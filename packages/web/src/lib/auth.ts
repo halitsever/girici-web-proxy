@@ -116,7 +116,7 @@ export async function saveBlockedHosts(hosts: string[], currentPassword: string)
 }
 
 /** Account and admin writes share these answers: 403 is a wrong current password, 429 too many tries. */
-function writeError(status: number, fallback: string): Error {
+export function writeError(status: number, fallback: string): Error {
   if (status === 403) return new Error(WRONG_PASSWORD);
   if (status === 429) return new Error("Too many attempts. Wait a minute and try again.");
   return new Error(fallback);

@@ -2,6 +2,9 @@ import express, { Router, type NextFunction, type Request, type Response } from 
 import { issueSession } from "../auth/cookie.ts";
 import { sessionAdmin } from "../auth/gate.ts";
 import type { AdminInfo, AuthStore } from "../auth/store.ts";
+import { readLogoUpload } from "../brand/logo.ts";
+import { readBrandName } from "../brand/name.ts";
+import type { BrandStore } from "../brand/store.ts";
 import { clientKey } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
 import { rateLimiter } from "../http/rate-limit.ts";
@@ -16,12 +19,14 @@ export interface AdminSettings {
 }
 
 /** Account and operator settings for the signed-in admin; changes need same origin, a session and the password. */
-export function adminRouter(store: AuthStore, blocklist: HostBlocklist): Router {
+export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: BrandStore): Router {
   // Exact paths only: the service worker guards these by name, so a variant such as /_g/Logout/ must miss too.
   const router = Router({ caseSensitive: true, strict: true });
   const json = express.json({ limit: "8kb" });
   // A full blocklist of long host names outgrows the small-form limit.
   const settingsJson = express.json({ limit: "512kb" });
+  // A 256 KB logo is about 350 KB as base64.
+  const brandJson = express.json({ limit: "384kb" });
   // Each write checks a password, so attempts are capped per client the way sign-ins are.
   const confirm = confirmPassword(store, rateLimiter({ windowMs: 60_000, max: 10 }));
 
@@ -77,6 +82,27 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist): Router 
       blocklist.update(hosts);
     }
     res.json(settingsOf(store, blocklist));
+  });
+
+  router.post("/_g/admin/brand", sameOrigin, requireSession(store), brandJson, confirm, (req, res) => {
+    const body = (req.body ?? {}) as { name?: unknown; logo?: unknown };
+    const hasName = "name" in body;
+    const hasLogo = "logo" in body;
+    if (!hasName && !hasLogo) {
+      res.status(400).end();
+      return;
+    }
+    const name = hasName ? readBrandName(body.name) : undefined;
+    if (name === null) {
+      res.status(400).json({ invalid: "name" });
+      return;
+    }
+    const logo = hasLogo && body.logo !== null ? readLogoUpload(body.logo) : undefined;
+    if (logo === null) {
+      res.status(400).json({ invalid: "logo" });
+      return;
+    }
+    res.json(brand.update({ ...(name ? { name: name.name } : {}), ...(hasLogo ? { logo: logo ?? null } : {}) }));
   });
 
   return router;

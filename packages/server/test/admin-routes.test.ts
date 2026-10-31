@@ -1,10 +1,14 @@
+import { mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { adminRouter } from "../src/routes/admin.ts";
 import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
+import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { HostBlocklist } from "../src/upstream/blocklist.ts";
 
@@ -20,7 +24,9 @@ async function withAdmin(
   const admin = store.createAdmin(setup);
   const blocklist = new HostBlocklist(options.envBlocked ?? [], store.blockedHosts());
   const app = express();
-  app.use(adminRouter(store, blocklist));
+  app.use(
+    adminRouter(store, blocklist, new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), store)),
+  );
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

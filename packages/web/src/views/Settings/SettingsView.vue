@@ -4,6 +4,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { brand, DEFAULT_BRAND_NAME, readLogoFile, saveBrand } from "@/lib/brand";
 import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess } from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
@@ -25,6 +26,16 @@ const envBlocked = ref<string[]>([]);
 const blockedStatus = ref("");
 const blockedError = ref("");
 const savingBlocked = ref(false);
+const instanceName = ref(brand.value.name === DEFAULT_BRAND_NAME ? "" : brand.value.name);
+// undefined keeps the saved logo, null removes it, an object replaces it.
+const pendingLogo = ref<{ type: string; data: string } | null | undefined>(undefined);
+const instanceStatus = ref("");
+const instanceError = ref("");
+const savingInstance = ref(false);
+const logoPreview = computed(() => {
+  if (pendingLogo.value === null) return null;
+  return pendingLogo.value ? `data:${pendingLogo.value.type};base64,${pendingLogo.value.data}` : brand.value.logo;
+});
 const sites = ref<SiteSummary[]>([]);
 const sitesLoaded = ref(false);
 const siteBusy = ref(false);
@@ -57,6 +68,47 @@ async function onTogglePublic(on: boolean) {
   } catch (e) {
     publicAccess.value = previous;
     publicError.value = e instanceof Error ? e.message : "Could not change public access.";
+  }
+}
+
+async function onPickLogo(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  instanceError.value = "";
+  instanceStatus.value = "";
+  if (!file) return;
+  try {
+    pendingLogo.value = await readLogoFile(file);
+  } catch (e) {
+    pendingLogo.value = undefined;
+    input.value = "";
+    instanceError.value = e instanceof Error ? e.message : "Could not read the logo.";
+  }
+}
+
+async function onSaveInstance() {
+  instanceStatus.value = "";
+  instanceError.value = "";
+  if (!adminPassword.value) {
+    instanceError.value = "Enter your current password first.";
+    return;
+  }
+  savingInstance.value = true;
+  try {
+    const saved = await saveBrand(
+      {
+        name: instanceName.value.trim() || null,
+        ...(pendingLogo.value !== undefined ? { logo: pendingLogo.value } : {}),
+      },
+      adminPassword.value,
+    );
+    instanceName.value = saved.name === DEFAULT_BRAND_NAME ? "" : saved.name;
+    pendingLogo.value = undefined;
+    instanceStatus.value = "Saved.";
+  } catch (e) {
+    instanceError.value = e instanceof Error ? e.message : "Could not save the instance.";
+  } finally {
+    savingInstance.value = false;
   }
 }
 
@@ -246,6 +298,38 @@ onMounted(async () => {
           <p v-if="publicError" class="mt-1 text-[13px] text-gi-danger">{{ publicError }}</p>
         </div>
         <Switch :model-value="publicAccess" @update:model-value="onTogglePublic" />
+      </div>
+      <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
+        <div>
+          <p class="text-[14px] font-medium">Instance</p>
+          <p class="text-[13px] text-muted-foreground">
+            The name and logo every visitor sees. The name can be up to 40 characters.
+          </p>
+        </div>
+        <label class="flex flex-col gap-2 text-[14px] font-medium">
+          Instance name
+          <Input v-model="instanceName" type="text" maxlength="40" :placeholder="DEFAULT_BRAND_NAME" />
+        </label>
+        <div class="flex flex-col gap-2">
+          <label for="instance-logo" class="text-[14px] font-medium">Logo</label>
+          <input
+            id="instance-logo"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml"
+            class="text-[13px]"
+            @change="onPickLogo"
+          />
+          <p class="text-[13px] text-muted-foreground">PNG, JPEG, WebP or SVG, up to 256 KB.</p>
+          <div v-if="logoPreview" class="flex items-center gap-3">
+            <img :src="logoPreview" class="h-9 w-9 rounded-md border border-border object-contain" alt="Logo preview" />
+            <Button type="button" size="sm" variant="outline" @click="pendingLogo = null">Remove logo</Button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <Button type="button" size="sm" :disabled="savingInstance" @click="onSaveInstance">Save instance</Button>
+          <span v-if="instanceStatus" class="text-[13px] text-gi-success">{{ instanceStatus }}</span>
+          <span v-if="instanceError" class="text-[13px] text-gi-danger">{{ instanceError }}</span>
+        </div>
       </div>
       <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
         <div>

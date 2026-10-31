@@ -34,3 +34,13 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
   await input.press("Enter");
   await page.waitForURL(/\/~\//);
 }
+
+export const INSTANCE = "http://127.0.0.1:41002";
+
+export async function signIn(page: Page, base: string): Promise<void> {
+  await page.goto(`${base}/_g/login`);
+  await page.getByLabel("Username").fill("e2e");
+  await page.getByLabel("Password").fill("e2e-password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.waitForURL(`${base}/`);
+}

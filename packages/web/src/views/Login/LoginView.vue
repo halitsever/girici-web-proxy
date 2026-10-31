@@ -3,8 +3,11 @@ import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import BrandMark from "@/components/layout/BrandMark.vue";
+import SourceLink from "@/components/layout/SourceLink.vue";
 import { Input } from "@/components/ui/input";
 import { getAuthState, login } from "@/lib/auth";
+import { brand } from "@/lib/brand";
 import { toProxyPath } from "@/lib/target";
 
 const route = useRoute();
@@ -52,9 +55,9 @@ function goNext() {
   <div class="grid min-h-screen place-items-center px-4 py-10">
     <form class="flex w-full max-w-[400px] flex-col gap-6" @submit.prevent="onSubmit">
       <div class="flex flex-col items-center gap-3 text-center">
-        <img src="@/assets/brand/girici-icon-dark.svg" class="h-9 w-9" alt="" />
+        <BrandMark size="lg" :show-name="false" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Sign in to Girici</h1>
+          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Sign in to {{ brand.name }}</h1>
           <p class="mt-1 text-[14px] text-muted-foreground">This proxy is private. Sign in to keep browsing.</p>
         </div>
       </div>
@@ -83,6 +86,8 @@ function goNext() {
       >
         Continue without signing in
       </RouterLink>
+
+      <p class="text-center text-[13px]"><SourceLink /></p>
     </form>
   </div>
 </template>
