@@ -1,6 +1,5 @@
 import { clientTag } from "../shared/client-tag.ts";
 import { decodeUrl } from "../shared/codec.ts";
-import { prefixFor } from "../shared/partition.ts";
 import { PROTOCOL_VERSION, type ClientConfig } from "../shared/protocol.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
@@ -20,7 +19,7 @@ import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
 import { installWebSocket } from "./websocket.ts";
-import { installStorage } from "./storage.ts";
+import { installStorage, partitionFor } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import { createMessageSender, installMessaging } from "./messaging.ts";
 import { installPermissions } from "./permissions.ts";
@@ -28,7 +27,8 @@ import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
-import { createUrlContext, type Realm } from "./url-context.ts";
+import { createUrlContext, originOf, parseUrl, realOriginOf, type Realm } from "./url-context.ts";
+import { createWindowGuard, installWindowLinks } from "./windows.ts";
 
 // Taken at load: install also runs when a page inserts a frame, after page code may have replaced these.
 const apply = Reflect.apply;
@@ -63,6 +63,8 @@ export function install(
   // Taken before the network hooks wrap it.
   const nativeFetch = win.fetch;
   const ctx = createUrlContext(win, config.inherit);
+  // Before the messaging and window hooks, whose natives it takes.
+  const guard = createWindowGuard(win, ctx, invoke);
   const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
   const readContainer = serviceWorkerContainer(win);
@@ -122,7 +124,17 @@ export function install(
     return fake;
   };
   const rewrite = createRewriteBridge(ctx, () => clientTag(clientUrl, childConfig()));
-  const partition = () => prefixFor(ctx.realUrl().origin);
+  const partition = () => {
+    // top cannot be redefined by a page, and neither can the address read from it.
+    const top = win.top;
+    const topOrigin = top === win ? null : realOriginOf(top, ctx.origin);
+    return partitionFor({
+      origin: originOf(ctx.realUrl()),
+      isTop: top === win,
+      topUrl: topOrigin ? parseUrl(topOrigin) : null,
+      site: current.site,
+    });
+  };
   const helpers = createHelpers({
     nativeLocation,
     fakeLocation,
@@ -138,8 +150,10 @@ export function install(
     toProxy: (raw) => ctx.toProxy(raw),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
-    messageTarget: createMessageSender(win, ctx, invoke),
-    renew: createRenew(currentScript, ctx.origin, steps),
+    messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper),
+    wrapWindow: guard.wrap,
+    realOrigin: () => originOf(ctx.realUrl()),
+    renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit)),
   });
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
   defineProperty(win, "__g$", { value: freeze(helpers), enumerable: false });
@@ -168,6 +182,7 @@ export function install(
           (child, next, url, navigating) => install(child, next, url, ownAnnounce, navigating),
           clientUrl,
           steps,
+          guard,
         )),
     ],
     ["attributes", () => installAttributes(win, ctx, rewrite)],
@@ -184,15 +199,16 @@ export function install(
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
     ["workers", () => installWorkers(win, ctx, partition, ownAnnounce)],
     ["cookies", () => listeners.push((cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
-    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke))],
+    ["navigation", () => listeners.push(installNavigation(win, ctx, cookies, invoke, guard))],
     ["top site", () => listeners.push(installTopSiteResponder(win, container))],
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
     ["network", () => installNetwork(win, ctx, cookies)],
-    ["storage", () => installStorage(win, ctx)],
+    ["storage", () => installStorage(win, partition)],
     ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
-    ["messaging", () => installMessaging(win, ctx, invoke)],
+    ["messaging", () => installMessaging(win, ctx, invoke, guard)],
+    ["windows", () => installWindowLinks(win, ctx, guard)],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
@@ -216,6 +232,8 @@ export function install(
   steps.add("document", () => resetDomain());
   steps.add("cookies", (next) => cookies.reset(next));
   steps.add("context", (next) => ctx.inherit(next.inherit));
+  // The document may be of another site now, so windows handed out as is to the last one are judged again.
+  steps.add("site", () => guard.reset());
   steps.add("listeners", () => {
     for (const listener of listeners) listener.listen();
   });

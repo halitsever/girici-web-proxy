@@ -27,6 +27,8 @@ function setup() {
     },
     indirectEval: (code) => code,
     messageTarget: (value) => value,
+    wrapWindow: (value) => (value === frame ? { wrapped: value } : value),
+    realOrigin: () => "https://site.test",
     renew: () => false,
   });
   return { helpers, nativeLocation, frameLocation, fake, frameFake, win, frame };
@@ -71,6 +73,22 @@ describe("createHelpers", () => {
     expect(helpers.D(plain)).toBe(plain);
   });
 
+  it("W delegates to the env's wrapWindow", () => {
+    const { helpers, frame, win } = setup();
+    expect(helpers.W(frame)).toEqual({ wrapped: frame });
+    expect(helpers.W(win)).toBe(win);
+    expect(helpers.W(5)).toBe(5);
+    expect(helpers.realOrigin()).toBe("https://site.test");
+  });
+
+  it("wraps window links read through destructuring", () => {
+    const { helpers, win, frame } = setup();
+    const withLinks = Object.assign(win, { parent: frame, top: frame, opener: frame, frames: frame, name: frame });
+    const view = helpers.D(withLinks) as Record<string, unknown>;
+    for (const key of ["parent", "top", "opener", "frames"]) expect(view[key]).toEqual({ wrapped: frame });
+    expect(view.name).toBe(frame);
+  });
+
   it("D ignores proxy traps a page adds to Object.prototype", () => {
     const { helpers, win } = setup();
     const proto = Object.prototype as Record<string, unknown>;
@@ -112,6 +130,8 @@ describe("createHelpers", () => {
         return "result";
       },
       messageTarget: (value) => ({ standIn: value }),
+      wrapWindow: (value) => value,
+      realOrigin: () => "https://site.test",
       renew: () => true,
     });
     expect(helpers.E("location")).toBe("/*rw*/location");

@@ -101,6 +101,7 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
     fromProxy: (value) => unrewriteUrl(value, realBase(), origin),
     // A worker never loads a second document.
     inherit: () => {},
+    accepts: () => false,
   };
 }
 
@@ -130,6 +131,8 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     indirectEval: (code) => scope.eval(code as string),
     // A worker cannot reach a window, so its ports and clients keep their own postMessage.
     messageTarget: (value) => value,
+    wrapWindow: (value) => value,
+    realOrigin: () => ctx.realBase().origin,
     // A worker never loads a second document.
     renew: () => false,
   });

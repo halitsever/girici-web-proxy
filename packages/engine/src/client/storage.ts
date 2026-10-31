@@ -1,5 +1,5 @@
-import { prefixFor } from "../shared/partition.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { prefixFor, sameSite } from "../shared/partition.ts";
+import { originOf, type Realm } from "./url-context.ts";
 
 export { prefixFor };
 
@@ -11,6 +11,20 @@ const protoOf = Object.getPrototypeOf;
 const describe = Object.getOwnPropertyDescriptor;
 const startsWith = String.prototype.startsWith;
 const slice = String.prototype.slice;
+const mapGet = Map.prototype.get;
+const mapSet = Map.prototype.set;
+
+/** Where a window's storage lives: its own origin's, or for a frame of another site, a copy kept per top origin. */
+export function partitionFor(input: {
+  origin: string;
+  isTop: boolean;
+  topUrl: URL | null;
+  site: string | undefined;
+}): string {
+  const { origin, isTop, topUrl, site } = input;
+  if (isTop || (topUrl && site !== undefined && sameSite(topUrl, site))) return prefixFor(origin);
+  return prefixFor(origin, topUrl ? originOf(topUrl) : "null");
+}
 
 export interface StorageMethods {
   length: (this: Storage) => number;
@@ -35,10 +49,9 @@ export function storageMethods(proto: object): StorageMethods {
 /** Every proxied site shares our origin's storage, so each real origin gets its own key prefix. */
 export function createPartitionedStorage(
   native: Storage,
-  origin: string,
+  prefix: string,
   calls: StorageMethods = storageMethods(protoOf(native) as object),
 ): Storage {
-  const prefix = prefixFor(origin);
   const length = () => apply(calls.length, native, []);
   const nativeKey = (index: number) => apply(calls.key, native, [index]);
   const getItem = (key: string) => apply(calls.getItem, native, [key]);
@@ -100,23 +113,23 @@ export function createPartitionedStorage(
   } as ProxyHandler<Storage>);
 }
 
-export function installStorage(win: Realm, ctx: UrlContext): void {
+export function installStorage(win: Realm, partition: () => string): void {
   const storageProto = (win as unknown as { Storage?: { prototype: object } }).Storage?.prototype;
   const calls = storageProto ? storageMethods(storageProto) : undefined;
   for (const name of ["localStorage", "sessionStorage"] as const) {
     const getNative = findGetter(win, name);
     if (!getNative) continue;
-    // One object per origin keeps `localStorage === localStorage` true.
-    const byOrigin = new Map<string, Storage>();
+    // One object per partition keeps `localStorage === localStorage` true.
+    const byPartition = new Map<string, Storage>();
     Object.defineProperty(win, name, {
       configurable: true,
       enumerable: true,
       get: () => {
-        const origin = ctx.realUrl().origin;
-        let storage = byOrigin.get(origin);
+        const prefix = partition();
+        let storage = apply(mapGet, byPartition, [prefix]) as Storage | undefined;
         if (!storage) {
-          storage = createPartitionedStorage(apply(getNative, win, []) as Storage, origin, calls);
-          byOrigin.set(origin, storage);
+          storage = createPartitionedStorage(apply(getNative, win, []) as Storage, prefix, calls);
+          apply(mapSet, byPartition, [prefix, storage]);
         }
         return storage;
       },

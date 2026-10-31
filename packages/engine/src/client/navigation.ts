@@ -2,9 +2,15 @@ import { encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
 import type { CookieBridge } from "./cookies.ts";
 import type { Invoke } from "./invoke.ts";
 import type { DocumentListeners } from "./renewal.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import { hrefOf, originOf, parseUrl, realUrlOf, type Realm, type UrlContext } from "./url-context.ts";
+import type { WindowGuard } from "./windows.ts";
 
 const LINK_EVENTS = ["click", "auxclick", "contextmenu"];
+
+// Taken at load: these hooks run on page calls, after page code may have replaced them.
+const apply = Reflect.apply;
+const ownDescriptor = Object.getOwnPropertyDescriptor;
+const toText = String;
 
 /** Navigations leave the service worker's reach, so their URLs are proxied before the browser acts on them. */
 export function installNavigation(
@@ -12,12 +18,18 @@ export function installNavigation(
   ctx: UrlContext,
   cookies: CookieBridge,
   invoke: Invoke,
+  guard: WindowGuard,
 ): DocumentListeners {
   const history = win.History.prototype;
+  const historyOf = ownDescriptor(win, "history")?.get;
   for (const method of ["pushState", "replaceState"] as const) {
     const native = history[method];
     history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      if (url === undefined || url === null) return native.call(this, data, unused, url);
+      // Another window's History would let a frame rename a page it cannot otherwise touch.
+      if (historyOf && this !== apply(historyOf, win, [])) {
+        throw new win.DOMException(`Failed to execute '${method}' on 'History': access denied.`, "SecurityError");
+      }
+      if (url === undefined || url === null) return apply(native, this, [data, unused, url]);
       const current = ctx.realUrl();
       const target = new URL(String(url), current);
       if (target.origin !== current.origin) {
@@ -26,14 +38,19 @@ export function installNavigation(
           "SecurityError",
         );
       }
-      return native.call(this, data, unused, encodeUrl(target));
+      return apply(native, this, [data, unused, encodeUrl(target)]);
     };
   }
 
   const nativeOpen = win.open;
   win.open = function (this: Window | undefined, url?: string | URL, target?: string, features?: string) {
-    const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(String(url));
-    return nativeOpen.call(this ?? win, proxied, target, features);
+    const blank = url === undefined || url === null || url === "";
+    const proxied = blank ? url : ctx.toProxy(toText(url));
+    const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
+    // Until the page it was opened for arrives, a popup shows a blank page of this origin.
+    const address = blank ? null : parseUrl(toText(proxied), ctx.origin);
+    const destination = address ? realUrlOf(hrefOf(address), ctx.origin) : null;
+    return guard.wrap(opened, destination ? originOf(destination) : undefined) as Window | null;
   };
 
   // The Navigation API leaves the service worker's reach like any navigation, so its target is proxied first.

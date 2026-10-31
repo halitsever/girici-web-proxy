@@ -110,7 +110,13 @@ const FRAME = page(
   "Frame",
   `<h1>Frame</h1><pre id="frame-results"></pre>
 <script>
-  document.getElementById("frame-results").textContent = JSON.stringify({ href: location.href, parent: parent.location.href });
+  let parentHref;
+  try {
+    parentHref = parent.location.href;
+  } catch (error) {
+    parentHref = error.name;
+  }
+  document.getElementById("frame-results").textContent = JSON.stringify({ href: location.href, parent: parentHref });
 </script>`,
 );
 
@@ -697,6 +703,68 @@ const PM_SOURCE_CHILD = page(
 </script>`,
 );
 
+// The page holds the frame's blank window before it names the page to load, as some widget loaders do.
+const PM_TOUCH = page(
+  "PostMessage touch",
+  `<pre id="results"></pre>
+<script>
+  const frame = document.createElement("iframe");
+  document.body.appendChild(frame);
+  const child = frame.contentWindow;
+  frame.src = "https://site-b.test/pm-touch-child";
+  const out = {};
+  window.addEventListener("message", (event) => {
+    if (event.data === "ready") {
+      out.readyOrigin = event.origin;
+      out.readyFromChild = event.source === child;
+      child.postMessage("ping", "https://site-b.test");
+    } else {
+      Object.assign(out, event.data);
+      document.getElementById("results").textContent = JSON.stringify(out);
+    }
+  });
+</script>`,
+);
+
+const CROSS_POPUP = page(
+  "Cross popup",
+  `<button id="open">open</button><button id="check">check</button><pre id="results"></pre>
+<script>
+  let w;
+  const failure = (read) => {
+    try {
+      read();
+      return "open";
+    } catch (error) {
+      return error.name;
+    }
+  };
+  document.getElementById("open").onclick = () => {
+    w = open("https://site-b.test/");
+  };
+  document.getElementById("check").onclick = () => {
+    let posted = true;
+    try {
+      w.postMessage("x", "https://site-b.test");
+    } catch {
+      posted = false;
+    }
+    document.getElementById("results").textContent = JSON.stringify({
+      document: failure(() => w.document),
+      storage: failure(() => w.localStorage),
+      closed: w.closed,
+      posted,
+    });
+  };
+</script>`,
+);
+
+const EMBED_STORAGE = page(
+  "Embed storage",
+  `<iframe id="b" src="https://site-b.test/storage"></iframe>
+<iframe id="www" src="https://www.site-a.test/storage"></iframe>`,
+);
+
 // A src set before insertion is the one order in which every browser reuses the blank window for the child page.
 const REUSE = page(
   "Reuse",
@@ -1024,6 +1092,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/postmessage": html(POSTMESSAGE),
     "/pm-child": html(PM_CHILD),
     "/pm-source": html(PM_SOURCE),
+    "/pm-touch": html(PM_TOUCH),
+    "/cross-popup": html(CROSS_POPUP),
+    "/embed-storage": html(EMBED_STORAGE),
     "/reuse": html(REUSE),
     "/reuse-same": html(REUSE_SAME),
     "/reuse-same-child": html(REUSE_SAME_CHILD),
@@ -1162,7 +1233,11 @@ const ROUTES: Record<string, Record<string, Route>> = {
       'const inner = new Worker("/probe-worker.js");\ninner.onmessage = (event) => postMessage(event.data);\ninner.onerror = () => postMessage("error");',
     ),
   },
-  "www.site-a.test": { "/landing": html(page("Landing", "<h1>Landing</h1>")), "/cookie/whoami": whoami },
+  "www.site-a.test": {
+    "/landing": html(page("Landing", "<h1>Landing</h1>")),
+    "/cookie/whoami": whoami,
+    "/storage": html(STORAGE),
+  },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
@@ -1181,6 +1256,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/idb-store": html(IDB_STORE),
     "/api": api,
     "/pm-source-child": html(PM_SOURCE_CHILD),
+    "/pm-touch-child": html(PM_SOURCE_CHILD),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
       page(

@@ -119,6 +119,38 @@ describe("installStorageIsolation", () => {
     expect(await win.indexedDB.databases()).toEqual([{ name: "db1" }]);
   });
 
+  it("lists only its own names after page code replaced String and Array methods", async () => {
+    const own = "__g^|https://top.test|https://a.test|";
+    const names = [`${own}db1`, "__g^|https://other.test|https://a.test|db2"];
+    const win = fakeStorageWin([], names, [...names]);
+    installStorageIsolation(win, ctxFor("https://a.test"), () => own);
+    const startsWith = String.prototype.startsWith;
+    const map = Array.prototype.map;
+    const iterator = Array.prototype[Symbol.iterator];
+    const seen: unknown[] = [];
+    let listed: unknown[];
+    String.prototype.startsWith = () => true;
+    try {
+      // Replaced once the fakes have answered, since they use these methods themselves.
+      const pending = [win.indexedDB.databases(), win.caches.keys()];
+      Array.prototype.map = function (this: unknown[]) {
+        seen.push(this);
+        return [];
+      };
+      Array.prototype[Symbol.iterator] = function (this: unknown[]) {
+        seen.push(this);
+        return Reflect.apply(iterator, this, []) as ArrayIterator<unknown>;
+      };
+      listed = [await pending[0], await pending[1]];
+    } finally {
+      String.prototype.startsWith = startsWith;
+      Array.prototype.map = map;
+      Array.prototype[Symbol.iterator] = iterator;
+    }
+    expect(listed).toEqual([[{ name: "db1" }], ["db1"]]);
+    expect(seen.filter((value) => Array.isArray(value) && value.length === 2)).toEqual([]);
+  });
+
   it("never hands its natives to a replaced Function.prototype.call", () => {
     const opened: string[] = [];
     const win = fakeStorageWin(opened, [], []);

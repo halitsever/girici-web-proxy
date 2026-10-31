@@ -47,10 +47,11 @@ export function createRenew(
   currentScript: () => EngineScript | null,
   origin: string,
   steps: DocumentSteps,
+  accept: (config: ClientConfig) => boolean = () => true,
 ): () => boolean {
   return () => {
     const next = engineScriptConfig(currentScript(), origin);
-    if (!next) return false;
+    if (!next || !accept(next)) return false;
     steps.run(next);
     return true;
   };

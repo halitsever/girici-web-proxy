@@ -75,7 +75,7 @@ All proxied sites share Girici's origin in your browser, so Girici keeps each si
 jar and prefixes each site's storage. **Settings → Site data** lists the sites that stored something and
 clears one of them, or all of them, without touching the others. Clearing a site removes its cookies,
 including HttpOnly ones, and its local storage, session storage, IndexedDB databases and caches, for the
-site and its subdomains.
+site and its subdomains. A site embedded in another keeps separate storage for each site that embeds it.
 
 ## Third-party cookies
 

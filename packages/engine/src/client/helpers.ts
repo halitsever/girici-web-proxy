@@ -10,6 +10,10 @@ export interface HelperEnv {
   rewrite: RewriteBridge;
   indirectEval(code: unknown): unknown;
   messageTarget(value: unknown): unknown;
+  /** Another origin's window becomes a restricted wrapper; anything else comes back as is. */
+  wrapWindow(value: unknown): unknown;
+  /** This window's real origin, which other windows read here because a page can redefine `origin`. */
+  realOrigin(): string;
   renew(): boolean;
 }
 
@@ -24,9 +28,19 @@ export interface GiriciHelpers {
   H(html: unknown): string;
   M(url: unknown): string;
   P(value: unknown): unknown;
+  W(value: unknown): unknown;
+  realOrigin(): string;
   /** The engine script of a document that reuses this window calls this instead of installing again. */
   renew(): boolean;
 }
+
+/** Window links that can lead to another origin's window. A null prototype keeps page additions out of `in`. */
+const WINDOW_LINKS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
+  top: true,
+  parent: true,
+  opener: true,
+  frames: true,
+});
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
 export function createHelpers(env: HelperEnv): GiriciHelpers {
@@ -63,7 +77,8 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
           __proto__: null,
           get: (target, property) => {
             const value: unknown = Reflect.get(target, property, target);
-            return property === "location" ? L(value) : value;
+            if (property === "location") return L(value);
+            return typeof property === "string" && property in WINDOW_LINKS ? env.wrapWindow(value) : value;
           },
         } as ProxyHandler<object>,
       );
@@ -75,6 +90,8 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     H: (html) => env.rewrite.html(String(html)),
     M: (url) => env.rewrite.metaUrl(String(url)),
     P: (value) => env.messageTarget(value),
+    W: (value) => env.wrapWindow(value),
+    realOrigin: () => env.realOrigin(),
     renew: () => env.renew(),
   };
 }

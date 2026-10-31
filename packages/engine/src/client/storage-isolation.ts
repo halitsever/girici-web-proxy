@@ -4,10 +4,16 @@ import type { Realm, UrlContext } from "./url-context.ts";
 // Taken at load, so a replaced Function.prototype.call or String never receives a native or the name.
 const apply = Reflect.apply;
 const toText = String;
+// Names of other partitions pass through these, and a third-party name tells which site embedded which.
+const startsWith = String.prototype.startsWith;
+const slice = String.prototype.slice;
 
 /** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
 export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
-  const strip = (name: string): string | null => (name.startsWith(partition()) ? name.slice(partition().length) : null);
+  const strip = (name: string): string | null => {
+    const prefix = partition();
+    return apply(startsWith, name, [prefix]) ? (apply(slice, name, [prefix.length]) as string) : null;
+  };
 
   prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], partition);
   wrap(
@@ -27,7 +33,12 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     (native) =>
       async function (this: unknown) {
         const all = (await apply(native, this, [])) as string[];
-        return all.map(strip).filter((name): name is string => name !== null);
+        const own: string[] = [];
+        for (let index = 0; index < all.length; index++) {
+          const name = strip(all[index] as string);
+          if (name !== null) own[own.length] = name;
+        }
+        return own;
       },
   );
   // match() with no cacheName searches every cache on the origin, so it is confined to this site's own caches.
@@ -80,10 +91,11 @@ interface NamedLock {
 function stripLocks(locks: NamedLock[] | undefined, strip: (name: string) => string | null): NamedLock[] {
   if (!locks) return [];
   const out: NamedLock[] = [];
-  for (const lock of locks) {
+  for (let index = 0; index < locks.length; index++) {
+    const lock = locks[index] as NamedLock;
     const name = lock.name === undefined ? undefined : strip(lock.name);
     if (lock.name !== undefined && name === null) continue;
-    out.push({ ...lock, name: name ?? undefined });
+    out[out.length] = { ...lock, name: name ?? undefined };
   }
   return out;
 }
