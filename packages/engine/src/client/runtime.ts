@@ -6,6 +6,7 @@ import {
   hashOf,
   hrefOf,
   isWebUrl,
+  NativeWeakMap,
   newUrl,
   originOf,
   parseUrl,
@@ -20,7 +21,7 @@ import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { createChildConfig, installFrames, type FrameAdopter } from "./frames.ts";
-import { createHelpers } from "./helpers.ts";
+import { createHelpers, type HelperEnv } from "./helpers.ts";
 import { createInvoker, type Invoke } from "./invoke.ts";
 import { createFakeLocation, type LocationEnv } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
@@ -50,6 +51,8 @@ const ownDescriptor = Object.getOwnPropertyDescriptor;
 const warn = console.warn;
 const nativeConsole = console;
 const freeze = Object.freeze;
+const mapGet = WeakMap.prototype.get;
+const mapSet = WeakMap.prototype.set;
 
 /**
  * `announce` is the worker announcer of the window this one inherits from: a blank window's own client has no page
@@ -104,7 +107,7 @@ export function install(
       awaiting = false;
       steps.again(["listeners"]);
     };
-    apply(win.EventTarget.prototype.addEventListener, win, ["load", lift, { once: true }]);
+    apply(win.EventTarget.prototype.addEventListener, win, ["load", lift, { __proto__: null, once: true }]);
   }
   const toolbarKeys = createToolbarKeys(win);
   const listeners: DocumentListeners[] = [toolbarKeys];
@@ -124,8 +127,10 @@ export function install(
     reset: () => {},
     snapshot: () => [],
   };
+  // Env and option objects below have null prototypes and every member own, so none is read from the page's prototypes.
   const fakeLocation = createFakeLocation(
     {
+      __proto__: null,
       real: () => ctx.realUrl(),
       navigate: (url, mode) => {
         // The next page must already see cookies this one has just written.
@@ -135,24 +140,29 @@ export function install(
       },
       reload: ownLocation.reload,
       setHash: ownLocation.setHash,
-    },
+      owner: () => originOf(ctx.realUrl()),
+    } as LocationEnv,
     win.Location.prototype,
   );
   // Windows without a runtime of their own, such as blank frames and popups, still need a stand-in.
-  const standIns = new WeakMap<object, object>();
+  const standIns = new NativeWeakMap<object, object>();
   const standIn = (location: Location): object => {
-    let fake = standIns.get(location);
+    let fake = apply(mapGet, standIns, [location]) as object | undefined;
     if (!fake) {
+      const calls = locationCalls(location, invoke, blobs.swap);
       fake = createFakeLocation(
         {
-          ...locationCalls(location, invoke, blobs.swap),
+          __proto__: null,
+          navigate: calls.navigate,
+          reload: calls.reload,
+          setHash: calls.setHash,
           real: () => realUrlOfLocation(location, ctx.origin) ?? ctx.realUrl(),
           // The caller is this realm, whichever window the stand-in navigates.
           owner: () => originOf(ctx.realUrl()),
-        },
+        } as LocationEnv,
         win.Location.prototype,
       );
-      standIns.set(location, fake);
+      apply(mapSet, standIns, [location, fake]);
     }
     return fake;
   };
@@ -170,14 +180,16 @@ export function install(
     const top = win.top;
     const topOrigin = top === win ? null : realOriginOf(top, ctx.origin);
     return partitionFor({
+      __proto__: null,
       origin: originOf(ctx.realUrl()),
       isTop: top === win,
       topUrl: topOrigin ? parseUrl(topOrigin) : null,
       site: current.site,
       topSite: top === win ? undefined : engineSiteOf(top),
-    });
+    } as Parameters<typeof partitionFor>[0]);
   };
   const helpers = createHelpers({
+    __proto__: null,
     nativeLocation,
     fakeLocation,
     isLocation,
@@ -197,7 +209,7 @@ export function install(
     realOrigin: () => originOf(ctx.realUrl()),
     site: () => current.site,
     renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit)),
-  });
+  } as HelperEnv);
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
   define(win, "__g$", { value: freeze(helpers), enumerable: false });
 
@@ -292,15 +304,17 @@ export function install(
   steps.add("toolbar", (next) => {
     toolbarKeys.use(null);
     const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
-    if (!shouldShowToolbar({ isTop: toolbarNatives.isTop, inherited: next.inherit !== undefined, prefs })) return;
+    const show = { __proto__: null, isTop: toolbarNatives.isTop, inherited: next.inherit !== undefined, prefs };
+    if (!shouldShowToolbar(show as Parameters<typeof shouldShowToolbar>[0])) return;
     installToolbar(
       win,
       ctx,
       toolbarNatives,
       {
-        assign: (path) => ownLocation.navigate(hrefOf(newUrl(path, ctx.origin)), "assign"),
+        __proto__: null,
+        assign: (path: string) => ownLocation.navigate(hrefOf(newUrl(path, ctx.origin)), "assign"),
         reload: ownLocation.reload,
-      },
+      } as Parameters<typeof installToolbar>[3],
       toolbarKeys,
     );
   });
@@ -318,6 +332,7 @@ function locationCalls(
   swapBlob: (url: string) => string,
 ): Pick<LocationEnv, "navigate" | "reload" | "setHash"> {
   return {
+    __proto__: null,
     navigate: (url, mode) => invoke(mode === "replace" ? location.replace : location.assign, location, [swapBlob(url)]),
     reload: () => invoke(location.reload, location, []),
     setHash: (hash) => {
@@ -326,7 +341,7 @@ function locationCalls(
       if (set) invoke(set, location, [hash]);
       else location.hash = hash;
     },
-  };
+  } as Pick<LocationEnv, "navigate" | "reload" | "setHash">;
 }
 
 /** A blank frame whose element names a web page to load: the browser will reuse this window for that page. */
