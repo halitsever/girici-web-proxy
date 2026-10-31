@@ -4,10 +4,14 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 const serverDir = fileURLToPath(new URL("..", import.meta.url));
 const dataDir = mkdtempSync(join(tmpdir(), "girici-data-"));
+const children: ChildProcess[] = [];
+afterEach(() => {
+  for (const child of children.splice(0)) if (child.exitCode === null) child.kill("SIGKILL");
+});
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -22,11 +26,13 @@ function freePort(): Promise<number> {
 }
 
 function start(env: Record<string, string>): ChildProcess {
-  return spawn(process.execPath, ["src/index.ts"], {
+  const child = spawn(process.execPath, ["src/index.ts"], {
     cwd: serverDir,
     env: { GIRICI_DATA_DIR: dataDir, ...process.env, ...env },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  children.push(child);
+  return child;
 }
 
 function exitCode(child: ChildProcess): Promise<number | null> {
@@ -54,6 +60,16 @@ describe("server process", () => {
     child.kill("SIGTERM");
     expect(await exited).toBe(0);
     expect(Date.now() - started).toBeLessThan(3000);
+  }, 15_000);
+
+  it("prints the trust-everything warning even at LOG_LEVEL=error", async () => {
+    const port = await freePort();
+    const child = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "error", GIRICI_TRUST_PROXY: "true" });
+    const exited = exitCode(child);
+    // The setup banner comes after listen, once the signal handlers are in place.
+    await waitForOutput(child, /GIRICI_TRUST_PROXY=true trusts every X-Forwarded-For entry[\s\S]*setup code/);
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
   }, 15_000);
 
   it("exits with code 1 and names the variable when PORT is invalid", async () => {

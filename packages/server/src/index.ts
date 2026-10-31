@@ -28,7 +28,8 @@ try {
 
 const logger = createLogger(config.logLevel);
 const trustWarning = trustProxyWarning(config.trustProxy);
-if (trustWarning) logger.warn(trustWarning);
+// Its own warn-level logger, so LOG_LEVEL=error cannot hide a setting that lets clients forge their address.
+if (trustWarning) createLogger("warn").warn(trustWarning);
 
 let authStore: AuthStore;
 try {
