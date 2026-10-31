@@ -105,3 +105,11 @@ describe("rewriteRefresh with built-ins the page replaced", () => {
     });
   }
 });
+
+describe("refresh in a document with a sealed address", () => {
+  it("writes a relative target as an absolute proxy URL", () => {
+    expect(rewriteRefresh("0; url=next", new URL("https://a.test/dir/page"), origin, true)).toContain(
+      "/~/https/a.test/dir/next",
+    );
+  });
+});

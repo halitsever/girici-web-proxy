@@ -25,6 +25,7 @@ import {
   trim,
   utf8Text,
 } from "./primordials.ts";
+import { isSealedPath, type OpenSealed } from "./sealed-address.ts";
 
 const SCHEME = /^[a-z][a-z\d+.-]*:/i;
 const EDGE_WHITESPACE = /^[\t\n\f\r ]+|[\t\n\f\r ]+$/g;
@@ -42,9 +43,11 @@ const escapedPercent = () => "%25";
 
 /**
  * Rewrites a URL found in a page so that requests and navigations stay on the proxy. `owner` is the real origin of the
- * document the URL belongs to, which a javascript: URL carries; it defaults to the base's.
+ * document the URL belongs to, which a javascript: URL carries; it defaults to the base's. In an `opaque` document,
+ * one on a sealed address, the browser cannot resolve relative URLs, so they are written absolute; hash and query links
+ * stay relative and keep the page.
  */
-export function rewriteUrl(raw: string, base: URL, origin: string, owner?: string): string {
+export function rewriteUrl(raw: string, base: URL, origin: string, owner?: string, opaque = false): string {
   const script = rewriteJavascriptUrl(raw, owner ?? (isWeb(base) ? originOf(base) : "null"));
   if (script !== null) return script;
   // Browsers ignore ASCII whitespace around URL attributes.
@@ -62,6 +65,7 @@ export function rewriteUrl(raw: string, base: URL, origin: string, owner?: strin
   }
   // Against a base such as about:blank, relative URLs have no web target to proxy.
   if (!isWeb(base)) return raw;
+  if (opaque && startsWith(value, "?")) return raw;
 
   if (startsWith(value, "/") && !startsWith(value, "//")) {
     const own = parse(value, origin);
@@ -71,7 +75,7 @@ export function rewriteUrl(raw: string, base: URL, origin: string, owner?: strin
   // The URL parser drops tabs and newlines, so "java\nscript:" only shows its scheme once resolved.
   const real = parse(value, base);
   if (!real || !isWeb(real)) return raw;
-  if (!startsWith(value, "/") && resolvesInsideProxy(value, real, base, origin)) return raw;
+  if (!opaque && !startsWith(value, "/") && resolvesInsideProxy(value, real, base, origin)) return raw;
   return encodeUrl(real);
 }
 
@@ -81,8 +85,8 @@ export function isBlobUrl(value: string): boolean {
   return url !== null && protocolOf(url) === "blob:";
 }
 
-/** Turns a URL the browser resolved against a proxy URL back into the URL the page meant. */
-export function unrewriteUrl(value: string, base: URL, origin: string): string {
+/** Turns a URL the browser resolved against a proxy URL back into the URL the page meant; `open` reads sealed ones. */
+export function unrewriteUrl(value: string, base: URL, origin: string, open?: OpenSealed): string {
   const wrapped = wrappedJavascript(value);
   if (wrapped !== null) return `javascript:${wrapped.code}`;
   if (!isWeb(base)) return value;
@@ -92,7 +96,8 @@ export function unrewriteUrl(value: string, base: URL, origin: string): string {
   if (lower && lower !== "http:" && lower !== "https:") return value;
   const url = parse(value, newUrl(encodeUrl(base), origin));
   if (!url || originOf(url) !== origin) return value;
-  const real = decodeUrl(pathnameOf(url) + searchOf(url));
+  const path = pathnameOf(url) + searchOf(url);
+  const real = (open && isSealedPath(path) ? open(path) : null) ?? decodeUrl(path);
   if (real) {
     setUrlPart(real, "hash", hashOf(url));
     return hrefOf(real);

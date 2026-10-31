@@ -3,6 +3,7 @@ import { attributeKind, restoreAttribute, rewriteAttribute } from "../src/client
 import { installAttributes } from "../src/client/attributes.ts";
 import { createRewriteBridge } from "../src/client/rewrite-bridge.ts";
 import type { Realm } from "../src/client/url-context.ts";
+import { createOriginSealer, MasterSealer } from "../src/shared/sealed-address.ts";
 import { withReplaced } from "./replaced-builtins.ts";
 
 const base = new URL("https://site.test/dir/page.html");
@@ -287,5 +288,30 @@ describe("srcdoc through the DOM hooks", () => {
     moved.setAttributeNode(node.cloneNode());
     expect(moved.map.get("srcdoc")?.raw.match(/data-girici/g)).toHaveLength(1);
     expect(moved.srcdoc).toContain("<p>x</p>");
+  });
+});
+
+describe("attributes of a document with a sealed address", () => {
+  const page = new URL("https://a.test/dir/page");
+  const own = createOriginSealer(new MasterSealer(new Uint8Array(32).fill(5)).originSeal("https://a.test"))!;
+
+  it("writes relative values absolute", () => {
+    expect(rewriteAttribute("img", "src", "x.png", page, origin, undefined, undefined, true)).toBe(
+      "/~/https/a.test/dir/x.png",
+    );
+    expect(rewriteAttribute("img", "srcset", "x.png 2x", page, origin, undefined, undefined, true)).toBe(
+      "/~/https/a.test/dir/x.png 2x",
+    );
+    expect(rewriteAttribute("a", "href", "?p=2", page, origin, undefined, undefined, true)).toBe("?p=2");
+  });
+
+  it("restores a sealed link of the page's own origin", () => {
+    const sealedHref = own.seal(new URL("https://a.test/other?q=1#f"))!;
+    expect(restoreAttribute("a", "href", sealedHref, page, origin, undefined, own.open)).toBe(
+      "https://a.test/other?q=1#f",
+    );
+    expect(restoreAttribute("a", "href", `${origin}${sealedHref}`, page, origin, undefined, own.open)).toBe(
+      "https://a.test/other?q=1#f",
+    );
   });
 });
