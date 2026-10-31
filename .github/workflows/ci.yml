@@ -67,10 +67,22 @@ jobs:
             playwright-report
             test-results
 
+  node22:
+    name: unit tests (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   # semantic-release pushes the images in its prepare step, so a failed push leaves no tag and no release.
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'halitsever/girici-web-proxy'
-    needs: [check, docker, e2e]
+    needs: [check, node22, docker, e2e]
     runs-on: ubuntu-latest
     concurrency:
       group: release
