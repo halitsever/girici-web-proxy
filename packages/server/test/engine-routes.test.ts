@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { AuthStore } from "../src/auth/store.ts";
+import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createHttpServer } from "../src/http/server.ts";
 import { createLogger } from "../src/log.ts";
@@ -24,13 +25,15 @@ describe("engine, bootstrap and legacy routes", () => {
     writeFileSync(join(engineDir, "sw.js"), "self.addEventListener('fetch', () => {});");
     writeFileSync(join(engineDir, "boot.js"), "console.log('boot');");
     writeFileSync(join(engineDir, "client.abc123.js"), "console.log('client');");
+    const authStore = new AuthStore(openDb(":memory:"));
     server = createHttpServer(
       createApp({
         webDistDir: webDir,
         engineBundlesDir: engineDir,
         sourceUrl: "https://example.com/source",
         logger: createLogger("error", () => {}),
-        authStore: new AuthStore(openDb(":memory:")),
+        authStore,
+        brand: new BrandStore(join(engineDir, "brand"), authStore),
         relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
       }),
     );

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { AuthStore } from "../src/auth/store.ts";
+import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { PERMISSIONS_POLICY, UI_CSP } from "../src/http/security-headers.ts";
 import { createLogger } from "../src/log.ts";
@@ -27,13 +28,15 @@ async function listen(
   write: (line: string) => void = () => {},
 ): Promise<{ server: Server; base: string }> {
   const logger = createLogger("debug", write);
+  const authStore = publicStore();
   const server = createServer(
     createApp({
       webDistDir,
       engineBundlesDir,
       sourceUrl: "https://example.com/source",
       logger,
-      authStore: publicStore(),
+      authStore,
+      brand: new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), authStore),
       relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
     }),
   );
@@ -120,6 +123,29 @@ describe("createApp", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("cache-control")).toContain("max-age=31536000");
     expect(res.headers.get("cache-control")).toContain("immutable");
+  });
+
+  it("serves the brand without signing in on a private instance", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    const privateServer = createServer(
+      createApp({
+        webDistDir,
+        engineBundlesDir,
+        sourceUrl: "https://example.com/source",
+        logger: createLogger("error", () => {}),
+        authStore: store,
+        brand: new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), store),
+        relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
+      }),
+    );
+    await new Promise<void>((resolve) => privateServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(privateServer.address() as AddressInfo).port}/_g/brand`);
+      expect(res.status).toBe(200);
+    } finally {
+      await close(privateServer);
+    }
   });
 
   it("redirects /_g/source to the configured source URL", async () => {

@@ -4,6 +4,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.ts";
 import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
+import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
 import { createUpstreamAgent } from "../src/upstream/agent.ts";
@@ -22,6 +23,7 @@ async function listen(store: AuthStore): Promise<string> {
       sourceUrl: "https://example.com/source",
       logger: createLogger("error", () => {}),
       authStore: store,
+      brand: new BrandStore("/nonexistent/brand", store),
       relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1024 },
       poToken: { mint: async () => "pot:x" },
     }),
