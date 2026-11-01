@@ -5,7 +5,7 @@ import { SITES } from "./e2e/support/site-mode.ts";
 const SITE_SPECS = /sites[\w-]*\.spec\.ts$/;
 /** Single-origin specs whose behaviour must hold in subdomain mode too. */
 const BORROWED_SPECS =
-  /(?:^|\/)(?:proxy|navigation|cross-site|isolation|cookies|third-party-cookies|toolbar|runtime|popup-realm)\.spec\.ts$/;
+  /(?:^|\/)(?:proxy|navigation|cross-site|isolation|cookies|third-party-cookies|toolbar|runtime|popup-realm|websocket|shared-worker|cookie-writes|dynamic-scripts)\.spec\.ts$/;
 const singleOrigin = { testIgnore: [SITE_SPECS, ...(process.env.SMOKE ? [] : [/smoke\//])] };
 const siteMode = { testMatch: [SITE_SPECS, BORROWED_SPECS] };
 

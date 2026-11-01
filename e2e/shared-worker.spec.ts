@@ -1,4 +1,4 @@
-import { expect, test } from "./support/test.ts";
+import { expect, isSiteProject, test } from "./support/test.ts";
 
 test("two tabs of one site share one shared worker and another site never joins it", async ({ context }) => {
   const first = await context.newPage();
@@ -26,6 +26,10 @@ test("a site framed by another site shares its shared worker only under that top
 });
 
 test("a shared worker address that no page announced starts no worker", async ({ page }) => {
+  test.skip(
+    isSiteProject(test.info()),
+    "The root runs no service worker, and a site host's addresses name only that site's scripts",
+  );
   // A proxied page installs the service worker, which the UI's start page does not.
   await page.goto("/~/https/site-b.test/shared-count");
   await expect(page.locator("#count")).toHaveText("1");
