@@ -2,6 +2,7 @@ import {
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
+  LOGIN_PATH,
   POT_PATH,
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
@@ -21,6 +22,8 @@ import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
 import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
+import { labelSiteOf } from "../shared/label-site.ts";
+import { resubmitResponse } from "./resubmit.ts";
 import {
   classifyRequest,
   isGuardedPath,
@@ -29,6 +32,7 @@ import {
   requestClientUrl,
   reservedAccess,
   type Route,
+  type SiteRouting,
 } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
@@ -274,6 +278,10 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
   const clientUrl = requestClientUrl({ client, identity }, origin);
   const topLevelGet = navigation && request.destination === "document" && request.method === "GET";
   if (topLevelGet && !site) refreshInstanceSeal();
+  // Fresh settings reach an open site on its next page load, read beside the page itself.
+  const pageConfig = site && topLevelGet ? siteMode.forPage() : undefined;
+  // A navigation needs the label key to tell which host its target lives on.
+  if (site && navigation) await siteMode.ensureKey();
   await Promise.all([cookies.ready(), sealing.ready()]);
   const master = await sealing.sealerFor(isSealedPath(new URL(request.url).pathname));
   let route: Route;
@@ -287,6 +295,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
       topLevelGet,
       open: sealing.open,
       seal: master ? (url) => master.seal(url) : undefined,
+      site: site ? siteRouting() : undefined,
     });
   } catch {
     // An address the router cannot read gets Girici's error page rather than the browser's network error.
@@ -302,6 +311,10 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
       return navigation ? htmlError("sealed", 404, null) : Response.error();
     case "redirect":
       return Response.redirect(new URL(route.location, origin).href, 307);
+    case "move":
+      return moveTo(request, route.location);
+    case "signin":
+      return signIn(route.target);
     case "proxy": {
       const initiator = realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
       const seal = route.sealed && master ? master.originSeal(route.target.origin) : undefined;
@@ -346,6 +359,11 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
         }
         const changes =
           result.ok && !blocked ? await cookies.store(route.target, result.response.setCookies, cookieContext) : [];
+        if (pageConfig) await pageConfig;
+        const siteState = site ? siteMode.state() : null;
+        if (siteState && topLevelGet && result.ok && siteMode.hostOf(route.target) === origin) {
+          siteMode.learnSite(labelSiteOf(route.target));
+        }
         return await buildPageResponse(result, {
           target: route.target,
           origin,
@@ -358,12 +376,34 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
           runtimeAvailable: async () => (await runtime.bytes(CLIENT_PATH)) !== null,
           seal,
           address,
+          uiOrigin: siteState?.root,
+          sites: (siteState && siteMode.context(route.target)) ?? undefined,
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
       }
     }
   }
+}
+
+/** This host's view of where each site lives, or undefined until the mode is known. */
+function siteRouting(): SiteRouting | undefined {
+  const state = siteMode.state();
+  if (!state) return undefined;
+  return { origin: self.location.origin, domain: state.domain, hostOf: (url) => siteMode.hostOf(url) };
+}
+
+/** WebKit drops a POST body across this worker's redirect, so a form gets a page that posts it again. */
+async function moveTo(request: Request, location: string): Promise<Response> {
+  const safe = request.method === "GET" || request.method === "HEAD";
+  return (safe ? null : await resubmitResponse(request, location)) ?? Response.redirect(location, 307);
+}
+
+/** Sign-in lives on the root; the label key comes with the site session it starts. */
+function signIn(target: URL): Response {
+  const login = new URL(LOGIN_PATH, siteMode.state()?.root ?? self.location.origin);
+  login.searchParams.set("next", target.href);
+  return Response.redirect(login.href, 302);
 }
 
 /** With the switch on, a request whose site differs from its top-level page's site carries and stores no cookies. */
@@ -505,6 +545,8 @@ async function clientOf(event: FetchEvent): Promise<Client | undefined> {
   return Promise.race([self.clients.get(event.clientId), timeout]);
 }
 
+/** On a site host `/` belongs to the page's site, so the way home is the root. */
 function htmlError(code: ErrorPageCode, status: number, target: URL | null): Response {
-  return errorResponse(code, status, target);
+  const root = siteMode.state()?.root;
+  return errorResponse(code, status, target, root === undefined ? undefined : `${root}/`);
 }
