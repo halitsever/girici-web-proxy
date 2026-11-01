@@ -35,6 +35,16 @@ read another site's. In such a page the browser cannot resolve relative URLs, so
 absolute `/~/https/...` URLs, and the worker resolves any relative request it still sees against the page's real
 address.
 
+## Hosts per site
+
+With `GIRICI_SITE_DOMAIN` set, Girici runs in [subdomain mode](/guide/subdomain-mode). The UI stays on the domain
+itself, and each proxied site runs on its own host, `<label>.proxy.example`, where the label is a keyed hash of the
+site's scheme and registrable domain. Each host registers its own service worker with its own cookie jar and storage,
+so the browser keeps sites apart by origin. Pages keep using `/~/` addresses on their own host: when a navigation
+leads to another site, the worker sends it on to that site's host, and the root redirects a `/~/` address opened
+there. The server picks what to serve from the `Host` header, with the UI and admin on the root and the relay and
+engine files on site hosts.
+
 ## Where rewriting happens
 
 The service worker is the safety net. Every subresource a controlled page requests passes through it,
@@ -63,8 +73,8 @@ subresources. Turning on public access opens the data path to everyone and skips
 
 The [threat model](/guide/threat-model) covers these in more depth, along with what the operator can see.
 
-- **Single origin.** Every proxied site shares one browser origin, so isolation between sites is
-  limited. `HttpOnly` is not a boundary here.
+- **Single origin.** By default every proxied site shares one browser origin, so isolation between sites is
+  limited. `HttpOnly` is not a boundary here. [Subdomain mode](/guide/subdomain-mode) gives each site its own origin.
 - **Computed access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other
   windows. A key built at run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)`,
   `Object.assign(window, { location: url })`, or a window reached as `frames[i]`, `window[i]` or by name, gets the

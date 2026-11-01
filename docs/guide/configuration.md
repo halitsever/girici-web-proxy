@@ -19,6 +19,8 @@ stops the server with a message naming the variable.
 | `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica so sessions validate across them. |
 | `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
+| `GIRICI_SITE_DOMAIN` | unset | Turns on [subdomain mode](/guide/subdomain-mode): the UI stays on this host and every proxied site gets its own host under it. A host name with a port only if visitors type one, such as `proxy.example`; leave off `:443`. |
+| `GIRICI_SITE_SECRET` | generated, kept in the database | The secret behind subdomain mode's host names; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica, and never change it. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
 
@@ -48,6 +50,13 @@ it can, use `socks5://`.
 
 YouTube ties its playback tokens to the IP that minted them, which is why minting goes through the same
 proxy as the video traffic.
+
+## Subdomain mode
+
+By default every proxied site runs on Girici's own origin. With `GIRICI_SITE_DOMAIN=proxy.example`, each site gets a
+host of its own, such as `<label>.proxy.example`, and the browser keeps sites apart by itself. The mode needs DNS and a
+certificate for `*.proxy.example`, and it shows a label per site in DNS lookups. [Subdomain mode](/guide/subdomain-mode)
+covers setup, the rules for the domain and what changes for visitors.
 
 ## Data directory
 

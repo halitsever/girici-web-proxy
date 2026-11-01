@@ -15,10 +15,13 @@ services:
     environment:
       LOG_LEVEL: info
       GIRICI_DATA_DIR: /data
-      # Set to 1 with the https profile, so rate limits see each visitor instead of Caddy.
+      # Set to 1 with the https or sites profile, so rate limits see each visitor instead of Caddy.
       GIRICI_TRUST_PROXY: ${GIRICI_TRUST_PROXY:-}
       # A fixed setup code instead of the one printed to the log; see .env.example.
       GIRICI_SETUP_TOKEN: ${GIRICI_SETUP_TOKEN:-}
+      # Subdomain mode, served by the sites profile; see docs/guide/subdomain-mode.md.
+      GIRICI_SITE_DOMAIN: ${GIRICI_SITE_DOMAIN:-}
+      GIRICI_SITE_SECRET: ${GIRICI_SITE_SECRET:-}
       # SOURCE_URL: https://github.com/you/your-fork
     volumes:
       - girici_data:/data
@@ -36,6 +39,27 @@ services:
       GIRICI_DOMAIN: ${GIRICI_DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Use instead of the https profile, never beside it: both bind ports 80 and 443.
+  caddy-sites:
+    build:
+      context: ./deploy/caddy-dns
+      args:
+        CADDY_DNS_MODULE: ${CADDY_DNS_MODULE:-github.com/caddy-dns/cloudflare}
+    profiles: ["sites"]
+    restart: unless-stopped
+    depends_on: [girici]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      GIRICI_SITE_DOMAIN: ${GIRICI_SITE_DOMAIN:-}
+      CLOUDFLARE_API_TOKEN: ${CLOUDFLARE_API_TOKEN:-}
+    volumes:
+      - ./deploy/Caddyfile.sites:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
 
