@@ -43,6 +43,26 @@ Public access is off by default. A public instance is open to abuse, so enable i
 Changing the account (name, email, password) or the admin settings asks for your current password every time.
 The page keeps it in memory only while it is open. If you forgot it, use the reset tool below.
 
+## Shared-link warning
+
+On a public instance, someone who opens a proxied page from a link, in a browser that has never used Girici, first
+sees a notice. It says that the page comes from another site through this proxy, not from the people who run the
+server, and shows the real address with a **Continue** button. It is meant for links passed around in chats and
+emails, where the visitor may not know what Girici is.
+
+Each browser sees it once. It stops after the visitor presses **Continue**, or after they open a site from Girici's
+home page or **Settings**. Only loading one of Girici's own pages does not count, so a link or popup that lands
+there cannot skip the notice. Pages inside frames and the requests a page makes never get the notice.
+
+**Settings → Admin → Warn before shared links** turns it off for everyone. It is on by default and asks for the
+current password like the other admin settings. It applies only while **Public access** is on: a private instance
+lets no visitor in, so it never shows there. A browser that already has Girici open picks up a change within a
+minute.
+
+The browser remembers the notice in the service worker's own storage. Clearing site data in Settings does not
+bring it back; wiping the browser's data for Girici does. A `#fragment` at the end of a shared link may be lost
+after **Continue**, depending on the browser.
+
 ## Resetting the admin password
 
 If you are locked out, reset the password from the command line. It generates a fresh random password,
@@ -107,6 +127,39 @@ that already has Girici open picks the change up on a page load within a minute.
 
 What stays readable, and other limits, are listed under
 [Known limitations](./how-it-works.md#known-limitations).
+
+## Browser check
+
+**Settings → Admin → Browser check for visitors** makes every new browser solve a short puzzle before its first
+proxied page. Turning it on asks for the current password. It applies only while public access is on, and the
+signed-in admin is never checked. It is off by default.
+
+A visitor without a pass sees a page titled "Checking your browser". The browser hashes a challenge from the server
+with SHA-256 until it finds a number that gives enough leading zero bits, sends that number back, and receives a
+`girici-visitor` cookie (`__Host-girici-visitor` on https). The page then opens the address the visitor asked for,
+encrypted or not. Until then the relay, the WebSocket relay and the YouTube token minter refuse that browser. A
+proxied page inside a frame cannot show the check, so the frame says to reload the page instead.
+
+The check makes automated abuse cost processor time on every new address. It does not stop a determined client: a
+script can solve the puzzle too, and a real browser driven by a bot passes like any other. It is not a CAPTCHA and
+does not tell people from machines.
+
+`GIRICI_POW_DIFFICULTY` sets how hard the puzzle is, from 1 to 24, default 16. Each step doubles the average work,
+so lower it if many of your visitors use slow phones.
+
+The cookie lasts a day, and a visitor who keeps browsing gets a fresh one every hour. It is tied to the visitor's
+network address (all of an IPv6 /64 counts as one), so a phone that moves from Wi-Fi to mobile data is checked again
+and then lands on the page it asked for. Cookies are signed with a key derived from the session secret. Replicas that
+share `GIRICI_SESSION_SECRET` accept each other's cookies, and changing the admin password checks every visitor again
+unless that variable is set.
+
+Limits:
+
+- The check needs JavaScript and Web Workers.
+- Each challenge can be answered once. Girici remembers answered challenges in memory, so after a restart or on
+  another replica an answer works once more during the five minutes the challenge lives.
+- Girici remembers up to 100,000 answered challenges. If a flood of solves from many addresses fills that within
+  five minutes, it forgets the oldest ones, and those can be answered once more. Other visitors keep passing.
 
 ## Scaling later
 

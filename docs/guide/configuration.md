@@ -19,8 +19,14 @@ stops the server with a message naming the variable.
 | `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica so sessions validate across them. |
 | `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
+| `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may start moving per minute, such as `50MB`. A response that starts under the limit finishes, so a visitor can go over it (see [Bandwidth limits](#bandwidth-limits)). The signed-in admin is never limited. |
+| `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may start moving per day, such as `2GB`, checked the same way. Counts reset at midnight UTC and when Girici restarts. |
+| `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more letters, digits or `-._~+/`, with optional `=` at the end. |
+| `GIRICI_POW_DIFFICULTY` | `16` | How hard the browser check is, 1 to 24; each step doubles the work. The check itself is switched on in Settings. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
+
+Sizes take `B`, `KB`, `MB`, `GB` or `TB` (powers of 1024, any case); a bare number is bytes.
 
 ## Trust proxy
 
@@ -48,6 +54,34 @@ it can, use `socks5://`.
 
 YouTube ties its playback tokens to the IP that minted them, which is why minting goes through the same
 proxy as the video traffic.
+
+## Bandwidth limits
+
+`GIRICI_BANDWIDTH_LIMIT` and `GIRICI_DAILY_QUOTA` limit how much traffic each visitor moves through a public
+instance. A visitor is a client address, the same key the rate limit uses, so behind a reverse proxy set
+[`GIRICI_TRUST_PROXY`](#trust-proxy) first. IPv6 clients share a budget per /64.
+
+Both count the bodies Girici relays, downloads and uploads alike, plus WebSocket messages both ways. Headers and
+Girici's own pages and scripts are not counted.
+
+The per-minute limit is a bucket that holds one minute's worth and refills continuously. A request starts while
+any budget is left, and a response that has started always finishes, even when it takes the bucket below zero.
+The visitor then waits until the bucket climbs back above zero. A video that started under the limit keeps
+playing; the limit bites on the next request.
+
+Both budgets are checked only when a request or WebSocket starts, so a visitor can go over them by whatever they
+start at once or by one long response. An open WebSocket is the exception: it is checked on every message and closed
+once the budget runs out.
+
+The daily quota counts from midnight UTC and starts over at the next one.
+
+Once either budget is spent, relay requests get `429` with a `Retry-After` header, and pages show a notice
+saying when to try again. New WebSockets are refused the same way, and an open one closes with code 1008 when it
+goes over. The signed-in admin is never refused or cut, even when they share an address with visitors who spent
+theirs.
+
+The counts live in memory: a restart resets them, and each replica counts on its own. Responses the browser
+serves from its own cache cost nothing and count nothing.
 
 ## Data directory
 

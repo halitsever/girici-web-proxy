@@ -21,6 +21,13 @@ export interface Config {
   blockedHosts: string[];
   upstreamProxy: UpstreamProxy | undefined;
   setupToken: string | undefined;
+  /** Bytes per minute per client; 0 is off. */
+  bandwidthLimit: number;
+  /** Bytes per UTC day per client; 0 is off. */
+  dailyQuota: number;
+  metricsToken: string | undefined;
+  /** Leading zero bits the browser check asks for. */
+  powDifficulty: number;
 }
 
 export interface TestUpstream {
@@ -53,7 +60,49 @@ export function loadConfig(env: Env): Config {
     blockedHosts: readBlockedHosts(env.GIRICI_BLOCKED_HOSTS),
     upstreamProxy: parseUpstreamProxy(env.GIRICI_UPSTREAM_PROXY),
     setupToken: readSetupToken(env.GIRICI_SETUP_TOKEN),
+    bandwidthLimit: readByteSize("GIRICI_BANDWIDTH_LIMIT", env.GIRICI_BANDWIDTH_LIMIT),
+    dailyQuota: readByteSize("GIRICI_DAILY_QUOTA", env.GIRICI_DAILY_QUOTA),
+    metricsToken: readMetricsToken(env.GIRICI_METRICS_TOKEN),
+    powDifficulty: readPowDifficulty(env.GIRICI_POW_DIFFICULTY),
   };
+}
+
+const SIZE_UNITS: Record<string, number> = { b: 0, kb: 1, mb: 2, gb: 3, tb: 4 };
+
+/** A size such as 500MB in powers of 1024; a bare number is bytes and 0 turns the limit off. */
+function readByteSize(name: string, raw: string | undefined): number {
+  const value = raw?.trim();
+  if (!value) return 0;
+  const match = /^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/i.exec(value);
+  if (!match) throw new Error(`${name} must be a size such as 500MB or 2GB (0 turns it off), got "${raw}"`);
+  const unit = SIZE_UNITS[(match[2] ?? "b").toLowerCase()] ?? 0;
+  return Math.floor(Number(match[1]) * 1024 ** unit);
+}
+
+/** It opens /metrics to anyone who holds it, so a short one could be guessed. Never echoed. */
+function readMetricsToken(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value.length < 16) {
+    throw new Error("GIRICI_METRICS_TOKEN must be at least 16 characters; openssl rand -hex 32 makes one");
+  }
+  // The token68 form of RFC 7235: anything else could never arrive in an Authorization: Bearer header.
+  if (!/^[A-Za-z0-9\-._~+/]+=*$/.test(value)) {
+    throw new Error(
+      "GIRICI_METRICS_TOKEN may contain only letters, digits, - . _ ~ + / and trailing =; openssl rand -hex 32 makes one",
+    );
+  }
+  return value;
+}
+
+function readPowDifficulty(raw: string | undefined): number {
+  const value = raw?.trim();
+  if (!value) return 16;
+  const difficulty = Number(value);
+  if (!/^\d+$/.test(value) || difficulty < 1 || difficulty > 24) {
+    throw new Error(`GIRICI_POW_DIFFICULTY must be a whole number from 1 to 24, got "${raw}"`);
+  }
+  return difficulty;
 }
 
 /** Express trust proxy: a boolean, a hop count, or a preset like "loopback". */
