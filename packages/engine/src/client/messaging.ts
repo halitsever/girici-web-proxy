@@ -1,4 +1,14 @@
-import { apply, define, isWebUrl, originOf, parseUrl, toText } from "../shared/primordials.ts";
+import {
+  apply,
+  assignOwn,
+  createObject,
+  define,
+  defineData,
+  isWebUrl,
+  originOf,
+  parseUrl,
+  toText,
+} from "../shared/primordials.ts";
 import type { Invoke } from "./invoke.ts";
 import { maskNative } from "./native-mask.ts";
 import { realOriginOf, type Realm, type UrlContext } from "./url-context.ts";
@@ -92,7 +102,11 @@ export function post(
   if (targetOrigin && typeof targetOrigin === "object" && "targetOrigin" in targetOrigin) {
     const options = targetOrigin as { targetOrigin?: unknown };
     const decision = resolveTarget(options.targetOrigin, realOrigin, proxyOrigin, senderOrigin);
-    if (decision.deliver) deliver({ ...options, targetOrigin: decision.target });
+    if (!decision.deliver) return;
+    // Own fields on a null prototype: the native reads `transfer` and the rest from whatever object it gets.
+    const delivered = assignOwn(createObject<Record<string, unknown>>(null), options);
+    defineData(delivered, "targetOrigin", decision.target);
+    deliver(delivered);
     return;
   }
   const decision = resolveTarget(targetOrigin, realOrigin, proxyOrigin, senderOrigin);

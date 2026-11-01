@@ -21,3 +21,20 @@ export function createInvoker(win: { Function: FunctionConstructor }): Invoke {
     return (fn, self, args) => apply(fn, self, args);
   }
 }
+
+/** False when the realm's document is gone, since browsers then drop or refuse the navigation. */
+export type AssignHref = (location: object, url: string) => boolean;
+
+/** WebKit takes the referrer from the realm that assigns `href`, and from the callee's realm for a call to the setter. */
+export function createHrefAssigner(win: { Function: FunctionConstructor }): AssignHref {
+  try {
+    return new win.Function(
+      "return function (l, u) { if (document !== window.document) return false; l.href = u; return true; }",
+    )() as AssignHref;
+  } catch {
+    return (location, url) => {
+      (location as { href: string }).href = url;
+      return true;
+    };
+  }
+}

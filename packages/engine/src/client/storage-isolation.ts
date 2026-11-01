@@ -1,4 +1,18 @@
-import { apply, joined, sliceOf, startsWith, toText } from "../shared/primordials.ts";
+import {
+  append,
+  apply,
+  assignOwn,
+  createObject,
+  defineData,
+  indexOf,
+  joined,
+  pathnameOf,
+  promiseThen,
+  sliceOf,
+  splitText,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -9,15 +23,18 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     // Names of other partitions pass through here, and a third-party name tells which site embedded which.
     return startsWith(name, prefix) ? sliceOf(name, prefix.length) : null;
   };
+  const page = pageRealm(win);
 
   prefixFirstArg(win.IDBFactory?.prototype, ["open", "deleteDatabase"], partition);
   wrap(
     win.IDBFactory?.prototype,
     "databases",
     (native) =>
-      async function (this: unknown) {
-        const all = (await apply(native, this, [])) as NamedLock[];
-        return stripLocks(all, strip);
+      function (this: unknown) {
+        return page.filter(
+          () => apply(native, this, []),
+          (all) => stripNamed(all as Named[], strip, page),
+        );
       },
   );
 
@@ -26,14 +43,19 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     win.CacheStorage?.prototype,
     "keys",
     (native) =>
-      async function (this: unknown) {
-        const all = (await apply(native, this, [])) as string[];
-        const own: string[] = [];
-        for (let index = 0; index < all.length; index++) {
-          const name = strip(all[index] as string);
-          if (name !== null) own[own.length] = name;
-        }
-        return own;
+      function (this: unknown) {
+        return page.filter(
+          () => apply(native, this, []),
+          (found) => {
+            const all = found as string[];
+            const own = page.list<string>();
+            for (let index = 0; index < all.length; index++) {
+              const name = strip(all[index] as string);
+              if (name !== null) append(own, name);
+            }
+            return own;
+          },
+        );
       },
   );
   // match() with no cacheName searches every cache on the origin, so it is confined to this site's own caches.
@@ -45,17 +67,25 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
         const caches = this as CacheStorage;
         const options = rawOptions as CacheQueryOptions & { cacheName?: string };
         if (options?.cacheName) {
-          return apply(native, this, [request, { ...options, cacheName: partition() + options.cacheName }]);
+          // Own fields on a null prototype: the native reads every option it knows of.
+          const named = assignOwn(createObject<Record<string, unknown>>(null), options);
+          defineData(named, "cacheName", partition() + options.cacheName);
+          return apply(native, this, [request, named]);
         }
-        return (async () => {
-          const names = await caches.keys();
-          for (let index = 0; index < names.length; index++) {
-            const name = names[index] as string;
-            const hit = await (await caches.open(name)).match(request as RequestInfo, options);
-            if (hit) return hit;
-          }
-          return undefined;
-        })();
+        return promiseThen(
+          page.later(() => caches.keys()),
+          (names) => {
+            const next = (index: number): unknown => {
+              if (index >= names.length) return undefined;
+              const opened = page.later(() => caches.open(names[index] as string));
+              const found = promiseThen(opened, (cache) =>
+                page.later(() => cache.match(request as RequestInfo, options)),
+              );
+              return promiseThen(found, (hit) => (hit ? hit : next(index + 1)));
+            };
+            return next(0);
+          },
+        );
       },
   );
 
@@ -65,9 +95,17 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     LockManager?.prototype,
     "query",
     (native) =>
-      async function (this: unknown) {
-        const result = (await apply(native, this, [])) as { held?: NamedLock[]; pending?: NamedLock[] };
-        return { ...result, held: stripLocks(result.held, strip), pending: stripLocks(result.pending, strip) };
+      function (this: unknown) {
+        return page.filter(
+          () => apply(native, this, []),
+          (found) => {
+            const result = found as { held?: Named[]; pending?: Named[] };
+            const out = assignOwn(page.object(), result);
+            defineData(out, "held", stripNamed(result.held, strip, page));
+            defineData(out, "pending", stripNamed(result.pending, strip, page));
+            return out;
+          },
+        );
       },
   );
 
@@ -80,18 +118,60 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
   installCookieStore(win, ctx);
 }
 
-interface NamedLock {
+interface Named {
   name?: string;
 }
 
-function stripLocks(locks: NamedLock[] | undefined, strip: (name: string) => string | null): NamedLock[] {
-  if (!locks) return [];
-  const out: NamedLock[] = [];
-  for (let index = 0; index < locks.length; index++) {
-    const lock = locks[index] as NamedLock;
-    const name = lock.name === undefined ? undefined : strip(lock.name);
-    if (lock.name !== undefined && name === null) continue;
-    out[out.length] = { ...lock, name: name ?? undefined };
+/** Makes answers out of the window's own Promise, Object and Array, taken at install. */
+interface PageRealm {
+  /** run() as a promise of the window's realm, rejected if run throws. */
+  later<T>(run: () => T | PromiseLike<T>): Promise<T>;
+  /** The native promise run() returns, settled into what `take` makes of its answer; only `take` sees that answer. */
+  filter<T, U>(run: () => unknown, take: (raw: T) => U): Promise<U>;
+  object<T extends object>(): T;
+  list<T>(): T[];
+}
+
+/**
+ * In a window reused for another site, this realm's built-ins belong to the page that made the window, so promises,
+ * arrays and objects handed to the page come from the window's own realm.
+ */
+function pageRealm(win: Realm): PageRealm {
+  const PagePromise = win.Promise;
+  const objectProto = win.Object.prototype;
+  const PageArray = win.Array;
+  const later = <T>(run: () => T | PromiseLike<T>) => new PagePromise<T>((resolve) => resolve(run()));
+  return {
+    __proto__: null,
+    later,
+    filter: <T, U>(run: () => unknown, take: (raw: T) => U): Promise<U> => {
+      let raw: unknown;
+      try {
+        raw = run();
+      } catch (error) {
+        return new PagePromise<U>((_resolve, reject) => reject(error));
+      }
+      if (typeof raw !== "object" || raw === null) return later(() => take(raw as T));
+      // An own constructor, so then() reads neither the page's Promise.prototype.constructor nor its then.
+      defineData(raw, "constructor", PagePromise);
+      return promiseThen(raw as Promise<T>, take);
+    },
+    object: <T extends object>() => createObject<T>(objectProto),
+    list: <T>() => new PageArray<T>(),
+  } as PageRealm;
+}
+
+/** Database and lock entries with this partition's prefix taken off, and other partitions' left out. */
+function stripNamed(entries: Named[] | undefined, strip: (name: string) => string | null, page: PageRealm): Named[] {
+  const out = page.list<Named>();
+  if (!entries) return out;
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index] as Named;
+    const name = entry.name === undefined ? undefined : strip(entry.name);
+    if (entry.name !== undefined && name === null) continue;
+    const copy = assignOwn(page.object<Named>(), entry);
+    defineData(copy, "name", name ?? undefined);
+    append(out, copy);
   }
   return out;
 }
@@ -121,31 +201,60 @@ function wrap(proto: object | undefined, name: string, make: (native: Method) =>
   target[name] = make(native as Method);
 }
 
+interface CookieItem {
+  name: string;
+  value: string;
+}
+
 /** cookieStore is a typed view of document.cookie, so it reuses the mirror the cookie hooks maintain. */
 function installCookieStore(win: Realm, ctx: UrlContext): void {
-  const store = (win as unknown as { cookieStore?: Record<string, unknown> }).cookieStore;
-  if (!store) return;
-  const parse = (text: string) =>
-    text
-      .split("; ")
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return { name: pair.slice(0, index), value: pair.slice(index + 1) };
-      });
+  const instance = (win as unknown as { cookieStore?: Record<string, unknown> }).cookieStore;
+  if (!instance) return;
+  // WebKit gives the next document of a reused window a new cookieStore, which still inherits from this prototype.
+  const CookieStore = (win as unknown as { CookieStore?: { prototype: Record<string, unknown> } }).CookieStore;
+  const store = CookieStore?.prototype ?? instance;
+  const page = pageRealm(win);
+  const answer = page.later;
+  const item = (name: string, value: string): CookieItem => {
+    const made = page.object<CookieItem>();
+    defineData(made, "name", name);
+    defineData(made, "value", value);
+    return made;
+  };
+  const parse = (text: string): CookieItem[] => {
+    const pairs = splitText(text, "; ");
+    const items = page.list<CookieItem>();
+    for (let index = 0; index < pairs.length; index++) {
+      const pair = pairs[index] as string;
+      if (!pair) continue;
+      const at = indexOf(pair, "=");
+      append(items, item(sliceOf(pair, 0, at), sliceOf(pair, at + 1)));
+    }
+    return items;
+  };
   // get/delete accept both a bare name and the { name } object form the native API allows.
   const nameOf = (input: unknown) =>
-    typeof input === "object" && input ? String((input as { name?: unknown }).name) : String(input);
-  store.get = async (name: unknown) => parse(win.document.cookie).find((c) => c.name === nameOf(name)) ?? null;
-  store.getAll = async () => parse(win.document.cookie);
-  store.set = async (name: unknown, value?: unknown) => {
-    const cookie =
-      typeof name === "object" && name
-        ? (name as { name: string; value: string })
-        : { name: String(name), value: String(value) };
-    win.document.cookie = `${cookie.name}=${cookie.value}; path=${new URL(ctx.realUrl().href).pathname}`;
-  };
-  store.delete = async (name: unknown) => {
-    win.document.cookie = `${nameOf(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  };
+    typeof input === "object" && input ? toText((input as { name?: unknown }).name) : toText(input);
+  store.get = (name: unknown) =>
+    answer(() => {
+      const items = parse(win.document.cookie);
+      for (let index = 0; index < items.length; index++) {
+        const found = items[index] as CookieItem;
+        if (found.name === nameOf(name)) return found;
+      }
+      return null;
+    });
+  store.getAll = () => answer(() => parse(win.document.cookie));
+  store.set = (name: unknown, value?: unknown) =>
+    answer(() => {
+      const cookie =
+        typeof name === "object" && name
+          ? (name as { name: string; value: string })
+          : ({ __proto__: null, name: toText(name), value: toText(value) } as CookieItem);
+      win.document.cookie = `${cookie.name}=${cookie.value}; path=${pathnameOf(ctx.realUrl())}`;
+    });
+  store.delete = (name: unknown) =>
+    answer(() => {
+      win.document.cookie = `${nameOf(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    });
 }
