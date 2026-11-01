@@ -379,6 +379,11 @@ describe("installScriptText", () => {
     const external = dom.script({ connected: true, type: "text/plain", src: "/a.js", stored: "x" });
     external.type = "";
     expect([dom.nativeText(loose), dom.nativeText(stays), dom.nativeText(external)]).toEqual(["x", "x", "x"]);
+    // Converted as the native call converts them, which refuses a symbol.
+    const symbol = Symbol("t") as never;
+    expect(() => stays.setAttribute("type", symbol)).toThrow(TypeError);
+    expect(() => (stays.type = symbol)).toThrow(TypeError);
+    expect(() => (stays.text = symbol)).toThrow(TypeError);
   });
 
   it("ignores values that are not nodes", () => {

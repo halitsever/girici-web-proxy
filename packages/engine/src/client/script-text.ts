@@ -6,6 +6,7 @@ import {
   lowerCase,
   NativeWeakMap,
   setHas,
+  stringOf,
   toText,
   trim,
 } from "../shared/primordials.ts";
@@ -262,15 +263,15 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
     });
   };
   // Each converts as its IDL type does, since the setter now gets a string.
-  const toContent = (value: unknown) => (value === null || value === undefined ? "" : toText(value));
-  const toInnerText = (value: unknown) => (value === null ? "" : toText(value));
+  const toContent = (value: unknown) => (value === null || value === undefined ? "" : stringOf(value));
+  const toInnerText = (value: unknown) => (value === null ? "" : stringOf(value));
   const script = win.HTMLScriptElement?.prototype;
   hook(node, "textContent", toContent);
   hook(win.HTMLElement?.prototype, "innerText", toInnerText);
   // Trusted Types gives script elements their own textContent and innerText, which shadow the two above.
   hook(script, "textContent", toContent);
   hook(script, "innerText", toInnerText);
-  hook(script, "text", toText);
+  hook(script, "text", stringOf);
 
   return { isScript, write, read, check };
 }
@@ -297,17 +298,17 @@ function hookTypeChanges(
   };
   /** Converted once here, so the native call does not run a page's toString a second time. */
   const named = (args: unknown[], index: number): boolean => {
-    const name = (args[index] = toText(args[index]));
+    const name = (args[index] = stringOf(args[index]));
     return lowerCase(name) === "type";
   };
   const plainNamespace = (value: unknown) => value === null || value === undefined || value === "";
   wrap(element, "setAttribute", (self, args) => {
     if (args.length < 2 || !named(args, 0)) return;
-    change(self, (args[1] = toText(args[1])));
+    change(self, (args[1] = stringOf(args[1])));
   });
   wrap(element, "setAttributeNS", (self, args) => {
     if (args.length < 3 || !plainNamespace(args[0]) || !named(args, 1)) return;
-    change(self, (args[2] = toText(args[2])));
+    change(self, (args[2] = stringOf(args[2])));
   });
   wrap(element, "removeAttribute", (self, args) => {
     if (args.length > 0 && named(args, 0)) change(self, null);
@@ -328,7 +329,7 @@ function hookTypeChanges(
   define(script, "type", {
     ...property,
     set: maskNative(function (this: unknown, value: unknown) {
-      const next = toText(value);
+      const next = stringOf(value);
       if (isScript(this)) change(this, next);
       apply(set, this, [next]);
     }, set),

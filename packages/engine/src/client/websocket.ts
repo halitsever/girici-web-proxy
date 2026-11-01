@@ -13,7 +13,7 @@ import {
   quoteJson,
   sliceOf,
   startsWith,
-  toText,
+  stringOf,
 } from "../shared/primordials.ts";
 import { WS_PREP_PATH } from "../shared/protocol.ts";
 import type { UrlContext } from "./url-context.ts";
@@ -37,7 +37,7 @@ function sendableClose(code: number | undefined): number | undefined {
 
 function protocolList(protocols: string | string[] | undefined): string[] {
   if (protocols == null) return [];
-  return isArray(protocols) ? mapOf(protocols, toText) : [toText(protocols)];
+  return isArray(protocols) ? mapOf(protocols, stringOf) : [stringOf(protocols)];
 }
 
 /** Written out from strings, so neither a replaced JSON.stringify nor a toJSON the page added ever sees the seal. */
@@ -113,7 +113,7 @@ export function installWebSocket(
     #bufferedBeforeOpen = 0;
 
     constructor(url: string | URL, protocols?: string | string[]) {
-      const real = socketUrl(toText(url));
+      const real = socketUrl(stringOf(url));
       super();
       this.url = hrefOf(real);
       void this.#connect(real, protocolList(protocols));

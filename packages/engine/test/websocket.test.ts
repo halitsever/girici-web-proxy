@@ -100,6 +100,7 @@ describe("installWebSocket", () => {
       expect(thrown, bad).toBeInstanceOf(DOMException);
       expect((thrown as DOMException).name, bad).toBe("SyntaxError");
     }
+    expect(() => new win.WebSocket(Symbol("x") as never)).toThrow(TypeError);
     await flush();
     expect(MockWs.instances).toHaveLength(0);
   });
