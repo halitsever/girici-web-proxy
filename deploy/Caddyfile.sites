@@ -1,0 +1,10 @@
+# Subdomain mode: the root and every site host share one wildcard certificate.
+# For a DNS provider other than Cloudflare, change the dns line to the one its caddy-dns module documents.
+{$GIRICI_SITE_DOMAIN}, *.{$GIRICI_SITE_DOMAIN} {
+	tls {
+		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+	}
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy girici:3000
+}

@@ -20,6 +20,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
     text: "Operate",
     items: [
       { text: "Reverse proxies", link: "/guide/reverse-proxy" },
+      { text: "Subdomain mode", link: "/guide/subdomain-mode" },
       { text: "Cloud platforms", link: "/guide/cloud-platforms" },
       { text: "Monitoring", link: "/guide/monitoring" },
       { text: "Troubleshooting and FAQ", link: "/guide/troubleshooting" },
