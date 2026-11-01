@@ -43,10 +43,14 @@ see a request: navigations, `embed`/`object`, WebSocket and WebRTC, `http:` targ
 reads that must return a real URL. HTML, CSS, and JavaScript are rewritten in the worker; the server
 only relays bytes.
 
-Workers a page starts run the same client runtime as the page, so a socket opened in a worker goes through the same
-WebSocket shim and carries the site's cookies. A shared worker loads from one address per script, storage partition
-and type under `/_g/rpc/shared-worker`. The service worker answers that address with the bootstrap the starting page
-announced, so two tabs of one site join the same running shared worker.
+Workers a page starts run Girici's worker runtime, which uses the same WebSocket shim as pages. A worker's socket
+carries the site's cookies only when the service worker knows which page started the worker. Chromium sends a nested
+worker's requests without that link, so there such a socket goes out without cookies and with an opaque `Origin`.
+Cookies a site sets on the socket handshake are not stored.
+
+A shared worker loads from one address per script, storage partition and type under `/_g/rpc/shared-worker`. The
+service worker answers that address with the bootstrap the starting page announced, so two tabs of one site join the
+same running shared worker.
 
 Script text a page writes at run time, through `text`, `textContent`, `innerText` or `innerHTML`, or inside a script
 element it builds and inserts, is rewritten just before the browser can run it. Reading that text back returns what
