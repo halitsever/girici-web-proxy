@@ -13,7 +13,7 @@ Browser (one origin, e.g. https://proxy.example)
   /~/https/site/...    a proxied page; the client runtime is injected at the top of <head>
   service worker       router -> request builder (cookie jar, Origin/Referer)
                        -> transport (HTTP relay) -> HTML/CSS/JS rewriters + cache
-  WebSocket shim       -> wss://proxy.example/_g/ws
+  WebSocket shim       -> wss://proxy.example/_g/ws (in pages and in workers)
 
 Server (Node 24, Express 5)
   /_g/r/*   HTTP relay (undici + SSRF guard, streaming)
@@ -42,6 +42,15 @@ so it can route and fetch them no matter the address. Rewriting is only needed w
 see a request: navigations, `embed`/`object`, WebSocket and WebRTC, `http:` targets, worker URLs, and
 reads that must return a real URL. HTML, CSS, and JavaScript are rewritten in the worker; the server
 only relays bytes.
+
+Workers a page starts run the same client runtime as the page, so a socket opened in a worker goes through the same
+WebSocket shim and carries the site's cookies. A shared worker loads from one address per script, storage partition
+and type under `/_g/rpc/shared-worker`. The service worker answers that address with the bootstrap the starting page
+announced, so two tabs of one site join the same running shared worker.
+
+Script text a page writes at run time, through `text`, `textContent`, `innerText` or `innerHTML`, or inside a script
+element it builds and inserts, is rewritten just before the browser can run it. Reading that text back returns what
+the page wrote. Data blocks such as JSON-LD and templates keep their text.
 
 ## The relay
 
