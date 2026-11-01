@@ -30,6 +30,7 @@ import { resubmitResponse } from "./resubmit.ts";
 import {
   classifyRequest,
   isGuardedPath,
+  isNetworkInEitherMode,
   isHostReservedPath,
   realUrlOf,
   requestClientUrl,
@@ -209,6 +210,7 @@ self.addEventListener("fetch", (event) => {
     if (answer) event.respondWith(answer);
     return;
   }
+  if (isNetworkInEitherMode(new URL(event.request.url), self.location.origin)) return;
   // A worker restarted on a site host reads its stored mode before it routes anything.
   event.respondWith(
     siteMode.ready().then(

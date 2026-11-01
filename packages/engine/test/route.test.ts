@@ -6,6 +6,7 @@ import {
   classifyRequest,
   isGuardedPath,
   isHostReservedPath,
+  isNetworkInEitherMode,
   isUiWindow,
   realUrlOf,
   requestClientUrl,
@@ -131,6 +132,18 @@ describe("reservedAccess", () => {
     const nav = { mode: "navigate" as RequestMode, destination: "document" as RequestDestination, method: "GET" };
     expect(reservedAccess("/_g/admin/settings", call, ui, origin, known, true)).toBe("deny");
     expect(reservedAccess("/_g/login", nav, undefined, origin, known, true)).toBe("deny");
+  });
+});
+
+describe("isNetworkInEitherMode", () => {
+  it("lets the site data routes of this host reach the network before the worker knows its mode", () => {
+    const own = "https://aaa.proxy.test";
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sites/clear?p=x&s=y&i=0`), own)).toBe(true);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sites/config`), own)).toBe(true);
+    expect(isNetworkInEitherMode(new URL("https://bbb.proxy.test/_g/sites/clear"), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sitesx`), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/~/https/a.test/_g/sites/clear`), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/admin/settings`), own)).toBe(false);
   });
 });
 

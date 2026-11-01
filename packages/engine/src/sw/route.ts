@@ -152,6 +152,14 @@ function isOwnOrigin(value: string, origin: string): boolean {
   }
 }
 
+/**
+ * Routes the network answers whatever the mode, so a worker that has not read its mode yet need not answer them. A
+ * clear hop's Clear-Site-Data then always comes from the network itself.
+ */
+export function isNetworkInEitherMode(url: URL, origin: string): boolean {
+  return url.origin === origin && url.pathname.startsWith("/_g/sites/");
+}
+
 /** Paths the network answers; on a site host `/` and `/robots.txt` belong to the page's own site. */
 export function isHostReservedPath(pathname: string, siteMode: boolean): boolean {
   return siteMode ? pathname.startsWith("/_g/") : isReservedPath(pathname);

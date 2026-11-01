@@ -82,9 +82,23 @@ describe("the clearing chain", () => {
     expect((await send("/_g/sites/plan", { host: siteA, method: "POST" })).status).toBe(404);
   });
 
+  it("lands on each host once before it clears there", async () => {
+    const { start } = await plan(["https://site-b.test"]);
+    const [host, path] = hop(start);
+    const landing = await send(path, { host });
+    expect(landing.status).toBe(200);
+    expect(landing.headers["clear-site-data"]).toBeUndefined();
+    expect(landing.headers["cache-control"]).toBe("no-store");
+    expect(refreshOf(await landing.text())).toBe(`${path}&b=1`);
+    const cleared = await send(`${path}&b=1`, { host });
+    expect(cleared.headers["clear-site-data"]).toBe('"cache", "storage"');
+    expect(hop(refreshOf(await cleared.text()))[0]).toBe("proxy.test");
+  });
+
   it("clears each host in turn and refuses a tampered or foreign hop", async () => {
     const { start } = await plan(["https://site-b.test", "https://site-a.test"]);
-    const [host, path] = hop(start);
+    const [host, landingPath] = hop(start);
+    const path = `${landingPath}&b=1`;
     const first = await send(path, { host });
     expect(first.status).toBe(200);
     expect(first.headers["clear-site-data"]).toBe('"cache", "storage"');
@@ -98,7 +112,7 @@ describe("the clearing chain", () => {
     expect((await send(path.replace("i=0", "i=1"), { host })).status).toBe(403);
     expect((await send(path.replace("i=0", "i=7"), { host })).status).toBe(403);
     expect((await send(path.replace("&i=0", ""), { host })).status).toBe(403);
-    const second = await send(hop(next)[1], { host: siteA });
+    const second = await send(`${hop(next)[1]}&b=1`, { host: siteA });
     expect(second.status).toBe(200);
     expect(hop(refreshOf(await second.text()))).toEqual(["proxy.test", expect.stringMatching(/^\/_g\/sites\/done\?/)]);
   });

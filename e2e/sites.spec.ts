@@ -153,11 +153,7 @@ test("settings reach an open site on its next load", async ({ page, context }) =
   await expect(page.locator("girici-bar")).toHaveCount(0);
 });
 
-test("clear all empties every visited host", async ({ page, browserName }) => {
-  test.skip(
-    browserName === "webkit",
-    "WebKit keeps the localStorage a proxied page wrote when Clear-Site-Data follows it on that host",
-  );
+test("clear all empties every visited host", async ({ page }) => {
   await page.goto("/~/https/site-a.test/sites/storage?set=1");
   await expect(page.locator("#ls")).toHaveText("v");
   await page.goto("/~/https/site-b.test/sites/storage?set=1");

@@ -181,12 +181,15 @@ export function siteHostRouter(setup: SiteSetup, store: AuthStore): Router {
       res.status(403).end();
       return;
     }
+    res.set({ "Content-Security-Policy": CLEAR_CSP, "Cache-Control": "no-store" });
+    // WebKit can leave the storage a proxied page wrote when the clearing page comes from another host's page, so the
+    // hop first lands here and then loads itself again.
+    if (req.query.b !== "1") {
+      res.type("html").send(clearPage(`${req.originalUrl}&b=1`));
+      return;
+    }
     // Never "cookies": that would clear the whole domain, sessions and settings included.
-    res.set({
-      "Clear-Site-Data": '"cache", "storage"',
-      "Content-Security-Policy": CLEAR_CSP,
-      "Cache-Control": "no-store",
-    });
+    res.setHeader("Clear-Site-Data", '"cache", "storage"');
     res.type("html").send(clearPage(hopAfter(plan, signedQuery(req), index, setup)));
   });
 
