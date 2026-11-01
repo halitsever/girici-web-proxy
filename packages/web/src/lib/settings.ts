@@ -1,4 +1,4 @@
-import { UI_SETTINGS_KEY } from "@girici/engine/shared";
+import { isLang, UI_SETTINGS_KEY, type Lang } from "@girici/engine/shared";
 import type { SearchEngine } from "./target";
 
 export interface Settings {
@@ -8,6 +8,8 @@ export interface Settings {
   blockCookies: boolean;
   toolbar: boolean;
   sealAddresses: boolean;
+  /** "auto" follows the browser's languages. */
+  lang: Lang | "auto";
 }
 
 const DEFAULTS: Settings = {
@@ -17,12 +19,15 @@ const DEFAULTS: Settings = {
   blockCookies: true,
   toolbar: true,
   sealAddresses: false,
+  lang: "auto",
 };
 
 export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(UI_SETTINGS_KEY);
-    return raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) } : { ...DEFAULTS };
+    const settings = raw ? { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) } : { ...DEFAULTS };
+    if (settings.lang !== "auto" && !isLang(settings.lang)) settings.lang = "auto";
+    return settings;
   } catch {
     return { ...DEFAULTS };
   }

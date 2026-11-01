@@ -19,6 +19,7 @@ const SETTINGS: Settings = {
   blockCookies: false,
   toolbar: false,
   sealAddresses: true,
+  lang: "de",
 };
 
 function authState(siteDomain: string | null): AuthState {
