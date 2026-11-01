@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_ENGINE_PREFS, PROTOCOL_VERSION, type EnginePrefs } from "../src/shared/protocol.ts";
 import { MasterSealer } from "../src/shared/sealed-address.ts";
-import { readInstanceSeal, readSealMessage, Sealing, type KeyStore } from "../src/sw/sealing.ts";
+import { readSealMessage, Sealing, type KeyStore } from "../src/sw/sealing.ts";
 
 function memoryKeys(stored: Uint8Array | null = null) {
   const state = { key: stored, created: 0 };
@@ -128,21 +128,5 @@ describe("readSealMessage", () => {
     expect(readSealMessage({ ...valid, v: 0 }, ui, origin, known)).toBeNull();
     expect(readSealMessage({ ...valid, path: 5 }, ui, origin, known)).toBeNull();
     expect(readSealMessage({ ...valid, type: "girici:prefs" }, ui, origin, known)).toBeNull();
-  });
-});
-
-describe("readInstanceSeal", () => {
-  it("reads the instance switch from the sign-in state", async () => {
-    expect(await readInstanceSeal(async () => Response.json({ sealAddresses: true }))).toBe(true);
-    expect(await readInstanceSeal(async () => Response.json({ sealAddresses: false }))).toBe(false);
-    expect(await readInstanceSeal(async () => Response.json({}))).toBe(false);
-    expect(await readInstanceSeal(async () => new Response("{}", { status: 500 }))).toBeNull();
-    expect(await readInstanceSeal(async () => new Response("x"))).toBeNull();
-    expect(await readInstanceSeal(async () => Response.json("x"))).toBeNull();
-    expect(
-      await readInstanceSeal(async () => {
-        throw new Error("offline");
-      }),
-    ).toBeNull();
   });
 });

@@ -43,6 +43,26 @@ Public access is off by default. A public instance is open to abuse, so enable i
 Changing the account (name, email, password) or the admin settings asks for your current password every time.
 The page keeps it in memory only while it is open. If you forgot it, use the reset tool below.
 
+## Shared-link warning
+
+On a public instance, someone who opens a proxied page from a link, in a browser that has never used Girici, first
+sees a notice. It says that the page comes from another site through this proxy, not from the people who run the
+server, and shows the real address with a **Continue** button. It is meant for links passed around in chats and
+emails, where the visitor may not know what Girici is.
+
+Each browser sees it once. It stops after the visitor presses **Continue**, or after they open Girici's home page,
+**Settings** or **Account**. Landing on the sign-in page from a link does not count. Pages inside frames and the
+requests a page makes never get the notice.
+
+**Settings → Admin → Warn before shared links** turns it off for everyone. It is on by default and asks for the
+current password like the other admin settings. It applies only while **Public access** is on: a private instance
+lets no visitor in, so it never shows there. A browser that already has Girici open picks up a change within a
+minute.
+
+The browser remembers the notice in the service worker's own storage. Clearing site data in Settings does not
+bring it back; wiping the browser's data for Girici does. A `#fragment` at the end of a shared link may be lost
+after **Continue**, depending on the browser.
+
 ## Resetting the admin password
 
 If you are locked out, reset the password from the command line. It generates a fresh random password,

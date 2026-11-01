@@ -41,6 +41,21 @@ describe("syncEnginePrefs", () => {
     ]);
   });
 
+  it("tells the worker this browser has seen Girici from its home, settings and account pages only", async () => {
+    for (const page of ["/", "/settings", "/account"]) {
+      const { container, received } = fakeContainer({ answer: true });
+      await syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container, undefined, page);
+      expect(received, page).toEqual([
+        { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: true, sealAddresses: false, seen: true },
+      ]);
+    }
+    for (const page of ["/_g/challenge", "/_g/login", "/_g/setup"]) {
+      const { container, received } = fakeContainer({ answer: true });
+      await syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container, undefined, page);
+      expect(received[0], page).not.toHaveProperty("seen");
+    }
+  });
+
   it("gives up after a second when the worker never answers", async () => {
     vi.useFakeTimers();
     const { container } = fakeContainer({ answer: false });

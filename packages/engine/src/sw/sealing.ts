@@ -8,7 +8,6 @@ import { isUiWindow, type ClientShape, type UiClientSet } from "./route.ts";
 // Not __g|-prefixed: the hooked IDBFactory never reaches it, and clearing site data keeps it.
 const DATABASE = "__girici_keys";
 const STORE = "keys";
-const KEY = "address";
 const KEY_BYTES = 32;
 
 export interface KeyStore {
@@ -16,7 +15,8 @@ export interface KeyStore {
   loadOrCreate(fresh: () => Uint8Array): Promise<Uint8Array>;
 }
 
-export function createIdbKeyStore(): KeyStore {
+/** Each use keeps its own key under its own name, so no key serves two purposes. */
+export function createIdbKeyStore(name = "address"): KeyStore {
   let database: Promise<IDBPDatabase> | null = null;
   const open = () => {
     database ??= openDB(DATABASE, 1, {
@@ -30,14 +30,14 @@ export function createIdbKeyStore(): KeyStore {
     return database;
   };
   return {
-    load: async () => validKey(await (await open()).get(STORE, KEY)),
+    load: async () => validKey(await (await open()).get(STORE, name)),
     // One transaction, so two workers starting at once cannot each write a different key.
     loadOrCreate: async (fresh) => {
       const transaction = (await open()).transaction(STORE, "readwrite");
-      const stored = validKey(await transaction.store.get(KEY));
+      const stored = validKey(await transaction.store.get(name));
       if (stored) return stored;
       const key = fresh();
-      await transaction.store.put(key, KEY);
+      await transaction.store.put(key, name);
       await transaction.done;
       return key;
     },
@@ -127,17 +127,4 @@ export function readSealMessage(
   if (typeof data !== "object" || data === null || !isUiWindow(source, origin, ui)) return null;
   const { type, v, path } = data as Record<string, unknown>;
   return type === SEAL_MESSAGE && v === PROTOCOL_VERSION && typeof path === "string" ? path : null;
-}
-
-/** The admin's switch as `/_g/auth/state` tells it, or null when the server cannot say. */
-export async function readInstanceSeal(fetcher: () => Promise<Response>): Promise<boolean | null> {
-  try {
-    const response = await fetcher();
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null) return null;
-    return (body as { sealAddresses?: unknown }).sealAddresses === true;
-  } catch {
-    return null;
-  }
 }
