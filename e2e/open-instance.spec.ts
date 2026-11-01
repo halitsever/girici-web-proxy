@@ -30,9 +30,10 @@ test("a first visit with the warning and the browser check on", async ({ page, b
       await visitor.close();
     }
   } finally {
-    await page.request.post(`${GATES}/_g/admin/settings`, {
+    const restored = await page.request.post(`${GATES}/_g/admin/settings`, {
       data: { deepLinkWarning: false, currentPassword: "e2e-password" },
       headers: { origin: GATES },
     });
+    expect(restored.ok()).toBe(true);
   }
 });

@@ -39,7 +39,10 @@ test("the admin turns the warning off", async ({ page, browser, browserName }) =
     const warn = page.getByRole("switch", { name: "Warn before shared links" });
     await expect(warn).toBeChecked();
     await warn.click();
-    await expect(warn).not.toBeChecked();
+    // The switch flips before the server answers, so wait for the instance to report it.
+    await expect
+      .poll(async () => (await (await page.request.get(`${INSTANCE}/_g/auth/state`)).json()).deepLinkWarning)
+      .toBe(false);
 
     const visitor = await browser.newContext();
     try {
@@ -50,9 +53,10 @@ test("the admin turns the warning off", async ({ page, browser, browserName }) =
       await visitor.close();
     }
   } finally {
-    await page.request.post(`${INSTANCE}/_g/admin/settings`, {
+    const restored = await page.request.post(`${INSTANCE}/_g/admin/settings`, {
       data: { deepLinkWarning: true, currentPassword: "e2e-password" },
       headers: { origin: INSTANCE },
     });
+    expect(restored.ok()).toBe(true);
   }
 });
