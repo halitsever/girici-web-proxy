@@ -1,3 +1,4 @@
+import type { FrameLocator, Page } from "@playwright/test";
 import { expect, openThroughUi, test } from "./support/test.ts";
 
 test("refuses another site's popup document but keeps messaging and navigation", async ({ page }) => {
@@ -62,8 +63,8 @@ for (const [name, button] of [
     const popupEvent = page.waitForEvent("popup");
     await page.click(button);
     const popup = await popupEvent;
-    await popup.waitForLoadState();
-    expect(popup.url()).toContain("/~/https/site-b.test/xs-opened");
+    // Another site's page reaches the popup through a blank first page.
+    await popup.waitForURL(/\/~\/https\/site-b\.test\/xs-opened/);
     await expect(popup.locator("#results")).not.toBeEmpty();
     expect(JSON.parse((await popup.locator("#results").textContent()) ?? "{}")).toEqual({
       runtime: true,
@@ -122,5 +123,106 @@ for (const [name, open] of [
       global: "SecurityError",
       closed: false,
     });
+  });
+}
+
+/**
+ * Whether the victim's window keeps the runtime of the page that made it blank. A popup for another site gets a window
+ * of its own; a frame whose src was set before insertion is reused.
+ */
+const REUSED = { popup: false, frame: true };
+
+// The page wraps its own built-ins, then opens or embeds the victim on `host` (another site by default, else another
+// origin of the same site); "seed" writes from a second tab of the victim's origin. `answers` are the victim's own
+// results for its path; one of them is enough, and `webkit` replaces them there. `cookie` paths leave a cookie the
+// victim reads back last. A frame of another site is third-party, so its cookies stay blocked.
+const VICTIM_PATHS: Array<{
+  via: "popup" | "frame";
+  path: string;
+  host?: string;
+  answers?: unknown[];
+  webkit?: unknown[];
+  cookie?: boolean;
+}> = [
+  { via: "popup", path: "read", cookie: true },
+  { via: "popup", path: "write", cookie: true },
+  { via: "popup", path: "sync", cookie: true },
+  { via: "popup", path: "listen", cookie: true },
+  { via: "popup", path: "store", answers: [[true, true, true, true], "absent"], cookie: true },
+  { via: "popup", path: "srcdoc", answers: [true], cookie: true },
+  { via: "popup", path: "storage", answers: [[true, true, true, true, true]] },
+  { via: "popup", path: "destructure", answers: [true] },
+  { via: "popup", path: "caches", answers: [[true, true, true]] },
+  { via: "popup", path: "idb", answers: [true, "absent"] },
+  { via: "popup", path: "locks", answers: [true, "absent"] },
+  { via: "popup", path: "post", answers: [true] },
+  { via: "frame", path: "write" },
+  { via: "frame", path: "store", answers: [[false, false, false, false], "absent"] },
+  { via: "frame", path: "srcdoc", answers: [true] },
+  { via: "frame", path: "storage", answers: [[true, true, true, true, true]] },
+  { via: "frame", path: "destructure", answers: [true] },
+  // WebKit's Cache API stays with the blank document of a reused window, which has stopped.
+  { via: "frame", path: "caches", answers: [[true, true, true]], webkit: ["unavailable: TypeError"] },
+  { via: "frame", path: "idb", answers: [true, "absent"] },
+  { via: "frame", path: "locks", answers: [true, "absent"] },
+  { via: "frame", path: "post", answers: [true] },
+  { via: "frame", path: "read", host: "www.site-a.test", cookie: true },
+  { via: "frame", path: "write", host: "www.site-a.test", cookie: true },
+  { via: "frame", path: "sync", host: "www.site-a.test", cookie: true },
+  { via: "frame", path: "listen", host: "www.site-a.test", cookie: true },
+  { via: "frame", path: "store", host: "www.site-a.test", answers: [[true, true, true, true], "absent"], cookie: true },
+  { via: "frame", path: "srcdoc", host: "www.site-a.test", answers: [true], cookie: true },
+];
+for (const { via, path, host = "site-b.test", answers, webkit, cookie } of VICTIM_PATHS) {
+  const made = via === "popup" ? "opens" : "embeds";
+  const on = host === "site-b.test" ? "" : ` on ${host}`;
+  test(`keeps the cookies and storage of a site a page ${made} out of that page's own built-ins: ${path}${on}`, async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    // MagicString, which srcdoc markup goes through, breaks once Object.prototype has descriptor fields.
+    const descriptors = path === "srcdoc" ? "&descriptors=off" : "";
+    await openThroughUi(page, `https://site-a.test/xs-cookie-spy?do=${path}&host=${host}${descriptors}`);
+    const seed = async () => {
+      const other = await context.newPage();
+      await other.goto(`/~/https/${host}/xs-cookie-victim?do=seed`);
+      await expect(other.locator("#results")).not.toBeEmpty();
+    };
+    if (path === "read") await seed();
+    let victim: Page | FrameLocator;
+    if (via === "popup") {
+      const popupEvent = page.waitForEvent("popup");
+      await page.click("#open");
+      const popup = await popupEvent;
+      await popup.waitForURL(/\/xs-cookie-victim/);
+      victim = popup;
+    } else {
+      await page.click("#frame");
+      victim = page.frameLocator("#victim");
+    }
+    await expect(victim.locator("#results")).not.toBeEmpty();
+    const results = JSON.parse((await victim.locator("#results").textContent()) ?? "{}") as Record<string, unknown>;
+    // Proves which case ran: the spying page's runtime serving the victim, or the victim on a runtime of its own.
+    expect(results.reused).toBe(REUSED[via]);
+    const expected = browserName === "webkit" && webkit ? webkit : answers;
+    if (expected) expect(expected).toContainEqual(results[path]);
+    if (path === "listen") {
+      await seed();
+      // The other tab's write reaches the victim as a worker message.
+      await expect
+        .poll(async () => {
+          await victim.locator("#read").click();
+          return victim.locator("#cookie").textContent();
+        })
+        .toContain("xsl_");
+    }
+    await page.click("#check");
+    await expect(page.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await page.locator("#results").textContent()) ?? "null")).toEqual([]);
+    const blocked = via === "frame" && host === "site-b.test";
+    if (blocked || !cookie || results.store === "absent") return;
+    await victim.locator("#read").click();
+    await expect(victim.locator("#cookie")).toContainText("xsl_");
   });
 }

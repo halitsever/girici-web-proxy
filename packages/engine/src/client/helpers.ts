@@ -43,8 +43,9 @@ export interface GiriciHelpers {
   renew(): boolean;
 }
 
-// Taken at load: the destructuring proxy reads through it on page calls.
+// Taken at load: the destructuring proxy is made and read through on page calls.
 const reflectGet = Reflect.get;
+const NativeProxy = Proxy;
 
 /** Window links that can lead to another origin's window. A null prototype keeps page additions out of `in`. */
 const WINDOW_LINKS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
@@ -96,7 +97,7 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
     D: (object) => {
       if (!env.isWindowOrDocument(object)) return object;
       // A null prototype keeps traps a page adds to Object.prototype out of this handler.
-      return new Proxy(
+      return new NativeProxy(
         object as object,
         {
           __proto__: null,
