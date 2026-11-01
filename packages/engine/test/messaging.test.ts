@@ -426,6 +426,36 @@ describe("createSiteMessaging", () => {
   });
 });
 
+describe("createSiteMessaging for a window that inherits its page", () => {
+  it("asks through the lookup of the window it inherits from", async () => {
+    const sent: unknown[][] = [];
+    const blank = {
+      fetch: () => Promise.reject(new Error("a blank window may have no worker")),
+      postMessage: (...args: unknown[]) => sent.push(args),
+      setTimeout,
+    } as unknown as Realm;
+    const parent = createSiteMessaging(
+      {
+        ...blank,
+        fetch: () => Promise.resolve(new Response(JSON.stringify({ hosts: [["https://site-b.test", HOST_B]] }))),
+      } as unknown as Realm,
+      ctxFor("https://site-a.test", HOST_A),
+      direct,
+      SITES,
+    );
+    const child = createSiteMessaging(
+      blank,
+      ctxFor("https://site-a.test", HOST_A),
+      direct,
+      SITES,
+      () => parent?.lookup,
+    );
+    child?.post({}, "hi", "https://site-b.test", []);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]?.[1]).toBe(HOST_B);
+  });
+});
+
 describe("installMessaging in subdomain mode", () => {
   type FakeEvent = MessageEvent & { stopped?: boolean };
 
@@ -472,6 +502,23 @@ describe("installMessaging in subdomain mode", () => {
     const message = event(HOST_B, fromB());
     expect(message.data).toBe(5);
     expect(message.origin).toBe("https://www.site-b.test");
+  });
+
+  it("unwraps the same while a page has replaced built-ins", () => {
+    const { event } = siteRealm();
+    const read = () => {
+      const message = event(HOST_B, fromB());
+      const forged = event(HOST_B, fromB({ s: "https://site-c.test" }));
+      return [message.data, message.origin, forged.origin, event(HOST_A, "own").origin];
+    };
+    for (const [name, target, property, replacement] of REPLACED_BUILTINS) {
+      expect(withReplaced(target, property, replacement, read), name).toEqual([
+        5,
+        "https://www.site-b.test",
+        "null",
+        HOST_A,
+      ]);
+    }
   });
 
   it("listens in the capture phase", () => {

@@ -29,20 +29,26 @@ interface Queued {
 
 type Verified = NonNullable<ReturnType<SiteLabels["verify"]>>;
 
-/** Labels and the site poster of a document on a site host, from natives taken before the runtime's hooks. */
+export type LabelLookup = Parameters<typeof createSiteLabels>[2];
+
+/**
+ * Labels and the site poster of a document on a site host, from natives taken before the runtime's hooks. While the
+ * window shows a document it inherits, it asks through that page's lookup: the worker may not see a blank window.
+ */
 export function createSiteMessaging(
   win: Realm,
   ctx: UrlContext,
   invoke: Invoke,
   sites: SiteContext | undefined,
-): { labels: SiteLabels; post: CrossSitePost } | null {
+  inherited: () => LabelLookup | undefined = () => undefined,
+): { labels: SiteLabels; post: CrossSitePost; lookup: LabelLookup } | null {
   if (!sites) return null;
-  const fetch = win.fetch;
-  const setTimer = win.setTimeout;
-  const lookup = createLabelLookup((url, init) => apply(fetch, win, [url, init]) as Promise<Response>, ctx.origin);
+  // Window operations called without a receiver run on their own window, so they need no binding.
+  const own = createLabelLookup(win.fetch, ctx.origin);
+  const lookup: LabelLookup = (origins) => (inherited() ?? own)(origins);
   const labels = createSiteLabels(sites, () => originOf(ctx.realUrl()), lookup);
-  const timer = ((handler: () => void, delay: number) => apply(setTimer, win, [handler, delay])) as typeof setTimeout;
-  return { __proto__: null, labels, post: createCrossSitePoster(labels, invoke, win.postMessage, timer) } as never;
+  const post = createCrossSitePoster(labels, invoke, win.postMessage, win.setTimeout);
+  return { __proto__: null, labels, post, lookup } as never;
 }
 
 /**
@@ -85,12 +91,9 @@ export function createCrossSitePoster(
     const text = wanted === undefined ? "/" : toText(wanted);
     if (text === "/") return;
     const transfer = options ? (options as { transfer?: unknown }).transfer : rest.length ? rest[0] : undefined;
+    // An options member left undefined takes its default, as if it were missing.
     const argsFor = (host: string, envelope: MessageEnvelope): unknown[] => {
-      if (options) {
-        const init = { __proto__: null, targetOrigin: host } as { targetOrigin: string; transfer?: unknown };
-        if (transfer !== undefined) init.transfer = transfer;
-        return [envelope, init];
-      }
+      if (options) return [envelope, { __proto__: null, targetOrigin: host, transfer }];
       return rest.length ? [envelope, host, transfer] : [envelope, host];
     };
     if (text === "*") {

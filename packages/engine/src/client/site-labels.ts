@@ -58,8 +58,7 @@ export function createSiteLabels(
   ownOrigin: () => string,
   ask: (origins: string[]) => Promise<Hosts>,
 ): SiteLabels {
-  // classifySiteHost compares with the value alone, which the worker wrote already checked and lowercased.
-  const domain = { __proto__: null, host: "", port: "", value: sites.domain } as SiteDomain;
+  const domain = siteDomainOf(sites);
   const key = fromBase64Url(sites.key);
   const root = parseUrl(sites.root);
   const protocol = root ? protocolOf(root) : "";
@@ -123,6 +122,11 @@ export function createSiteLabels(
   };
 }
 
+/** classifySiteHost compares with the value alone, which the worker wrote already checked and lowercased. */
+export function siteDomainOf(sites: SiteContext): SiteDomain {
+  return { __proto__: null, host: "", port: "", value: sites.domain } as SiteDomain;
+}
+
 /** The worker's label lookup, through the fetch taken before the page's network hooks. */
 export function createLabelLookup(
   fetch: (url: string, init: RequestInit) => Promise<Response>,
@@ -154,9 +158,7 @@ function within(origin: string, site: string): boolean {
   if (!claimed || !own || !isWebUrl(claimed) || originOf(claimed) !== origin) return false;
   const host = urlPart(claimed, "hostname");
   const siteHost = urlPart(own, "hostname");
-  return (
-    protocolOf(claimed) === protocolOf(own) && siteHost !== "" && (host === siteHost || endsWith(host, `.${siteHost}`))
-  );
+  return protocolOf(claimed) === protocolOf(own) && (host === siteHost || endsWith(host, `.${siteHost}`));
 }
 
 /** The host named for `origin`: undefined when the answer has no entry for it. */
