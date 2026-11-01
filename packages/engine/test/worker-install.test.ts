@@ -412,32 +412,58 @@ describe("installWorker", () => {
     expect(JSON.parse(relays[0]?.sent[0] as string)).toEqual({ u: "wss://site-a.test/chat", p: [], s: "S" });
   });
 
-  it("seals a worker's socket whatever the page replaced", async () => {
-    const pages: Array<[string, (run: () => void) => void]> = [
-      ...REPLACED_BUILTINS.map(([name, target, key, replacement]): [string, (run: () => void) => void] => [
+  it("seals a worker's socket whatever the page replaced, also while it connects", async () => {
+    /** Puts a replacement in place and gives back what undoes it, so it can stay across awaits. */
+    const replace = (target: object, key: PropertyKey, replacement: PropertyDescriptor) => () => {
+      const original = Object.getOwnPropertyDescriptor(target, key) as PropertyDescriptor;
+      Object.defineProperty(target, key, { ...original, ...replacement });
+      return () => Object.defineProperty(target, key, original);
+    };
+    const pages: Array<[string, () => () => void]> = [
+      ...REPLACED_BUILTINS.map(([name, target, key, replacement]): [string, () => () => void] => [
         name,
-        (run) => withReplaced(target, key, replacement, run),
+        replace(target, key, replacement),
       ]),
       [
-        "Object.prototype get and then",
-        (run) =>
-          withPrototypeAdditions({ get: DESCRIPTOR_ADDITIONS.get!, then: { value: () => {}, writable: true } }, run),
+        "Object.prototype get",
+        () => {
+          const proto = Object.prototype as Record<string, unknown>;
+          Object.defineProperty(proto, "get", {
+            __proto__: null,
+            configurable: true,
+            ...DESCRIPTOR_ADDITIONS.get,
+          } as PropertyDescriptor);
+          return () => delete proto.get;
+        },
       ],
     ];
-    for (const [name, replaced] of pages) {
+    for (const [name, install] of pages) {
       const { scope, sockets, relays, fetched } = socketScope({ seal: "S" });
       installWorker(scope as unknown as WorkerScope);
       let url: string | undefined;
-      replaced(() => {
+      let sent: string | undefined;
+      const restore = install();
+      try {
         url = new scope.WebSocket("wss://site-a.test/chat").url;
-      });
+        await flush();
+        relays[0]?.onopen?.();
+        sent = relays[0]?.sent[0] as string | undefined;
+      } finally {
+        restore();
+      }
       expect(url, name).toBe("wss://site-a.test/chat");
-      await flush();
       expect(fetched[0], name).toEqual(["http://proxy.test/_g/rpc/ws-prep", '{"url":"wss://site-a.test/chat"}']);
       expect(sockets[0], name).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
-      relays[0]?.onopen?.();
-      expect(JSON.parse(relays[0]?.sent[0] as string), name).toMatchObject({ s: "S" });
+      expect(JSON.parse(sent as string), name).toMatchObject({ s: "S" });
     }
+    // A then on Object.prototype decides every promise resolved with a plain object, so it is checked at the call.
+    const { scope, sockets } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    withPrototypeAdditions({ then: { value: () => {}, writable: true } }, () => {
+      expect(new scope.WebSocket("wss://site-a.test/chat").url).toBe("wss://site-a.test/chat");
+    });
+    await flush();
+    expect(sockets[0]).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
   });
 
   it("still takes WebRTC and the other transports away from workers", () => {

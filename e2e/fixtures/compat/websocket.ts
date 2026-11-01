@@ -40,6 +40,39 @@ const WS_CLOSE = page(
 </script>`,
 );
 
+// Relative and http(s) addresses connect as the browser maps them; other schemes and fragments throw.
+const WS_URLS = page(
+  "Socket addresses",
+  `<pre id="urls"></pre>
+<script>
+  const result = {};
+  const thrown = (url) => {
+    try {
+      new WebSocket(url);
+      return "none";
+    } catch (error) {
+      return error.name;
+    }
+  };
+  result.ftp = thrown("ftp://site-a.test/echo-socket");
+  result.fragment = thrown("/echo-socket#x");
+  const echo = (url) =>
+    new Promise((resolve) => {
+      const socket = new WebSocket(url);
+      socket.onopen = () => socket.send("hello");
+      socket.onmessage = (event) => {
+        socket.close();
+        resolve(socket.url + " " + event.data);
+      };
+      socket.onerror = () => resolve(socket.url + " error");
+    });
+  Promise.all([echo("/echo-socket"), echo("https://site-a.test/echo-socket")]).then(([relative, https]) => {
+    Object.assign(result, { relative, https });
+    document.getElementById("urls").textContent = JSON.stringify(result);
+  });
+</script>`,
+);
+
 const WS_WORKER = page(
   "Worker socket",
   `<pre id="worker"></pre>
@@ -82,6 +115,43 @@ const wsWorkerPage: Route = (_req, res) => {
   res.end(WS_WORKER);
 };
 
+// A nested worker asks for the cookie and Origin its socket carried.
+const WS_NESTED = page(
+  "Nested worker socket",
+  `<pre id="nested"></pre>
+<script>
+  const worker = new Worker("/ws-nested-outer.js");
+  worker.onmessage = (event) => {
+    document.getElementById("nested").textContent = JSON.stringify(event.data);
+  };
+</script>`,
+);
+
+const WS_NESTED_OUTER = `const inner = new Worker("/ws-nested-inner.js");
+inner.onmessage = (event) => postMessage(event.data);`;
+
+const WS_NESTED_INNER = `const socket = new WebSocket("wss://site-a.test/echo-socket");
+const result = {};
+socket.onopen = () => socket.send("cookie?");
+socket.onmessage = (event) => {
+  if (event.data.startsWith("cookie:")) {
+    result.cookie = event.data;
+    socket.send("origin?");
+    return;
+  }
+  result.origin = event.data;
+  socket.close();
+  postMessage(result);
+};`;
+
+const wsNestedPage: Route = (_req, res) => {
+  res.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "set-cookie": "ws=1; Path=/; Secure; SameSite=Lax",
+  });
+  res.end(WS_NESTED);
+};
+
 const RTC_WORKER = page(
   "Worker transports",
   `<pre id="rtc"></pre>
@@ -107,8 +177,12 @@ export const ROUTES: CompatRoutes = {
   "site-a.test": {
     "/ws-echo": html(WS_ECHO),
     "/ws-close": html(WS_CLOSE),
+    "/ws-urls": html(WS_URLS),
     "/ws-worker": wsWorkerPage,
     "/ws-worker.js": script(WS_WORKER_SCRIPT),
+    "/ws-nested": wsNestedPage,
+    "/ws-nested-outer.js": script(WS_NESTED_OUTER),
+    "/ws-nested-inner.js": script(WS_NESTED_INNER),
     "/rtc-worker": html(RTC_WORKER),
     "/rtc-worker.js": script(RTC_WORKER_SCRIPT),
   },

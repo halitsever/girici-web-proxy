@@ -17,14 +17,15 @@ export function handleSocketUpgrade(req: IncomingMessage, socket: Duplex, head: 
     // Lets pages check the type a binary frame reaches them as.
     server.handleUpgrade(req, socket, head, (ws) => ws.send(Buffer.from([1, 2, 3])));
   } else if (url.pathname === "/echo-socket") {
-    server.handleUpgrade(req, socket, head, (ws) => echo(ws, req.headers.cookie ?? "", url.searchParams.get("id")));
+    const headers = { cookie: req.headers.cookie ?? "", origin: req.headers.origin ?? "" };
+    server.handleUpgrade(req, socket, head, (ws) => echo(ws, headers, url.searchParams.get("id")));
   } else {
     socket.destroy();
   }
 }
 
 /** A few text commands let a test drive the server's side of the socket. */
-function echo(ws: WebSocket, cookie: string, id: string | null): void {
+function echo(ws: WebSocket, headers: { cookie: string; origin: string }, id: string | null): void {
   let serverEnded = false;
   ws.on("message", (data: Buffer, binary: boolean) => {
     if (binary) {
@@ -33,7 +34,9 @@ function echo(ws: WebSocket, cookie: string, id: string | null): void {
     }
     const text = data.toString();
     if (text === "cookie?") {
-      ws.send("cookie:" + cookie);
+      ws.send("cookie:" + headers.cookie);
+    } else if (text === "origin?") {
+      ws.send("origin:" + headers.origin);
     } else if (text === "drop") {
       serverEnded = true;
       ws.terminate();

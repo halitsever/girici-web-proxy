@@ -15,6 +15,17 @@ test("a page's socket echoes text and binary", async ({ page }) => {
   await expect(page.locator("#binary")).toHaveText("1,2,3");
 });
 
+test("a socket address is read as the browser reads it", async ({ page }) => {
+  await openThroughUi(page, "https://site-a.test/ws-urls");
+  await expect(page.locator("#urls")).not.toBeEmpty({ timeout: 15_000 });
+  expect(JSON.parse((await page.locator("#urls").textContent()) ?? "{}")).toEqual({
+    ftp: "SyntaxError",
+    fragment: "SyntaxError",
+    relative: "wss://site-a.test/echo-socket hello",
+    https: "wss://site-a.test/echo-socket hello",
+  });
+});
+
 test("close codes and reasons travel both ways", async ({ page }) => {
   const id = test.info().testId;
   await openThroughUi(page, `https://site-a.test/ws-close?id=${id}`);
@@ -41,6 +52,20 @@ test("a worker's socket carries the site's cookies and reconnects after the serv
     cookie: "cookie:ws=1",
     closed: 4002,
     reconnected: "hello",
+  });
+});
+
+test("a nested worker's socket carries the site's cookies only when the worker is bound to its page", async ({
+  page,
+  browserName,
+}) => {
+  await openThroughUi(page, "https://site-a.test/ws-nested");
+  await expect(page.locator("#nested")).not.toBeEmpty({ timeout: 15_000 });
+  // Chromium sends a nested worker's requests without a client, so nothing binds it to the page.
+  const bound = browserName !== "chromium";
+  expect(JSON.parse((await page.locator("#nested").textContent()) ?? "{}")).toEqual({
+    cookie: bound ? "cookie:ws=1" : "cookie:",
+    origin: bound ? "origin:https://site-a.test" : "origin:null",
   });
 });
 
