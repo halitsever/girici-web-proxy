@@ -78,8 +78,10 @@ export function createApp({
   if (sites) app.use(onHosts(["root"], siteRootRouter(sites, authStore)));
   app.use(root(sourceRouter(sourceUrl)));
   app.use(root(brandRouter(brand)));
-  app.use(root(authRouter(authStore, { setupToken })));
-  app.use(root(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand)));
+  app.use(root(authRouter(authStore, { setupToken, siteDomain: sites?.domain })));
+  app.use(
+    root(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand, sites?.domain)),
+  );
   // Gate the proxy data path, the poToken minter and WebSocket seals; navigations reach the SW as an auth error
   // and redirect to login. Public access opens them; nothing else here is gated.
   app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], site(authGate(authStore)));

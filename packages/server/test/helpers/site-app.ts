@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, request, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,25 +11,13 @@ import { openDb } from "../../src/db/open.ts";
 import { createLogger } from "../../src/log.ts";
 import { deriveSiteKeys, type SiteSetup } from "../../src/sites/keys.ts";
 import { createUpstreamAgent } from "../../src/upstream/agent.ts";
+import { hostRequest, type SendOptions, type Sent } from "./host-request.ts";
 
-export interface Sent {
-  status: number;
-  headers: IncomingHttpHeaders;
-  text(): Promise<string>;
-  json(): Promise<unknown>;
-}
-
-export interface SendOptions {
-  host: string;
-  method?: string;
-  headers?: Record<string, string>;
-  body?: string;
-}
+export type { SendOptions, Sent };
 
 export interface SiteApp {
   store: AuthStore;
   setup: SiteSetup;
-  /** fetch cannot set Host, so requests go through node:http. */
   send(path: string, options: SendOptions): Promise<Sent>;
   close(): Promise<void>;
 }
@@ -66,34 +54,8 @@ export async function startSiteApp(sites: SiteSetup | null = siteSetup()): Promi
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
 
-  const send = (path: string, options: SendOptions): Promise<Sent> =>
-    new Promise((resolve, reject) => {
-      const req = request(
-        {
-          host: "127.0.0.1",
-          port,
-          path,
-          method: options.method ?? "GET",
-          headers: { ...options.headers, host: options.host },
-        },
-        (res) => {
-          const chunks: Buffer[] = [];
-          res.on("data", (chunk: Buffer) => chunks.push(chunk));
-          res.on("error", reject);
-          res.on("end", () => {
-            const body = Buffer.concat(chunks).toString();
-            resolve({
-              status: res.statusCode ?? 0,
-              headers: res.headers,
-              text: async () => body,
-              json: async () => JSON.parse(body) as unknown,
-            });
-          });
-        },
-      );
-      req.on("error", reject);
-      req.end(options.body);
-    });
+  const base = `http://127.0.0.1:${port}`;
+  const send = (path: string, options: SendOptions): Promise<Sent> => hostRequest(base, path, options);
 
   return {
     store,

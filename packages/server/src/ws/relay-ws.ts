@@ -2,8 +2,9 @@ import type { IncomingMessage, Server } from "node:http";
 import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { rootCertificates, connect as tlsConnect } from "node:tls";
+import { classifySiteHost, type SiteDomain } from "@girici/engine/shared";
 import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from "ws";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientIp, clientKey, compileTrust, type TrustFn } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
@@ -58,8 +59,8 @@ export interface WsRelayOptions {
   blocklist?: HostBlocklist;
   /** Set when GIRICI_UPSTREAM_PROXY is: upstream sockets then open through the proxy instead of directly. */
   tunnel?: TunnelDialer;
-  /** Subdomain mode's domain without port, which the relay never opens. */
-  siteDomain?: string;
+  /** Subdomain mode: upgrades are taken on site hosts only, and the relay never opens a host under the domain. */
+  siteDomain?: SiteDomain;
 }
 
 export interface WsRelayHandle {
@@ -138,7 +139,7 @@ function parseControlFrame(data: RawData, isBinary: boolean): ControlFrame | nul
 /** Same rule as the HTTP gate: open when public, else a valid session for the current admin. */
 function wsAuthorized(store: AuthStore | undefined, cookie: string | undefined): boolean {
   if (!store || store.publicAccess()) return true;
-  return isAdminCookie(store, cookie);
+  return isSessionCookie(store, cookie);
 }
 
 /** A plain 429 lets the browser's WebSocket fail fast instead of waiting on a silently dropped socket. */
@@ -249,13 +250,17 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
       socket.destroy();
       return;
     }
+    if (options.siteDomain && classifySiteHost(req.headers.host, options.siteDomain).kind !== "site") {
+      socket.destroy();
+      return;
+    }
     if (!wsAuthorized(options.authStore, req.headers.cookie)) {
       socket.destroy();
       return;
     }
     const ip = clientKey(clientIp(req, trust));
     const limit = options.limiter?.(ip);
-    if (limit && !limit.ok && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie))) {
+    if (limit && !limit.ok && !(options.authStore && isSessionCookie(options.authStore, req.headers.cookie))) {
       refuse(socket, limit.retryAfter);
       return;
     }
@@ -325,7 +330,7 @@ function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions)
       validateWsTarget(target, {
         allowedTestHosts: options.allowedTestHosts,
         selfHost: req.headers.host,
-        siteDomain: options.siteDomain,
+        siteDomain: options.siteDomain?.host,
       });
     } catch (error) {
       options.logger.debug(`ws blocked ${target.host}`);

@@ -1,6 +1,6 @@
 import { decodeUrl, encodeUrl, isSealedPath, LOGIN_PATH } from "@girici/engine/shared";
 import { Router, type Response } from "express";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { siteHostFor } from "../sites/hosts.ts";
 import type { SiteSetup } from "../sites/keys.ts";
@@ -37,7 +37,7 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
       return;
     }
     // Signed-out visitors of a private instance learn no site hosts from here.
-    if (!store.publicAccess() && !isAdminCookie(store, req.headers.cookie)) {
+    if (!store.publicAccess() && !isSessionCookie(store, req.headers.cookie)) {
       res.redirect(302, `${LOGIN_PATH}?next=${encodeURIComponent(target.href)}`);
       return;
     }

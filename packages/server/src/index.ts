@@ -123,7 +123,7 @@ const wsRelay = attachWsRelay(server, {
   trust,
   limiter,
   blocklist,
-  siteDomain: sites?.domain.host,
+  siteDomain: sites?.domain,
 });
 server.on("error", (error) => {
   logger.error(error.message);

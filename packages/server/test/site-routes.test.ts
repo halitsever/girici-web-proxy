@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createSiteSessionToken } from "../src/auth/cookie.ts";
 import { FRESH_POST } from "../src/routes/bootstrap.ts";
 import { RETIRE_WORKER, SEALED_GONE } from "../src/routes/sites.ts";
 import { siteHostFor } from "../src/sites/hosts.ts";
@@ -32,6 +33,15 @@ describe("the root in subdomain mode", () => {
     store.setPublicAccess(false);
     const res = await send("/~/https/www.site-a.test/x?y=1", { host: "proxy.test" });
     expect(res.headers.location).toBe(`/_g/login?next=${encodeURIComponent("https://www.site-a.test/x?y=1")}`);
+  });
+
+  it("lets a site session through the root redirect on a private instance", async () => {
+    store.setPublicAccess(false);
+    const token = createSiteSessionToken(store.admin()!.id, store.sessionSecret());
+    for (const cookie of [`girici-site=${token}`, `__Secure-girici-site=${token}`]) {
+      const res = await send("/~/https/www.site-a.test/x", { host: "proxy.test", headers: { cookie } });
+      expect(res.headers.location, cookie).toBe(`//${siteA}/~/https/www.site-a.test/x`);
+    }
   });
 
   it("refuses sealed single-origin addresses on the root", async () => {

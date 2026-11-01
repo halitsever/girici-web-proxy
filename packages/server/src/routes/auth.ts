@@ -1,3 +1,4 @@
+import type { SiteDomain } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { clearSession, issueSession } from "../auth/cookie.ts";
 import { sessionAdmin } from "../auth/gate.ts";
@@ -11,6 +12,8 @@ export interface AuthRouterOptions {
   loginMax?: number;
   /** The code the server printed at startup; without one, setup takes a code nobody has. */
   setupToken?: string;
+  /** Subdomain mode: sign-in also issues the site session for every site host. */
+  siteDomain?: SiteDomain;
 }
 
 interface Credentials {
@@ -53,7 +56,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       return;
     }
     const admin = store.createAdmin(creds);
-    issueSession(req, res, admin.id, store.sessionSecret());
+    issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
     res.json(state(store, true));
   });
 
@@ -69,7 +72,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       res.status(401).end();
       return;
     }
-    issueSession(req, res, admin.id, store.sessionSecret());
+    issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
     res.json(state(store, true));
   });
 
@@ -81,7 +84,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
     // Revoking needs a live session, so a stray request cannot sign the admin out of every device.
     const everywhere = (req.body as { everywhere?: unknown } | undefined)?.everywhere === true;
     if (everywhere && sessionAdmin(store, req.headers.cookie)) store.revokeSessions();
-    clearSession(res);
+    clearSession(res, options.siteDomain);
     res.status(204).end();
   });
 
