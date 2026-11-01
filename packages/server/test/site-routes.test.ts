@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createSessionToken, createSiteSessionToken } from "../src/auth/cookie.ts";
 import { FRESH_POST } from "../src/routes/bootstrap.ts";
+import { metricsRouter } from "../src/routes/metrics.ts";
 import { RETIRE_WORKER, SEALED_GONE } from "../src/routes/sites.ts";
 import { siteHostFor } from "../src/sites/hosts.ts";
+import { TrafficStats } from "../src/stats/traffic.ts";
 import { siteSetup, startSiteApp, type SiteApp } from "./helpers/site-app.ts";
 
 const setup = siteSetup();
@@ -246,6 +248,26 @@ describe("host routing", () => {
   it("routes by the Host header, never a forwarded one", async () => {
     const res = await send("/_g/auth/state", { host: siteA, headers: { "x-forwarded-host": "proxy.test" } });
     expect(res.status).toBe(404);
+  });
+
+  it("serves /metrics on the root and on any other host a scraper uses, never on a site host", async () => {
+    const token = "metrics-token-0123456789";
+    const metrics = await startSiteApp(setup, { metricsRouter: metricsRouter({ token, stats: new TrafficStats() }) });
+    try {
+      const scrape = (host: string, path = "/metrics", authorization = `Bearer ${token}`) =>
+        metrics.send(path, { host, headers: { authorization } });
+      for (const host of ["proxy.test", "girici:3000", "127.0.0.1"]) {
+        const res = await scrape(host);
+        expect(res.status, host).toBe(200);
+        expect(await res.text()).toContain("girici_");
+        expect((await scrape(host, "/metrics", "Bearer wrong-token-000000")).status, host).toBe(401);
+        expect((await scrape(host, "/metrics/")).status, host).toBe(404);
+        expect((await scrape(host, "/Metrics")).status, host).toBe(404);
+      }
+      expect((await scrape(siteA)).status).toBe(404);
+    } finally {
+      await metrics.close();
+    }
   });
 });
 

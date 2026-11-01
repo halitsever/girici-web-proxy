@@ -259,8 +259,8 @@ of reach, until they clear it there.
 ## Troubleshooting
 
 **Every page answers 404.** Girici answers 404 on any host that is neither `GIRICI_SITE_DOMAIN` nor a site host, a
-26-character label in front of it; only `/healthz` and `/robots.txt` work there, so health checks by IP address keep
-passing. Check that the
+26-character label in front of it; only `/healthz`, `/robots.txt` and `/metrics` work there, so health checks and
+scrapes by IP address or internal name keep passing. Check that the
 address in the browser matches the variable exactly: the same name, a port only if the address shows one, and no
 `:443`. `www.proxy.example`, other subdomains and the server's IP address all get 404. Redirect them in the proxy if
 visitors use them.

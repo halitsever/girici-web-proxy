@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSiteDomain } from "@girici/engine/shared";
-import { createApp } from "../../src/app.ts";
+import { createApp, type AppOptions } from "../../src/app.ts";
 import { AuthStore } from "../../src/auth/store.ts";
 import { BrandStore } from "../../src/brand/store.ts";
 import { openDb } from "../../src/db/open.ts";
@@ -28,7 +28,10 @@ export const siteSetup = (): SiteSetup => ({
 });
 
 /** A public instance with an admin, in subdomain mode on proxy.test; null runs it in single-origin mode. */
-export async function startSiteApp(sites: SiteSetup | null = siteSetup()): Promise<SiteApp> {
+export async function startSiteApp(
+  sites: SiteSetup | null = siteSetup(),
+  extra: Partial<AppOptions> = {},
+): Promise<SiteApp> {
   const store = new AuthStore(openDb(":memory:"));
   store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
   store.setPublicAccess(true);
@@ -49,6 +52,7 @@ export async function startSiteApp(sites: SiteSetup | null = siteSetup()): Promi
       brand: new BrandStore(join(brandDir, "brand"), store),
       relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
       sites: sites ?? undefined,
+      ...extra,
     }),
   );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

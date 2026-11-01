@@ -89,7 +89,8 @@ export function createApp({
   const site = (handler: RequestHandler) => onHosts(["single", "site"], handler);
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter(authStore, logger));
-  if (metricsRouter) app.use(root(metricsRouter));
+  // A scraper may reach the server by an internal name, such as a compose service, which is no host of the instance.
+  if (metricsRouter) app.use(onHosts(["single", "root", "other"], metricsRouter));
   app.use(robotsRouter());
   if (sites) app.use(onHosts(["root"], siteRootRouter(sites, authStore)));
   app.use(root(sourceRouter(sourceUrl)));

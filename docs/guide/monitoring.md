@@ -72,9 +72,9 @@ scrape_configs:
 
 `credentials_file` reads the token from a file instead. With several replicas, scrape each one: they count apart.
 
-In [subdomain mode](./subdomain-mode.md), `/metrics` and the Status section's data answer only on the root host, so
-the scrape must reach Girici under that name (`proxy.example` above). An internal name such as `girici:3000` gets
-`404`.
+In [subdomain mode](./subdomain-mode.md), `/metrics` answers on the root host and on any host that is not a site's,
+so Prometheus can scrape through an internal name such as `girici:3000`. Site hosts answer `404`. It still needs the
+token there. The Status section's data answers only on the root host.
 
 Proxied pages cannot reach `/metrics`. A page's own `/metrics` links, once Girici rewrites them, go to the site the
 page came from, and one that escaped rewriting gets `403` from the service worker. The endpoint shares the proxy's
