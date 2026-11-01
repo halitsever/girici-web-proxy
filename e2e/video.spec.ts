@@ -76,20 +76,21 @@ test("streams the first chunk before the last", async ({ page }) => {
 
 test("aborts the upstream when a media fetch is cancelled", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/");
-  await page.evaluate(async () => {
+  const id = crypto.randomUUID();
+  await page.evaluate(async (id) => {
     const controller = new AbortController();
-    const pending = fetch("/~/https/site-a.test/abortable", { signal: controller.signal }).catch(() => {});
+    const pending = fetch(`/~/https/site-a.test/abortable?id=${id}`, { signal: controller.signal }).catch(() => {});
     setTimeout(() => controller.abort(), 100);
     await pending;
-  });
+  }, id);
   await expect
     .poll(
       () =>
-        page.evaluate(async () => {
-          const r = await fetch("/~/https/site-a.test/abortable/aborts");
-          return ((await r.json()) as { aborts: number }).aborts;
-        }),
+        page.evaluate(async (id) => {
+          const r = await fetch(`/~/https/site-a.test/abortable/aborted?id=${id}`);
+          return ((await r.json()) as { aborted: boolean }).aborted;
+        }, id),
       { timeout: 10000 },
     )
-    .toBeGreaterThan(0);
+    .toBe(true);
 });
