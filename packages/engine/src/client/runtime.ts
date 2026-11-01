@@ -21,7 +21,7 @@ import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
 import { installWebSocket } from "./websocket.ts";
-import { captureAncestors, framePartitionTop, installStorage, partitionFor } from "./storage.ts";
+import { captureTopAncestor, framePartitionTop, installStorage, partitionFor } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import { createMessageSender, installMessaging } from "./messaging.ts";
 import { createSiteMessaging, type LabelLookup } from "./site-messages.ts";
@@ -84,7 +84,7 @@ export function install(
   const guard = createWindowGuard(win, ctx, invoke, blobs.swap, siteMessaging?.post);
   const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
-  const ancestors = captureAncestors(win);
+  const topAncestor = captureTopAncestor(win);
   const readContainer = serviceWorkerContainer(win);
   // Chromium gives the page that reuses a blank window the container the blank document read, without a controller,
   // so a window already headed for another page waits for that page before reading it.
@@ -175,17 +175,12 @@ export function install(
     // top cannot be redefined by a page, and neither can the address read from it.
     const top = win.top;
     const topOrigin = top === win ? null : realOriginOf(top, ctx.origin);
-    const siteMode = sites !== undefined && top !== win && !topOrigin;
     return partitionFor({
       __proto__: null,
       origin: originOf(ctx.realUrl()),
       isTop: top === win,
-      topUrl: framePartitionTop({
-        __proto__: null,
-        topOrigin,
-        ancestors: siteMode ? ancestors() : null,
-        siteMode,
-      } as Parameters<typeof framePartitionTop>[0]),
+      // A top window has no ancestors, and a readable top's own origin wins.
+      topUrl: framePartitionTop(topOrigin, sites ? topAncestor() : null),
       site: current.site,
       topSite: top === win ? undefined : engineSiteOf(top),
     } as Parameters<typeof partitionFor>[0]);

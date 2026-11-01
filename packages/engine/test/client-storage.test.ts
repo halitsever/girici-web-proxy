@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  captureAncestors,
+  captureTopAncestor,
   createPartitionedStorage,
   framePartitionTop,
   installStorage,
@@ -154,17 +154,11 @@ describe("partitionFor", () => {
   });
 
   it("keys a frame under another host by that host", () => {
-    const ancestors = ["https://aaa.proxy.test", "https://bbb.proxy.test"];
-    const top = framePartitionTop({ topOrigin: null, ancestors, siteMode: true });
+    const top = framePartitionTop(null, "https://bbb.proxy.test");
     expect(top?.origin).toBe("https://bbb.proxy.test");
-    expect(framePartitionTop({ topOrigin: null, ancestors: null, siteMode: true })).toBeNull();
-    expect(framePartitionTop({ topOrigin: null, ancestors, siteMode: false })).toBeNull();
-    expect(framePartitionTop({ topOrigin: "https://a.test", ancestors, siteMode: false })?.origin).toBe(
-      "https://a.test",
-    );
-    expect(framePartitionTop({ topOrigin: "https://a.test", ancestors, siteMode: true })?.origin).toBe(
-      "https://a.test",
-    );
+    expect(framePartitionTop(null, null)).toBeNull();
+    expect(framePartitionTop("https://a.test", null)?.origin).toBe("https://a.test");
+    expect(framePartitionTop("https://a.test", "https://bbb.proxy.test")?.origin).toBe("https://a.test");
     expect(
       partitionFor({ origin: "https://site-b.test", isTop: false, topUrl: top, site: "https://site-b.test" }),
     ).toBe(prefixFor("https://site-b.test", "https://bbb.proxy.test"));
@@ -181,16 +175,17 @@ describe("partitionFor", () => {
     });
     const location = {};
     Object.defineProperty(location, "ancestorOrigins", { configurable: true, get: () => list });
-    const read = captureAncestors({ location, DOMStringList } as unknown as Realm);
+    const read = captureTopAncestor({ location, DOMStringList } as unknown as Realm);
     Object.defineProperty(DOMStringList.prototype, "length", { get: () => 0 });
     Object.defineProperty(location, "ancestorOrigins", { get: () => ({ length: 0 }) });
-    expect(read()).toEqual(["https://aaa.proxy.test", "https://bbb.proxy.test"]);
-    expect(captureAncestors({ location: {} } as unknown as Realm)()).toBeNull();
+    expect(read()).toBe("https://bbb.proxy.test");
+    list.count = 0;
+    expect(read()).toBeNull();
+    expect(captureTopAncestor({ location: {} } as unknown as Realm)()).toBeNull();
   });
 
   it("reads the top host the same while a page has replaced built-ins", () => {
-    const read = () =>
-      framePartitionTop({ topOrigin: null, ancestors: ["https://bbb.proxy.test"], siteMode: true })?.href;
+    const read = () => framePartitionTop(null, "https://bbb.proxy.test")?.href;
     for (const [name, target, property, replacement] of REPLACED_BUILTINS) {
       expect(withReplaced(target, property, replacement, read), name).toBe("https://bbb.proxy.test/");
     }
