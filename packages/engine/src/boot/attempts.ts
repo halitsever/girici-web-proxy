@@ -5,6 +5,13 @@ export interface BootState {
 
 const WINDOW_MS = 30_000;
 const MAX_ATTEMPTS = 3;
+/** The server's replay page holds a form posted to a site host before its worker ran. */
+export const REPLAY_FORM_ID = "girici-replay";
+
+/** A kept form goes back through the worker; a reload would turn the post into a GET and lose its fields. */
+export function nextStep(doc: { getElementById(id: string): unknown }): "replay" | "reload" {
+  return doc.getElementById(REPLAY_FORM_ID) ? "replay" : "reload";
+}
 
 /** A tab that keeps landing on the bootstrap page would reload forever, so attempts are rationed per window. */
 export function nextBootAttempt(previous: BootState | null, now: number): { allowed: boolean; state: BootState } {

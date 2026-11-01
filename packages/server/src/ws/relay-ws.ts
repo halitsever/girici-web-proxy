@@ -58,6 +58,8 @@ export interface WsRelayOptions {
   blocklist?: HostBlocklist;
   /** Set when GIRICI_UPSTREAM_PROXY is: upstream sockets then open through the proxy instead of directly. */
   tunnel?: TunnelDialer;
+  /** Subdomain mode's domain without port, which the relay never opens. */
+  siteDomain?: string;
 }
 
 export interface WsRelayHandle {
@@ -320,7 +322,11 @@ function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions)
       return;
     }
     try {
-      validateWsTarget(target, { allowedTestHosts: options.allowedTestHosts, selfHost: req.headers.host });
+      validateWsTarget(target, {
+        allowedTestHosts: options.allowedTestHosts,
+        selfHost: req.headers.host,
+        siteDomain: options.siteDomain,
+      });
     } catch (error) {
       options.logger.debug(`ws blocked ${target.host}`);
       client.close(1011, error instanceof SsrfBlockedError ? "blocked" : "invalid");

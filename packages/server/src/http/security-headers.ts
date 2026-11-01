@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express";
+import { requestHost } from "../sites/hosts.ts";
 
 export const UI_CSP = [
   "default-src 'self'",
@@ -26,6 +27,16 @@ export function securityHeaders(): RequestHandler {
       "Content-Security-Policy": "frame-ancestors 'none'",
       "Cross-Origin-Opener-Policy": "same-origin",
     });
+    next();
+  };
+}
+
+/** Runs after `hostKinds`: in subdomain mode each host asks for its own agent cluster, and no site may embed the root. */
+export function siteHeaders(): RequestHandler {
+  return (_req, res, next) => {
+    const { kind } = requestHost(res);
+    if (kind !== "single") res.setHeader("Origin-Agent-Cluster", "?1");
+    if (kind === "root") res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     next();
   };
 }
