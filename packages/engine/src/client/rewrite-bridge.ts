@@ -1,7 +1,7 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { keyword, rewriteHtml } from "../rewrite/html.ts";
-import { rewriteJs } from "../rewrite/js.ts";
+import { rewriteJs, type FunctionBodyKind } from "../rewrite/js.ts";
 import { mapRefresh } from "../rewrite/refresh.ts";
 import { stripClientTag } from "../shared/client-tag.ts";
 import { originOf } from "../shared/primordials.ts";
@@ -13,7 +13,8 @@ import type { UrlContext } from "./url-context.ts";
 /** The rewriters, bound to the page's current real base, so the runtime can rewrite code and markup synchronously. */
 export interface RewriteBridge {
   js(code: string): string;
-  jsBody(code: string): string;
+  /** A Function constructor body; the generator and async constructors name their own kind. */
+  jsBody(code: string, kind?: "handler" | FunctionBodyKind): string;
   html(html: string): string;
   /** A srcdoc document with the runtime tag in front, since it has no address to load the runtime through. */
   srcdoc(markup: string): string;
@@ -59,7 +60,7 @@ export function createRewriteBridge(
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
-    jsBody: (code) => rewriteJs(code, { kind: "handler" }),
+    jsBody: (code, kind = "handler") => rewriteJs(code, { kind }),
     html,
     // A tag carried over from an earlier rewrite is dropped first, since its cookie snapshot may be stale.
     srcdoc: (markup) =>
