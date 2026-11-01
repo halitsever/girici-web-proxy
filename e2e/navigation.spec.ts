@@ -63,6 +63,7 @@ test("stays in the proxy when a pushed URL is reloaded", async ({ page }) => {
 test("follows meta refresh and Refresh headers inside the proxy", async ({ page }) => {
   await page.goto("/~/https/site-a.test/meta-refresh");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\/$/);
+  await expect(page.locator("h1")).toHaveText("Site B");
   await page.goto("/~/https/site-a.test/refresh-header");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\/$/);
 });

@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, openThroughUi, test } from "./support/test.ts";
+import { expect, isSiteProject, openThroughUi, siteHost, test } from "./support/test.ts";
 
 async function setThirdPartyCookie(page: Page) {
   await openThroughUi(page, "https://site-b.test/cookie/set");
@@ -16,6 +16,10 @@ test("blocks third-party cookies by default and keeps first-party ones", async (
 });
 
 test("sends third-party cookies when the switch is off", async ({ page }) => {
+  test.skip(
+    isSiteProject(test.info()),
+    "Each site host keeps its own jar, so third-party cookies are partitioned per embedding site even when allowed",
+  );
   await setThirdPartyCookie(page);
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Block third-party cookies" }).click();
@@ -58,10 +62,12 @@ test("keeps cookies on the requests of a worker a blank frame started", async ({
   await expect(page.locator("#worker")).toHaveText("sid=abc; theme=dark");
 });
 
-test("a worker cannot borrow another site's cookies with a forged referrer", async ({ page }) => {
+test("a worker cannot borrow another site's cookies with a forged referrer", async ({ page, baseURL }) => {
   await setThirdPartyCookie(page);
-  await page.goto("/~/https/site-a.test/worker-forge?proxy=http://127.0.0.1:41000");
+  // The forged referrer names the worker's own origin, which in subdomain mode is site-a's host.
+  const proxy = isSiteProject(test.info()) ? siteHost("https://site-a.test/") : baseURL;
+  await page.goto(`/~/https/site-a.test/worker-forge?proxy=${proxy}`);
   await expect(page.locator("#worker")).toHaveText("none");
-  await page.goto("/~/https/site-a.test/worker-forge?proxy=http://127.0.0.1:41000&nested=1");
+  await page.goto(`/~/https/site-a.test/worker-forge?proxy=${proxy}&nested=1`);
   await expect(page.locator("#worker")).toHaveText("none");
 });
