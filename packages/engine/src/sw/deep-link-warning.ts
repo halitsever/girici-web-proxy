@@ -48,7 +48,15 @@ export class DeepLinkWarning {
     this.#random = deps.random ?? randomKey;
   }
 
-  async needed(): Promise<boolean> {
+  /** `fresh` brings newer settings, such as a site host's config, and is waited for only while the warning would show. */
+  async needed(fresh?: Promise<void>): Promise<boolean> {
+    if (!(await this.#needed())) return false;
+    if (!fresh) return true;
+    await fresh;
+    return this.#needed();
+  }
+
+  async #needed(): Promise<boolean> {
     await this.#prefs.ready();
     if (this.#prefs.current().seen) return false;
     return this.#instance.deepLinkWarning();

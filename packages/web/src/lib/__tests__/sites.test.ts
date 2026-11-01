@@ -2,7 +2,15 @@ import { PROTOCOL_VERSION } from "@girici/engine/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthState } from "../auth";
 import type { Settings } from "../settings";
-import { isSiteMode, retireRootEngine, siteUrlPattern, syncSettings, type RetireEnv } from "../sites";
+import {
+  isSiteMode,
+  markSitesSeen,
+  retireRootEngine,
+  siteUrlPattern,
+  syncSettings,
+  syncSitePrefs,
+  type RetireEnv,
+} from "../sites";
 
 const SETTINGS: Settings = {
   engine: "Bing",
@@ -47,8 +55,58 @@ describe("syncSettings", () => {
     expect(calls[0]!.init?.method).toBe("POST");
     expect(new Headers(calls[0]!.init?.headers).get("content-type")).toBe("application/json");
     expect(calls[0]!.init?.body).toBe(
-      '{"blockThirdPartyCookies":false,"sealAddresses":true,"toolbar":false,"engine":"Bing"}',
+      '{"blockThirdPartyCookies":false,"sealAddresses":true,"toolbar":false,"engine":"Bing","seen":false}',
     );
+  });
+
+  it("tells the root this browser opened a site, then keeps saying so with every later sync", async () => {
+    const calls = recordFetch();
+    const values = new Map<string, string>();
+    const storage = () => ({
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    });
+    const seenOf = (index: number) => (JSON.parse(String(calls[index]!.init?.body)) as { seen: unknown }).seen;
+    await syncSitePrefs(SETTINGS, fetch, storage);
+    await markSitesSeen(SETTINGS, fetch, storage);
+    await syncSitePrefs(SETTINGS, fetch, storage);
+    expect(calls.map((_, index) => seenOf(index))).toEqual([false, true, true]);
+    expect(calls.every((call) => call.url === "/_g/prefs")).toBe(true);
+  });
+
+  it("sends one post at a time, so an older one cannot land after a newer one", async () => {
+    const sent: string[] = [];
+    let release = () => {};
+    const slow = (async (_url: string, init?: RequestInit) => {
+      sent.push(String(init?.body));
+      if (sent.length === 1) await new Promise<void>((resolve) => (release = resolve));
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    const values = new Map<string, string>();
+    const storage = () => ({
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    });
+    const loaded = syncSitePrefs(SETTINGS, slow, storage);
+    const opened = markSitesSeen({ ...SETTINGS, engine: "Google" }, slow, storage);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent).toHaveLength(1);
+    release();
+    await Promise.all([loaded, opened]);
+    expect(sent.map((body) => JSON.parse(body) as { engine: string; seen: boolean })).toEqual([
+      expect.objectContaining({ engine: "Bing" }),
+      expect.objectContaining({ engine: "Google", seen: true }),
+    ]);
+  });
+
+  it("still tells the root a site was opened when storage is blocked", async () => {
+    const calls = recordFetch();
+    const blocked = () => {
+      throw new Error("blocked");
+    };
+    await markSitesSeen(SETTINGS, fetch, blocked);
+    await syncSitePrefs(SETTINGS, fetch, blocked);
+    expect(calls.map((call) => (JSON.parse(String(call.init?.body)) as { seen: unknown }).seen)).toEqual([true, false]);
   });
 
   it("does not fail when the root cannot take the settings", async () => {

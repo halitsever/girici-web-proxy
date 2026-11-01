@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SITE_PREFS, type SiteConfigAnswer } from "../src/shared/protocol.ts";
 import { toBase64Url } from "../src/shared/seal-cipher.ts";
 import {
+  enginePrefsOf,
   FIRST_KEY_WAIT_MS,
   PAGE_CONFIG_WAIT_MS,
   SiteModeService,
@@ -199,5 +200,26 @@ describe("SiteModeService", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: "POST", body: '{"site":"https://site-a.test"}' });
     expect(new Headers(calls[0]?.headers).get("content-type")).toBe("application/json");
+  });
+});
+
+describe("enginePrefsOf", () => {
+  const state = (prefs: Partial<SiteState["prefs"]>, instanceSeal = false) => ({
+    prefs: { ...DEFAULT_SITE_PREFS, ...prefs },
+    instanceSeal,
+  });
+
+  it("takes the root's switches and turns seen on, never off", () => {
+    expect(enginePrefsOf(state({ blockThirdPartyCookies: false, sealAddresses: true }, true))).toEqual({
+      blockThirdPartyCookies: false,
+      sealAddresses: true,
+      instanceSeal: true,
+    });
+    expect(enginePrefsOf(state({ seen: true }))).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: false,
+      instanceSeal: false,
+      seen: true,
+    });
   });
 });

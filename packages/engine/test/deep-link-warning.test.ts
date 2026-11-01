@@ -74,6 +74,17 @@ describe("DeepLinkWarning", () => {
     expect(await warning({ seen: false, instance: false }).w.needed()).toBe(false);
   });
 
+  it("waits for fresh settings only while it would warn, and asks again once they arrive", async () => {
+    const { w, prefs } = warning();
+    const seen = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() => prefs.set({ seen: true }));
+    expect(await w.needed(seen)).toBe(false);
+    let waited = false;
+    const fresh = new Promise<void>((resolve) => setTimeout(resolve, 0)).then(() => void (waited = true));
+    expect(await warning({ seen: true }).w.needed(fresh)).toBe(false);
+    expect(waited).toBe(false);
+    expect(await warning().w.needed(Promise.resolve())).toBe(true);
+  });
+
   it("serves a page without script that cannot be framed", async () => {
     const res = await warning().w.page("/~/https/site-a.test/a?b=1", target);
     expect(res.status).toBe(200);

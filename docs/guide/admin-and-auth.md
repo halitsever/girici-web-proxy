@@ -63,8 +63,13 @@ The browser remembers the notice in the service worker's own storage. Clearing s
 bring it back; wiping the browser's data for Girici does. A `#fragment` at the end of a shared link may be lost
 after **Continue**, depending on the browser.
 
-In [subdomain mode](./subdomain-mode.md) each site's host has its own service worker, which remembers the notice for
-that site only. A visitor then sees it once for each site, sites opened from Girici's home page included.
+In [subdomain mode](./subdomain-mode.md) each site's host has its own service worker. **Continue** there counts for
+that site only, so a visitor who arrives only by links sees the notice once for each site. Opening a site from
+Girici's home page or **Settings** counts for every site: the root keeps it in the signed settings cookie that all
+site hosts read.
+
+The notice is a courtesy for visitors, not a security boundary. A page that already runs through Girici can open other
+sites without it, and in subdomain mode a page can set cookies that change what the settings cookie says.
 
 ## Resetting the admin password
 

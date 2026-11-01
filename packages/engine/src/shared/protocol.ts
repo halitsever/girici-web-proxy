@@ -80,6 +80,8 @@ export interface SitePrefs {
   sealAddresses: boolean;
   toolbar: boolean;
   engine: SearchEngine;
+  /** This browser opened a site from Girici's own pages, so no site host shows it the shared-link warning. */
+  seen: boolean;
 }
 
 export const DEFAULT_SITE_PREFS: SitePrefs = {
@@ -87,6 +89,7 @@ export const DEFAULT_SITE_PREFS: SitePrefs = {
   sealAddresses: false,
   toolbar: true,
   engine: "DuckDuckGo",
+  seen: false,
 };
 
 /** The answer to `GET` and `POST` on `SITES_CONFIG_PATH`. */

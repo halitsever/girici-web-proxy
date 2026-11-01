@@ -31,7 +31,8 @@ export function signVisited(sites: readonly string[], keys: SiteKeys): string {
 
 /**
  * A page on any site host can add same-name cookies holding other values this server signed, so every value that
- * verifies counts and the most private choice wins; the rest comes from the first.
+ * verifies counts and the most private choice wins, as does showing the shared-link warning; the rest comes from the
+ * first.
  */
 export function readPrefsCookie(cookieHeader: string | undefined, keys: SiteKeys): SitePrefs {
   const verified = cookieValues(cookieHeader, [PREFS_COOKIE, PLAIN_PREFS_COOKIE])
@@ -42,6 +43,7 @@ export function readPrefsCookie(cookieHeader: string | undefined, keys: SiteKeys
   for (const prefs of verified) {
     merged.blockThirdPartyCookies ||= prefs.blockThirdPartyCookies;
     merged.sealAddresses ||= prefs.sealAddresses;
+    merged.seen &&= prefs.seen;
   }
   return merged;
 }

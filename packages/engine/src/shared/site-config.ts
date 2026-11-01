@@ -12,7 +12,7 @@ import { fromBase64Url } from "./seal-cipher.ts";
 import { isSiteLabel, parseSiteDomain } from "./site-label.ts";
 import { SEARCH_ENGINES, type SearchEngine } from "./target.ts";
 
-const FLAGS = ["blockThirdPartyCookies", "sealAddresses", "toolbar"] as const;
+const FLAGS = ["blockThirdPartyCookies", "sealAddresses", "toolbar", "seen"] as const;
 const LABEL_KEY_BYTES = 32;
 
 /** Each missing or malformed field takes its default, so a damaged cookie still leaves the secure settings. */

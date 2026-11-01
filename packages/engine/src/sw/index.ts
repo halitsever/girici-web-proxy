@@ -45,7 +45,7 @@ import {
 import { CookieRpc } from "./rpc.ts";
 import { announceSharedStart, answerSharedWorker, SharedWorkerStarts } from "./shared-workers.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
-import { createIdbSiteStore, SiteModeService } from "./site-mode.ts";
+import { createIdbSiteStore, enginePrefsOf, SiteModeService } from "./site-mode.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
@@ -125,12 +125,7 @@ const siteMode = new SiteModeService({
   store: createIdbSiteStore(),
   protocol: self.location.protocol,
   host: self.location.host,
-  apply: (state) =>
-    prefs.set({
-      blockThirdPartyCookies: state.prefs.blockThirdPartyCookies,
-      sealAddresses: state.prefs.sealAddresses,
-      instanceSeal: state.instanceSeal,
-    }),
+  apply: (state) => prefs.set(enginePrefsOf(state)),
 });
 
 self.addEventListener("install", (event) => {
@@ -335,7 +330,8 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
       return signIn(route.target);
     case "proxy": {
       // Checked before any relay request, so a shared link's first load shows the warning and nothing else.
-      if (navigation && request.destination === "document" && (await warning.needed())) {
+      // A site host hears the root's `seen` with its config, which this page load is fetching.
+      if (navigation && request.destination === "document" && (await warning.needed(pageConfig))) {
         const { pathname, search, hash } = new URL(request.url);
         const root = site ? siteMode.state()?.root : undefined;
         return warning.page(pathname + search + hash, route.target, root === undefined ? undefined : `${root}/`);

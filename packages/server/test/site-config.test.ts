@@ -74,7 +74,7 @@ describe("site config", () => {
   });
 
   it("reads the settings the root wrote", async () => {
-    const prefs = { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" };
+    const prefs = { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing", seen: false };
     const write = await send("/_g/prefs", {
       host: "proxy.test",
       method: "POST",
@@ -102,12 +102,30 @@ describe("site config", () => {
     expect(((await read.json()) as { prefs: unknown }).prefs).toEqual({ ...DEFAULT_SITE_PREFS, toolbar: false });
   });
 
+  it("tells every site host that this browser opened a site from Girici", async () => {
+    const write = await send("/_g/prefs", {
+      host: "proxy.test",
+      method: "POST",
+      body: JSON.stringify({ seen: true }),
+      headers: { origin: "https://proxy.test", ...json },
+    });
+    const cookie = write.cookies[0]!.split(";")[0]!;
+    for (const host of [siteA, siteB]) {
+      const read = await send("/_g/sites/config", { host, headers: { cookie } });
+      expect(((await read.json()) as { prefs: unknown }).prefs, host).toEqual({ ...DEFAULT_SITE_PREFS, seen: true });
+    }
+  });
+
   it("refuses settings from a site host or another origin", async () => {
-    const write = (host: string, origin: string, body = "{}") =>
-      send("/_g/prefs", { host, method: "POST", body, headers: { origin, ...json } });
+    const write = (host: string, origin: string | undefined, body = '{"seen":true}') =>
+      send("/_g/prefs", { host, method: "POST", body, headers: { ...(origin ? { origin } : {}), ...json } });
     expect((await write("proxy.test", `https://${siteA}`)).status).toBe(403);
+    expect((await write("proxy.test", `http://${siteA}`)).status).toBe(403);
     expect((await write("proxy.test", "https://evil.test")).status).toBe(403);
+    expect((await write("proxy.test", "null")).status).toBe(403);
+    expect((await write("proxy.test", undefined)).status).toBe(403);
     expect((await write(siteA, `https://${siteA}`)).status).toBe(404);
+    expect((await write(siteA, "https://proxy.test")).status).toBe(404);
     expect((await write("proxy.test", "https://proxy.test", "[]")).status).toBe(400);
     expect((await write("proxy.test", "https://proxy.test", '"x"')).status).toBe(400);
     expect((await write("proxy.test", "https://proxy.test", JSON.stringify({ pad: "x".repeat(2048) }))).status).toBe(

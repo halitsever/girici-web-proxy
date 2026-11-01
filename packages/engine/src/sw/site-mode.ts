@@ -1,6 +1,6 @@
 import { openDB, type IDBPDatabase } from "idb";
 import { labelSiteOf } from "../shared/label-site.ts";
-import type { SiteConfigAnswer, SiteContext, SitePrefs, SiteReport } from "../shared/protocol.ts";
+import type { EnginePrefs, SiteConfigAnswer, SiteContext, SitePrefs, SiteReport } from "../shared/protocol.ts";
 import { fromBase64Url, toBase64Url } from "../shared/seal-cipher.ts";
 import { readSiteConfigAnswer } from "../shared/site-config.ts";
 import {
@@ -35,6 +35,17 @@ export interface SiteState {
   prefs: SitePrefs;
   instanceSeal: boolean;
   deepLinkWarning: boolean;
+}
+
+/** The engine prefs a site host takes from its config; `seen` only turns on, so a Continue on this host still counts. */
+export function enginePrefsOf(state: Pick<SiteState, "prefs" | "instanceSeal">): Partial<EnginePrefs> {
+  const update: Partial<EnginePrefs> = {
+    blockThirdPartyCookies: state.prefs.blockThirdPartyCookies,
+    sealAddresses: state.prefs.sealAddresses,
+    instanceSeal: state.instanceSeal,
+  };
+  if (state.prefs.seen) update.seen = true;
+  return update;
 }
 
 export interface SiteStore {

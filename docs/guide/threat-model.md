@@ -89,7 +89,8 @@ What stays open, and what the mode adds:
 - Browser protections keyed to the site, such as HTTP cache partitioning, the `window.name` reset, process-per-site
   and SameSite, see one site for all Girici hosts.
 - A page can set cookies for the shared domain. It cannot read Girici's own cookies, and a same-name cookie it plants
-  cannot replace them: Girici reads every value, keeps only signed ones and merges settings to the more private choice.
+  cannot replace them: Girici reads every value, keeps only signed ones and merges settings to the more private choice
+  and toward showing the shared-link warning.
   A flood can still make every host answer `431`, as in single-origin mode, or push Girici's own cookies out of the
   browser's per-domain limit, which signs the site hosts out and resets settings.
 - Form posts moved to another site's host are sent again as UTF-8. Messages from a host under the sender's site reach
@@ -132,7 +133,8 @@ rate limit.
 
 - The [shared-link warning](/guide/admin-and-auth#shared-link-warning) tells a visitor who arrives by link that the
   page comes from another site through a proxy. It does not prove that site is genuine: the address bar shows your
-  server, so a phishing page looks as trustworthy as the real one.
+  server, so a phishing page looks as trustworthy as the real one. It is a courtesy notice, not a security boundary:
+  a page already open through Girici can send the visitor on to other sites without it.
 - The [browser check](/guide/admin-and-auth#browser-check) raises the cost of automated abuse. It does not stop a
   determined client, which can solve the puzzle like any browser.
 

@@ -90,6 +90,17 @@ describe("the settings cookie", () => {
     });
   });
 
+  it("counts this browser as having opened a site from Girici only when every value that verifies says so", () => {
+    const seen = signPrefs({ ...DEFAULT_SITE_PREFS, seen: true }, keys);
+    const unseen = signPrefs(DEFAULT_SITE_PREFS, keys);
+    const read = (header: string) => readPrefsCookie(header, keys).seen;
+    expect(read(`__Secure-girici-prefs=${seen}`)).toBe(true);
+    expect(read(`__Secure-girici-prefs=${seen}; girici-prefs=junk`)).toBe(true);
+    expect(read(`__Secure-girici-prefs=${unseen}; __Secure-girici-prefs=${seen}`)).toBe(false);
+    expect(read(`__Secure-girici-prefs=${seen}; girici-prefs=${unseen}`)).toBe(false);
+    expect(read("")).toBe(false);
+  });
+
   it("sets each cookie for the whole domain under /_g/sites", () => {
     const domain = parseSiteDomain("proxy.test:8443")!;
     expect(siteCookie("prefs", "v.s", domain, true)).toBe(

@@ -117,6 +117,7 @@ describe("openProxied", () => {
     await openProxied("/~/https/a.test/", {
       siteMode: false,
       start: async () => void steps.push("start"),
+      markSeen: async () => void steps.push("seen"),
       seal: async (path) => {
         steps.push(`seal ${path}`);
         return "/~/x/L.B";
@@ -126,18 +127,28 @@ describe("openProxied", () => {
     expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
   });
 
-  it("opens a site through the root address without the service worker", async () => {
+  it("opens a site through the root address once every site host knows this browser opened it from Girici", async () => {
     const steps: string[] = [];
-    await openProxied("/~/https/site-a.test/", {
+    let release = () => {};
+    const opening = openProxied("/~/https/site-a.test/", {
       siteMode: true,
       start: async () => void steps.push("start"),
+      markSeen: () =>
+        new Promise<void>((resolve) => {
+          steps.push("seen");
+          release = resolve;
+        }),
       seal: async (path) => {
         steps.push(`seal ${path}`);
         return "/~/x/L.B";
       },
       assign: (url) => void steps.push(`assign ${url}`),
     });
-    expect(steps).toEqual(["assign /~/https/site-a.test/"]);
+    await Promise.resolve();
+    expect(steps).toEqual(["seen"]);
+    release();
+    await opening;
+    expect(steps).toEqual(["seen", "assign /~/https/site-a.test/"]);
   });
 });
 

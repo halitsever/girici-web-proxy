@@ -9,7 +9,7 @@ const answer: SiteConfigAnswer = {
   domain: "proxy.test",
   label: "k6wjalxihe6pja6woodbryo47k",
   key: toBase64Url(new Uint8Array(32).fill(7)),
-  prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" },
+  prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing", seen: true },
   instanceSeal: true,
   deepLinkWarning: false,
 };
@@ -21,7 +21,7 @@ describe("site config readers", () => {
     expect(readSitePrefs({ toolbar: false, engine: "Ask" })).toEqual({ ...DEFAULT_SITE_PREFS, toolbar: false });
     expect(readSitePrefs(null)).toEqual(DEFAULT_SITE_PREFS);
     expect(readSitePrefs("x")).toEqual(DEFAULT_SITE_PREFS);
-    expect(readSitePrefs({ blockThirdPartyCookies: "no", sealAddresses: 1, engine: "toString" })).toEqual(
+    expect(readSitePrefs({ blockThirdPartyCookies: "no", sealAddresses: 1, engine: "toString", seen: "yes" })).toEqual(
       DEFAULT_SITE_PREFS,
     );
     expect(DEFAULT_SITE_PREFS).toEqual({
@@ -29,7 +29,14 @@ describe("site config readers", () => {
       sealAddresses: false,
       toolbar: true,
       engine: "DuckDuckGo",
+      seen: false,
     });
+  });
+
+  it("reads whether this browser opened a site from Girici", () => {
+    expect(readSitePrefs({ seen: true })).toEqual({ ...DEFAULT_SITE_PREFS, seen: true });
+    expect(readSitePrefs({ seen: false })).toEqual(DEFAULT_SITE_PREFS);
+    expect(readSitePrefs(Object.create({ seen: true }))).toEqual(DEFAULT_SITE_PREFS);
   });
 
   it("reads a site config answer and refuses a malformed one", () => {

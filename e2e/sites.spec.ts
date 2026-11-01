@@ -165,7 +165,7 @@ test("the shared-link warning and the browser check reach site hosts", async ({ 
     expect(res.ok()).toBe(true);
   };
   const visit = async (check: (visitor: Page) => Promise<void>) => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ baseURL: SITES });
     try {
       await check(await context.newPage());
     } finally {
@@ -183,6 +183,14 @@ test("the shared-link warning and the browser check reach site hosts", async ({ 
       );
       await visitor.getByRole("button", { name: "Continue to site-a.test" }).click();
       await expect(visitor.locator("#title")).toHaveText("Site A");
+      // Continue counts on its own host only.
+      await visitor.goto(`${SITE_B}/~/https/site-b.test/`);
+      await expect(visitor.getByRole("heading", { name: "This page opens through Girici" })).toBeVisible();
+      // Opening a site from Girici counts on every host, a running one included.
+      await openThroughUi(visitor, "https://site-b.test/");
+      await expect(visitor.locator("h1")).toHaveText("Site B");
+      await visitor.goto(`${siteHost("http://site-c.test/")}/~/http/site-c.test/`);
+      await expect(visitor.locator("h1")).toHaveText("Site C");
     });
 
     await set({ deepLinkWarning: false });
