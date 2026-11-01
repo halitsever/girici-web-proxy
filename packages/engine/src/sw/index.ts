@@ -1,5 +1,6 @@
 import { isReservedPath } from "../shared/codec.ts";
 import {
+  CONTINUE_PATH,
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
@@ -16,10 +17,12 @@ import { createIdbClientRecords } from "./client-records.ts";
 import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
+import { DeepLinkWarning } from "./deep-link-warning.ts";
 import { errorResponse, forbiddenResponse, type ErrorPageCode } from "./error-page.ts";
+import { InstanceState } from "./instance-state.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
+import { createIdbKeyStore, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
 import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess, type Route } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
@@ -63,9 +66,8 @@ const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
 const sealing = new Sealing(createIdbKeyStore(), prefs);
-// The admin's switch reaches open tabs within a minute without a UI tab telling the worker.
-const INSTANCE_SEAL_INTERVAL = 60_000;
-let instanceSealCheckedAt = -Infinity;
+const instance = new InstanceState(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" }), prefs);
+const warning = new DeepLinkWarning({ prefs, instance, keys: createIdbKeyStore("warning") });
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
@@ -95,7 +97,7 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   seeding = seedUiClients();
-  refreshInstanceSeal(true);
+  instance.refresh(true);
   const cleanup = caches
     .keys()
     .then((keys) =>
@@ -114,16 +116,6 @@ async function seedUiClients(): Promise<void> {
   } catch {
     // An unseeded tab gains UI authority on its next load.
   }
-}
-
-/** Fire and forget; a failed check keeps the switch the worker last heard. */
-function refreshInstanceSeal(force = false): void {
-  const now = Date.now();
-  if (!force && now - instanceSealCheckedAt < INSTANCE_SEAL_INTERVAL) return;
-  instanceSealCheckedAt = now;
-  void readInstanceSeal(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" })).then(
-    (instanceSeal) => (instanceSeal === null ? undefined : prefs.set({ instanceSeal })),
-  );
 }
 
 async function uiReady(): Promise<void> {
@@ -148,7 +140,7 @@ self.addEventListener("message", (event) => {
       if (!update) return;
       await prefs.set(update);
       // The UI cannot turn the admin's switch off, only have the worker ask the server again.
-      if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
+      if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) instance.refresh(true);
       // The UI waits for this answer before navigating, so the next page already sees the new choice.
       answer?.postMessage({ ok: true });
     }),
@@ -185,6 +177,10 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin === self.location.origin && url.pathname === SITE_DATA_RPC_PATH && event.request.method === "POST") {
     event.respondWith(handleSiteDataRpc(event));
+    return;
+  }
+  if (url.origin === self.location.origin && url.pathname === CONTINUE_PATH) {
+    event.respondWith(sealing.ready().then(() => warning.accept(event.request, sealing.open, self.location.origin)));
     return;
   }
   if (url.origin === self.location.origin && isGuardedPath(url.pathname)) {
@@ -230,7 +226,7 @@ async function handle(event: FetchEvent): Promise<Response> {
   const identity = await identityOf(event, client);
   const clientUrl = requestClientUrl({ client, identity }, origin);
   const topLevelGet = navigation && request.destination === "document" && request.method === "GET";
-  if (topLevelGet) refreshInstanceSeal();
+  if (topLevelGet) instance.refresh();
   await Promise.all([cookies.ready(), sealing.ready()]);
   const master = await sealing.sealerFor(isSealedPath(new URL(request.url).pathname));
   let route: Route;
@@ -260,6 +256,11 @@ async function handle(event: FetchEvent): Promise<Response> {
     case "redirect":
       return Response.redirect(new URL(route.location, origin).href, 307);
     case "proxy": {
+      // Checked before any relay request, so a shared link's first load shows the warning and nothing else.
+      if (navigation && request.destination === "document" && (await warning.needed())) {
+        const { pathname, search, hash } = new URL(request.url);
+        return warning.page(pathname + search + hash, route.target);
+      }
       const initiator = realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
       const seal = route.sealed && master ? master.originSeal(route.target.origin) : undefined;
       const sealsLoad = navigation && request.destination === "document" && master && sealing.enabled();

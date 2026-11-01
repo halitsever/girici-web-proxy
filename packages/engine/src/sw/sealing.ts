@@ -128,16 +128,3 @@ export function readSealMessage(
   const { type, v, path } = data as Record<string, unknown>;
   return type === SEAL_MESSAGE && v === PROTOCOL_VERSION && typeof path === "string" ? path : null;
 }
-
-/** The admin's switch as `/_g/auth/state` tells it, or null when the server cannot say. */
-export async function readInstanceSeal(fetcher: () => Promise<Response>): Promise<boolean | null> {
-  try {
-    const response = await fetcher();
-    if (!response.ok) return null;
-    const body: unknown = await response.json();
-    if (typeof body !== "object" || body === null) return null;
-    return (body as { sealAddresses?: unknown }).sealAddresses === true;
-  } catch {
-    return null;
-  }
-}
