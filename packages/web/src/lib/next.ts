@@ -1,6 +1,5 @@
 import { classifySiteHost, parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
-import type { AuthState } from "./auth";
-import { isSiteMode, siteUrlPattern } from "./sites";
+import { siteUrlPattern } from "./sites";
 import { toProxyPath } from "./target";
 
 export type NextTarget =
@@ -29,15 +28,6 @@ export function resolveNext(next: string, siteDomain?: string | null): NextTarge
   }
   const proxied = WEB_URL.test(next) ? toProxyPath(next) : null;
   return proxied ? { kind: "proxy", path: proxied } : { kind: "home" };
-}
-
-/**
- * A site host sends a signed-in admin here when it has no site session, as after a switch from single-origin mode.
- * Only signing in again issues one, so the sign-in page stays open for them.
- */
-export function needsSiteSession(state: Pick<AuthState, "authed" | "siteDomain">, next: unknown): boolean {
-  if (!state.authed || !isSiteMode(state) || typeof next !== "string" || !WEB_URL.test(next)) return false;
-  return resolveNext(next, state.siteDomain).kind !== "home";
 }
 
 /** Our own hosts never reopen through the proxy, and a proxy address on any other host belongs to another Girici. */

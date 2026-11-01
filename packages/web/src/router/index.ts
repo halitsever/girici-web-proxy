@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { getAuthState } from "@/lib/auth";
-import { needsSiteSession } from "@/lib/next";
 
 export const LOGIN_PATH = "/_g/login";
 export const SETUP_PATH = "/_g/setup";
@@ -42,7 +41,7 @@ router.beforeEach(async (to) => {
   }
   if (state.setup) return to.path === SETUP_PATH ? true : SETUP_PATH;
   if (to.path === SETUP_PATH) return "/";
-  if (to.path === LOGIN_PATH) return state.authed && !needsSiteSession(state, to.query.next) ? "/" : true;
+  if (to.path === LOGIN_PATH) return state.authed ? "/" : true;
   const needsAuth = to.meta.auth === true || !state.public;
   if (!state.authed && needsAuth) {
     return to.fullPath === "/" ? { path: LOGIN_PATH } : { path: LOGIN_PATH, query: { next: to.fullPath } };
