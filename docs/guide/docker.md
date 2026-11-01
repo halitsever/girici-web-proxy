@@ -64,6 +64,18 @@ The setup screen asks for a code that Girici prints to the container log at star
 docker logs <container> | grep "setup code"
 ```
 
+## Updating and going back
+
+A new version may update the database in `/data` when it starts, and older versions then refuse to open it. Back up
+the volume before you update:
+
+```bash
+docker run --rm -v girici_data:/data -v "$PWD":/backup alpine tar czf /backup/girici-data.tgz -C /data .
+```
+
+Girici 2.3 adds a table for traffic statistics, so going back to 2.2.x needs a backup of the data directory from
+before the update. Stop the container, restore the backup into the volume, then start the older image.
+
 ## HTTPS with Caddy
 
 The compose file includes an optional Caddy service behind an `https` profile. It terminates TLS and
