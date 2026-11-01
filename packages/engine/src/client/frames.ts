@@ -26,8 +26,11 @@ export interface FrameAdopter {
   reopened(doc: unknown): void;
   /** The window.open that three-argument document.open calls, so one function proxies, swaps and wraps. */
   useOpen(open: (this: unknown, ...args: unknown[]) => unknown): void;
-  /** Called with each inserted node first, so frames another parser made get their values rewritten. */
-  useBackstop(check: (node: unknown) => void): void;
+  /**
+   * Called with each inserted node and the node it goes into first, so frames another parser made get their values
+   * rewritten. The target is null for nodes inserted beside `this`.
+   */
+  useBackstop(check: (node: unknown, target: unknown) => void): void;
 }
 
 export interface FrameWalker {
@@ -54,6 +57,8 @@ const SETTER_HOOKS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["HTMLTableElement", ["caption", "tHead", "tFoot"]],
 ];
 
+/** Methods that insert beside `this`, so what they add never lands inside it. */
+const BESIDE = ["before", "after", "replaceWith"];
 const FRAME_ELEMENTS = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement"];
 const SVG_DOCUMENT_ELEMENTS = ["HTMLIFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
 const NO_CHILDREN: readonly unknown[] = [];
@@ -223,7 +228,7 @@ export function installFrames(
     (win as unknown as Record<string, { prototype?: object } | undefined>)[name]?.prototype;
 
   // Markup from XML parsers and XHR documents never went through the HTML sinks; the attribute hooks check it here.
-  let backstop: (node: unknown) => void = () => {};
+  let backstop: (node: unknown, target: unknown) => void = () => {};
   // Indexed, without destructuring: adopting a frame runs this inside a page call, after the page may have replaced
   // the array iterator.
   for (let hook = 0; hook < MUTATION_HOOKS.length; hook++) {
@@ -238,8 +243,9 @@ export function installFrames(
       const descriptor = ownDescriptor(proto, method);
       const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
       if (typeof native !== "function") continue;
+      const beside = listIncludes(BESIDE, method);
       const hooked = function (this: unknown, ...args: unknown[]): unknown {
-        for (let index = 0; index < args.length; index++) backstop(args[index]);
+        for (let index = 0; index < args.length; index++) backstop(args[index], beside ? null : this);
         return mutateIn(targetView(this), () => apply(native, this, args));
       };
       define(proto, method, { ...descriptor, value: maskNative(hooked, native) });
@@ -256,7 +262,7 @@ export function installFrames(
       const set = descriptor?.set;
       if (!set) continue;
       const hooked = function (this: unknown, value: unknown): void {
-        backstop(value);
+        backstop(value, this);
         mutateIn(viewOf(this), () => apply(set, this, [value]));
       };
       define(proto, property, { ...descriptor, set: maskNative(hooked, set) });
