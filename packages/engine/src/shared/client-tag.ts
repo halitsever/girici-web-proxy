@@ -47,7 +47,8 @@ function encode(value: unknown): string | undefined {
   return out + "}";
 }
 
-function escapeAttribute(text: string): string {
+/** For a double- or single-quoted HTML attribute value; the server's and the worker's form pages use it too. */
+export function escapeAttribute(text: string): string {
   let escaped = "";
   for (let index = 0; index < text.length; index++) escaped += ESCAPES[text[index]!] ?? text[index];
   return escaped;

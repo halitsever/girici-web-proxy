@@ -135,6 +135,38 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ LOG_LEVEL: "verbose" })).toThrow(/LOG_LEVEL/);
   });
 
+  it("reads the site domain and refuses one that cannot carry domain cookies", () => {
+    expect(loadConfig({ GIRICI_SITE_DOMAIN: "Proxy.Example" }).siteDomain).toEqual({
+      host: "proxy.example",
+      port: "",
+      value: "proxy.example",
+    });
+    expect(loadConfig({}).siteDomain).toBeUndefined();
+    expect(loadConfig({ GIRICI_SITE_DOMAIN: " " }).siteDomain).toBeUndefined();
+    expect(() => loadConfig({ GIRICI_SITE_DOMAIN: "github.io" })).toThrow(/GIRICI_SITE_DOMAIN.*public suffix/);
+    expect(() => loadConfig({ GIRICI_SITE_DOMAIN: "https://proxy.example" })).toThrow(/GIRICI_SITE_DOMAIN/);
+  });
+
+  it("names the rule a bad site domain breaks", () => {
+    expect(loadConfig({ GIRICI_SITE_DOMAIN: " girici.localhost:41005 " }).siteDomain?.value).toBe(
+      "girici.localhost:41005",
+    );
+    expect(() => loadConfig({ GIRICI_SITE_DOMAIN: "co.uk:8080" })).toThrow(
+      'GIRICI_SITE_DOMAIN must be a domain you control, not a public suffix such as github.io, got "co.uk:8080"',
+    );
+    expect(() => loadConfig({ GIRICI_SITE_DOMAIN: "1.2.3.4" })).toThrow(
+      'GIRICI_SITE_DOMAIN must be a host name such as proxy.example, optionally with :port, got "1.2.3.4"',
+    );
+  });
+
+  it("wants a site secret of 32 or more characters", () => {
+    expect(() => loadConfig({ GIRICI_SITE_SECRET: "short" })).toThrow(/GIRICI_SITE_SECRET.*32/);
+    expect(() => loadConfig({ GIRICI_SITE_SECRET: "short" })).not.toThrow(/short"/);
+    expect(loadConfig({ GIRICI_SITE_SECRET: "x".repeat(32) }).siteSecret).toBe("x".repeat(32));
+    expect(loadConfig({ GIRICI_SITE_SECRET: "" }).siteSecret).toBeUndefined();
+    expect(loadConfig({}).siteSecret).toBeUndefined();
+  });
+
   it("accepts only http(s) SOURCE_URL values", () => {
     expect(loadConfig({ SOURCE_URL: "https://example.com/fork" }).sourceUrl).toBe("https://example.com/fork");
     expect(() => loadConfig({ SOURCE_URL: "javascript:alert(1)" })).toThrow(/SOURCE_URL/);
