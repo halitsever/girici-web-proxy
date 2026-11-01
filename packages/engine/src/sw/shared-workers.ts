@@ -49,13 +49,16 @@ export function readSharedStart(url: URL, origin: string): SharedStart | null {
   return { scriptUrl, base, partition, module };
 }
 
-/** The partition must be the announcing page's own origin, under the top that page really has. */
-export function startFits(start: SharedStart, identity: WorkerIdentity): boolean {
+/**
+ * The partition must be the announcing page's own origin, under the top that page really has. A frame on a site host
+ * names its top's host, an origin the worker cannot ask, so there an unknown top fits any.
+ */
+export function startFits(start: SharedStart, identity: WorkerIdentity, siteHost = false): boolean {
   const page = parse(identity.page);
   if (!page || partitionOrigin(start.partition) !== page.origin) return false;
   const top = partitionTop(start.partition);
   if (top === null) return identity.top === null || sameSite(page, identity.top);
-  if (top === "null") return true;
+  if (top === "null" || (siteHost && identity.top === null)) return true;
   const topUrl = parse(top);
   return topUrl !== null && identity.top !== null && sameSite(topUrl, identity.top);
 }
@@ -65,10 +68,10 @@ export function announceSharedStart(
   path: string,
   nonce: string,
   identity: WorkerIdentity,
-  deps: { origin: string; starts: SharedWorkerStarts },
+  deps: { origin: string; starts: SharedWorkerStarts; siteHost?: boolean },
 ): boolean {
   const start = readSharedStart(new URL(path, deps.origin), deps.origin);
-  if (!start || !startFits(start, identity)) return false;
+  if (!start || !startFits(start, identity, deps.siteHost)) return false;
   deps.starts.announce(path, nonce, identity);
   return true;
 }
@@ -175,13 +178,13 @@ export class SharedWorkerStarts {
 export async function answerSharedWorker(
   request: { destination: string },
   url: URL,
-  deps: { origin: string; runtimePath: string; starts: SharedWorkerStarts },
+  deps: { origin: string; runtimePath: string; starts: SharedWorkerStarts; siteHost?: boolean },
 ): Promise<Response> {
   if (request.destination !== "sharedworker") return refused(404);
   const start = readSharedStart(url, deps.origin);
   if (!start) return refused(403);
   const announced = await deps.starts.take(url.pathname + url.search, SHARED_START_WAIT_MS);
-  if (!announced || !startFits(start, announced.identity)) return refused(403);
+  if (!announced || !startFits(start, announced.identity, deps.siteHost)) return refused(403);
   const code = workerBootstrapCode({
     runtimeUrl: deps.origin + deps.runtimePath,
     nonce: announced.nonce,

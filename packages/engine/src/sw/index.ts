@@ -241,7 +241,7 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
     return runtime.response(url.pathname);
   }
   const post = event.request.method === "POST";
-  if (own && url.pathname === WORKER_RPC_PATH && post) return handleWorkerRpc(event);
+  if (own && url.pathname === WORKER_RPC_PATH && post) return handleWorkerRpc(event, site);
   if (own && url.pathname === COOKIE_RPC_PATH && post) return handleCookieRpc(event);
   if (own && url.pathname === WS_PREP_PATH && post) return handleWsPrep(event);
   if (own && url.pathname === SITE_DATA_RPC_PATH && post) return handleSiteDataRpc(event, site);
@@ -249,7 +249,8 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
     return handleLabelRpc(event.request, (target) => siteMode.hostOf(target));
   }
   if (own && url.pathname === SHARED_WORKER_PATH) {
-    return answerSharedWorker(event.request, url, { origin, runtimePath: WORKER_PATH, starts: sharedStarts });
+    const deps = { origin, runtimePath: WORKER_PATH, starts: sharedStarts, siteHost: site };
+    return answerSharedWorker(event.request, url, deps);
   }
   if (own && url.pathname === CONTINUE_PATH) {
     return sealing.ready().then(() => warning.accept(event.request, sealing.open, origin));
@@ -544,8 +545,8 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
  * A page announces each worker it starts, and a worker its nested ones, before they exist. The caller's own place,
  * never the body, decides the identity the nonce binds to.
  */
-async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
-  const shared = { origin: self.location.origin, starts: sharedStarts };
+async function handleWorkerRpc(event: FetchEvent, site: boolean): Promise<Response> {
+  const shared = { origin: self.location.origin, starts: sharedStarts, siteHost: site };
   return answerAnnouncement(
     event.request,
     event.clientId,
