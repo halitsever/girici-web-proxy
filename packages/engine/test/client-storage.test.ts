@@ -56,6 +56,24 @@ describe("createPartitionedStorage", () => {
     expect(b.getItem("other")).toBe("x");
   });
 
+  it("reads the page's key index once", () => {
+    const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
+    a.setItem("k", "1");
+    let reads = 0;
+    const index = {
+      valueOf() {
+        reads++;
+        return 0;
+      },
+      toString() {
+        reads++;
+        return "0";
+      },
+    };
+    expect(a.key(index as unknown as number)).toBe("k");
+    expect(reads).toBe(1);
+  });
+
   it("stores values as strings", () => {
     const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
     a.setItem("n", 5 as unknown as string);

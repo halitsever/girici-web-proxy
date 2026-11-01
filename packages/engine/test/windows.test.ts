@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
-import { createWindowGuard, realOriginOf } from "../src/client/windows.ts";
+import {
+  createWindowGuard,
+  markWindow,
+  openedOrigin,
+  realOriginOf,
+  seversOpener,
+  WINDOW_BOUND,
+} from "../src/client/windows.ts";
 import { DESCRIPTOR_ADDITIONS, REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const proxy = "http://proxy.test";
@@ -47,6 +54,7 @@ function guardFor(
   const ctx = {
     origin: proxy,
     realUrl: () => new URL(`${realOrigin}/page`),
+    realBase: () => new URL(`${realOrigin}/page`),
     openSealed,
     toProxy: (raw: string) => {
       navigated.push(raw);
@@ -55,6 +63,32 @@ function guardFor(
   } as unknown as UrlContext;
   return createWindowGuard(win, ctx, invoke, swapBlob);
 }
+
+describe("seversOpener", () => {
+  it("reads window features as the HTML standard does", () => {
+    const severed = [
+      "noopener",
+      "NoOpener=yes",
+      "noopener=true",
+      "noopener=1",
+      "  noopener = 2 ",
+      "width=200,noreferrer",
+    ];
+    const kept = ["noopener=0", "noopener=no", "noopener=false", "xnoopener", "noopenerx", "noopener=abc", ""];
+    expect(severed.map(seversOpener)).toEqual(severed.map(() => true));
+    expect(kept.map(seversOpener)).toEqual(kept.map(() => false));
+    // The last value of a repeated feature counts.
+    expect([seversOpener("noopener=0,noopener"), seversOpener("noopener,noopener=0")]).toEqual([true, false]);
+  });
+});
+
+describe("openedOrigin", () => {
+  it("resolves a relative address against the document's base, not the proxy root", () => {
+    expect(openedOrigin("page", proxy, new URL("https://c.test/dir/"))).toBe("https://c.test");
+    expect(openedOrigin("/~/https/b.test/x", proxy, new URL("https://c.test/dir/"))).toBe("https://b.test");
+    expect(openedOrigin("page", proxy)).toBeUndefined();
+  });
+});
 
 describe("realOriginOf", () => {
   for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
@@ -157,6 +191,18 @@ describe("createWindowGuard", () => {
       const home = frame(attributes);
       expect(guard.wrap(home)).toBe(home);
     }
+  });
+
+  it("keeps a blank window another realm's engine sent to another site locked, as that engine does", () => {
+    const guard = guardFor("https://a.test");
+    const frame = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" }, document: {} });
+    markWindow(frame, WINDOW_BOUND, "https://b.test");
+    const wrapped = guard.wrap(frame) as Record<string, unknown>;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    // A mark the page made itself, as an accessor, counts for nothing.
+    const forged = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" }, document: {} });
+    Object.defineProperty(forged, WINDOW_BOUND, { get: () => "https://b.test" });
+    expect(guard.wrap(forged)).toBe(forged);
   });
 
   it("lets an opener reach a popup that came back to its origin on a sealed address", () => {
@@ -325,6 +371,7 @@ describe("createWindowGuard", () => {
     const ctx = {
       origin: proxy,
       realUrl: () => new URL("https://a.test/page"),
+      realBase: () => new URL("https://a.test/page"),
       openSealed: () => null,
       toProxy: (raw: string) => `${proxy}/~/proxied/${raw}`,
     } as unknown as UrlContext;

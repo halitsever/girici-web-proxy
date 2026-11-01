@@ -125,6 +125,42 @@ describe("installStorageIsolation", () => {
     expect(await next.get("a")).toEqual({ name: "a", value: "1" });
   });
 
+  it("keeps every partition's names out of the page's own promise machinery", async () => {
+    const prefix = prefixFor("https://a.test");
+    // The page's realm, whose then and constructor note every answer that passes through them.
+    const page = runInNewContext(`(prefix) => {
+      const seen = [];
+      const look = (value) => { try { seen.push(JSON.stringify(value)); } catch {} };
+      const then = Promise.prototype.then;
+      Promise.prototype.then = function (resolve, reject) {
+        return then.call(this, (value) => { look(value); return typeof resolve === "function" ? resolve(value) : value; }, reject);
+      };
+      let busy = false;
+      Object.defineProperty(Promise.prototype, "constructor", {
+        configurable: true,
+        get() {
+          if (!busy) {
+            busy = true;
+            try { then.call(this, look, () => {}); } finally { busy = false; }
+          }
+          return Promise;
+        },
+      });
+      const names = [prefix + "own", "__g|https://other.test|theirs"];
+      class IDBFactory { databases() { return Promise.resolve(names.map((name) => ({ name }))); } }
+      class CacheStorage { keys() { return Promise.resolve(names.slice()); } }
+      class LockManager { query() { return Promise.resolve({ held: names.map((name) => ({ name })), pending: [] }); } }
+      return {
+        seen, Promise, Object, Array, IDBFactory, CacheStorage, LockManager,
+        indexedDB: new IDBFactory(), caches: new CacheStorage(), locks: new LockManager(),
+      };
+    }`)(prefix) as Realm & { seen: string[]; locks: { query(): Promise<unknown> }; LockManager: unknown };
+    installStorageIsolation(page, ctxFor("https://a.test"), () => prefix);
+    const answers = [await page.indexedDB.databases(), await page.caches.keys(), await page.locks.query()];
+    expect(JSON.stringify(answers)).toBe('[[{"name":"own"}],["own"],{"held":[{"name":"own"}],"pending":[]}]');
+    expect(page.seen.filter((value) => value.includes("theirs"))).toEqual([]);
+  });
+
   it("answers storage listings in the page's own realm, out of reach of the built-ins of the realm that made it", async () => {
     const prefix = prefixFor("https://a.test");
     // The window's own storage APIs, from another realm, answering with names that carry the marker.

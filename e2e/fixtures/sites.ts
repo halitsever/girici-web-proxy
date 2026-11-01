@@ -866,6 +866,10 @@ const EXEC = page(
   const generator = new GeneratorFunction("yield 1; return location.href")();
   generator.next();
   out.generator = generator.next().value;
+  out.params = new Function("a = location.href", "return a")();
+  out.objectBody = new Function({ toString: () => "return location.href" })();
+  out.escaped = new Function("return l\\\\u006fcation.href")();
+  setTimeout({ toString: () => "window.__o = location.href" }, 0);
   const later = Promise.all([
     new AsyncFunction("await 0; return location.href")(),
     (async () => {
@@ -879,6 +883,7 @@ const EXEC = page(
   });
   setTimeout(() => {
     out.timer = window.__t;
+    out.objectTimer = window.__o;
     later.then(() => {
       document.getElementById("results").textContent = JSON.stringify(out);
     });
@@ -2298,8 +2303,10 @@ const XS_REALM_OPENER = page(
   "Realm opener",
   `<button id="go">go</button><button id="check">check</button><a id="link">link</a>
 <form id="form" method="get"><input name="via" id="form-via"></form>
+<iframe id="same" src="/xs-realm-idle"></iframe>
 <pre id="results"></pre>
 <script>
+  ${FAILURE}
   window.__xsRealmA = "site-a";
   const spy = (() => {
     "use strict";
@@ -2405,14 +2412,32 @@ const XS_REALM_OPENER = page(
   const via = new URLSearchParams(location.search).get("via");
   const victim = (path) => "https://site-b.test/xs-realm-victim?via=" + path;
   const idle = "https://site-a.test/xs-realm-idle";
+  // Answers late, so a window a link or form sends there stays blank meanwhile.
+  const slow = "https://site-a.test/xs-realm-slow";
   const messages = [];
   let w = null;
-  const submit = (target, path) => {
+  let lock = null;
+  const submit = (target, path, action = "https://site-b.test/xs-realm-victim") => {
     const form = document.getElementById("form");
     document.getElementById("form-via").value = path;
     form.target = target;
-    form.action = "https://site-b.test/xs-realm-victim";
+    form.action = action;
     form.submit();
+  };
+  const follow = (target, href) => {
+    const link = document.getElementById("link");
+    link.target = target;
+    link.href = href;
+    link.click();
+  };
+  // Readies a blank window's realm for the next page: the engine script that page runs takes Reflect.apply at load,
+  // so a renewal it asks for seems to succeed without running.
+  const prepare = (handle) => {
+    const apply = handle.Reflect.apply;
+    handle.Reflect.apply = function (fn, self, args) {
+      if (typeof fn === "function" && fn.name === "renew") return true;
+      return apply(fn, self, args);
+    };
   };
   addEventListener("message", (event) => {
     if (event.data === "idle" && via === "existing") open(victim("existing"), "xsr-existing");
@@ -2427,23 +2452,46 @@ const XS_REALM_OPENER = page(
     "doc-open": () => (w = document.open(victim("doc-open"), "xsr-doc", "")),
     existing: () => (w = open(idle, "xsr-existing")),
     pending: () => {
-      w = open(idle, "xsr-pending");
-      open(victim("pending"), "xsr-pending");
+      open(idle, "xsr-pending");
+      w = open(victim("pending"), "xsr-pending");
+    },
+    javascript: () => {
+      prepare(open("javascript:void 0", "xsr-js"));
+      w = open(victim("javascript"), "xsr-js");
+    },
+    retarget: () => {
+      prepare(open(idle, "xsr-retarget"));
+      w = open(victim("retarget"), "xsr-retarget");
+    },
+    // The victim follows in a later task, once the browser has started the link's or form's own navigation.
+    "link-new": () => {
+      follow("xsr-linknew", slow);
+      prepare(open("", "xsr-linknew"));
+      setTimeout(() => (w = open(victim("link-new"), "xsr-linknew")), 100);
+    },
+    "form-new": () => {
+      submit("xsr-formnew", "form-new", slow);
+      prepare(open("", "xsr-formnew"));
+      setTimeout(() => (w = open(victim("form-new"), "xsr-formnew")), 100);
+    },
+    lock: () => {
+      w = open(victim("lock"), "xsr-lock");
+      // Another realm of this site reaches the same window by name before the other site's page arrives.
+      const other = document.getElementById("same").contentWindow.open("", "xsr-lock");
+      lock = failure(() => other.document);
     },
     link: () => {
       w = open("", "xsr-link");
-      const link = document.getElementById("link");
-      link.target = "xsr-link";
-      link.href = victim("link");
-      link.click();
+      follow("xsr-link", victim("link"));
     },
     form: () => {
       w = open("", "xsr-form");
       submit("xsr-form", "form");
     },
     "form-opened": () => {
-      w = open(idle, "xsr-opened");
+      open(idle, "xsr-opened");
       submit("xsr-opened", "form-opened");
+      w = open("", "xsr-opened");
     },
     redirect: () => (w = open("https://site-a.test/xs-realm-away?to=" + encodeURIComponent(victim("redirect")))),
     away: () => {
@@ -2454,12 +2502,21 @@ const XS_REALM_OPENER = page(
   };
   document.getElementById("go").onclick = () => paths[via]();
   document.getElementById("check").onclick = () => {
-    document.getElementById("results").textContent = JSON.stringify({ spy: JSON.parse(spy()), messages });
+    document.getElementById("results").textContent = JSON.stringify({ spy: JSON.parse(spy()), messages, lock });
   };
 </script>`,
 );
 
-const XS_REALM_IDLE = page("Realm idle", `<script>if (opener) opener.postMessage("idle", "*");</script>`);
+// Answers a victim that names this page its opener, as one that asked for the victim's window by name becomes.
+const XS_REALM_IDLE = page(
+  "Realm idle",
+  `<script>
+  if (opener) opener.postMessage("idle", "*");
+  addEventListener("message", (event) => {
+    if (event.data && event.data.via) event.source.postMessage("pong", event.origin);
+  });
+</script>`,
+);
 
 // Compiles location reads through the generator and async constructors of a blank frame's own realm.
 const XS_REALM_EXEC = page(
@@ -2847,6 +2904,12 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sealed/search": sealedSearch,
     "/xs-realm": html(XS_REALM_OPENER),
     "/xs-realm-idle": html(XS_REALM_IDLE),
+    "/xs-realm-slow": (_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(XS_REALM_IDLE);
+      }, 3000);
+    },
     "/xs-realm-exec": html(XS_REALM_EXEC),
     "/xs-realm-away": (req, res) => {
       res.writeHead(302, { location: new URL(req.url ?? "/", "http://fixture").searchParams.get("to") ?? "/" });
