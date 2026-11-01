@@ -5,7 +5,6 @@
 
 import {
   apply,
-  endsWith,
   hostOf as hostPart,
   isWebUrl,
   NativeMap,
@@ -34,7 +33,16 @@ const promiseThen = Promise.prototype.then;
 const mapGet = Map.prototype.get;
 const mapSet = Map.prototype.set;
 const mapDelete = Map.prototype.delete;
+const mapSize = Object.getOwnPropertyDescriptor(Map.prototype, "size")?.get as () => number;
+const mapClear = Map.prototype.clear;
 const responseText = Response.prototype.text;
+const MEMO_LIMIT = 512;
+
+/** A page that names ever more origins would grow these maps without end, so a full one starts over. */
+function remember<V>(map: Map<string, V>, key: string, value: V): void {
+  if (apply(mapSize, map, []) >= MEMO_LIMIT) apply(mapClear, map, []);
+  apply(mapSet, map, [key, value]);
+}
 
 /** The worker's answer for one origin: its host, null when it names none, undefined when the lookup failed. */
 export type LabelLookup = (realOrigin: string) => Promise<string | null | undefined>;
@@ -48,9 +56,6 @@ export interface SiteClaim {
   host: string;
   sure: boolean;
 }
-
-const SAME = 1;
-const UNDER = 2;
 
 export interface SiteLabels {
   /** The host serving `realOrigin`, when a lookup or a verified message has named it. */
@@ -78,7 +83,7 @@ export function createSiteLabels(sites: SiteContext, ownOrigin: () => string, as
     if (!url || protocolOf(url) !== protocol) return null;
     const kind = classifySiteHost(hostPart(url), domain);
     if (kind.kind !== "site") return null;
-    return { __proto__: null, origin: originOf(url), label: kind.label } as { origin: string; label: string };
+    return { origin: originOf(url), label: kind.label };
   };
 
   /** Callers ask only for origins `hostOf` cannot name, so a lookup kept here holds the worker's answer. */
@@ -90,12 +95,12 @@ export function createSiteLabels(sites: SiteContext, ownOrigin: () => string, as
         const finish = (found: unknown) => {
           const host = typeof found === "string" ? (siteHost(found)?.origin ?? null) : null;
           if (found === undefined) apply(mapDelete, lookups, [realOrigin]);
-          else apply(mapSet, hosts, [realOrigin, host]);
+          else remember(hosts, realOrigin, host);
           settle(host);
         };
         apply(promiseThen, ask(realOrigin), [finish, () => finish(undefined)]);
       });
-      apply(mapSet, lookups, [realOrigin, lookup]);
+      remember(lookups, realOrigin, lookup);
     }
     return lookup;
   };
@@ -109,21 +114,24 @@ export function createSiteLabels(sites: SiteContext, ownOrigin: () => string, as
       const host = siteHost(nativeOrigin);
       if (!host || host.label === sites.label) return undefined;
       const envelope = readMessageEnvelope(value);
-      if (!key || !envelope) return null;
-      const place = placeIn(envelope.o, envelope.s);
-      if (!place || siteLabel(key, envelope.s) !== host.label) return null;
-      // A name under the site may sit under a public suffix and be a site of its own, which only the worker can tell.
-      if (place === SAME) apply(mapSet, hosts, [envelope.o, host.origin]);
+      const claimed = envelope && parseUrl(envelope.o);
+      if (!key || !claimed || !isWebUrl(claimed) || originOf(claimed) !== envelope.o) return null;
+      if (siteLabel(key, envelope.s) !== host.label) return null;
+      // Only the site's own name is certain here; any other name may be a site of its own under a public suffix, which
+      // only the worker can tell.
+      if (`${protocolOf(claimed)}//${urlPart(claimed, "hostname")}` === envelope.s) {
+        remember(hosts, envelope.o, host.origin);
+      }
       const known = apply(mapGet, hosts, [envelope.o]) as string | null | undefined;
       if (known !== undefined && known !== host.origin) return null;
+      // Every field is the record's own, so no prototype a page changed is ever read.
       return {
-        __proto__: null,
         origin: envelope.o,
         target: envelope.t,
         data: envelope.d,
         host: host.origin,
         sure: known !== undefined,
-      } as never;
+      };
     },
   };
 }
@@ -160,17 +168,6 @@ export function createLabelLookup(
         failed();
       }
     });
-}
-
-/** Where `origin`, a serialized web origin of `site`'s scheme, sits: on the site's own name, under it, or nowhere. */
-function placeIn(origin: string, site: string): number {
-  const claimed = parseUrl(origin);
-  const own = parseUrl(site);
-  if (!claimed || !own || !isWebUrl(claimed) || originOf(claimed) !== origin) return 0;
-  if (protocolOf(claimed) !== protocolOf(own)) return 0;
-  const host = urlPart(claimed, "hostname");
-  const siteHost = urlPart(own, "hostname");
-  return host === siteHost ? SAME : endsWith(host, `.${siteHost}`) ? UNDER : 0;
 }
 
 /** The host the worker named for `origin`, the answer's only entry: null for none, undefined if it does not say. */

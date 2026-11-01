@@ -54,7 +54,8 @@ function createOrderedQueue(setTimer: typeof setTimeout) {
     }
   };
   const add = (run: (() => void) | null, waiting: boolean): Job => {
-    const job = { __proto__: null, run, waiting, next: null } as Job;
+    // Only this queue reads its jobs, and every field it reads is the job's own.
+    const job: Job = { run, waiting, next: null };
     if (last) last.next = job;
     else first = job;
     last = job;
@@ -95,7 +96,7 @@ export function createSiteMessaging(
   const lookup: LabelLookup = (realOrigin) => (inherited() ?? own)(realOrigin);
   const labels = createSiteLabels(sites, () => originOf(ctx.realUrl()), lookup);
   const post = createCrossSitePoster(labels, invoke, win.postMessage, win.setTimeout);
-  return { __proto__: null, labels, post, lookup } as never;
+  return { labels, post, lookup };
 }
 
 /**
@@ -248,7 +249,6 @@ export function installSiteMessages(
   };
 
   return {
-    __proto__: null,
     origin: (event, origin) => {
       const verified = check(event, origin);
       if (verified === undefined) return undefined;

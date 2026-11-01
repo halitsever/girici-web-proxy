@@ -43,9 +43,24 @@ describe("createSiteLabels", () => {
     expect(labels.hostOf("https://site-b.test")).toBe(B);
     expect(labels.verify(B, env({ o: "https://site-b.test:8443" }))?.sure).toBe(true);
     expect(labels.verify(B, env({ s: "https://site-c.test" }))).toBeNull();
-    expect(labels.verify(B, env({ o: "https://evil.test" }))).toBeNull();
-    expect(labels.verify(B, env({ o: "http://site-b.test" }))).toBeNull();
+    expect(labels.verify(B, env({ o: "https://site-b.test/" }))).toBeNull();
+    expect(labels.verify(B, env({ o: "javascript:x" }))).toBeNull();
     expect(labels.verify(B, Object.create(env({})))).toBeNull();
+  });
+
+  it("holds a claim for any other name until the worker places it on the sender's host", async () => {
+    const elsewhere = "https://ijklmnopqrstuvwxyz234567ab.proxy.test";
+    const labels = createSiteLabels(
+      sites,
+      () => "https://site-a.test",
+      async () => elsewhere,
+    );
+    for (const origin of ["https://evil.test", "http://site-b.test", "https://xsite-b.test"]) {
+      expect(labels.verify(B, env({ o: origin }))?.sure, origin).toBe(false);
+      expect(labels.hostOf(origin), origin).toBeNull();
+      expect(await labels.resolve(origin), origin).toBe(elsewhere);
+      expect(labels.verify(B, env({ o: origin })), origin).toBeNull();
+    }
   });
 
   it("holds a claim for a name under the sender's site until the worker names that name's host", async () => {
@@ -93,8 +108,6 @@ describe("createSiteLabels", () => {
     expect(labels.verify("http://g4fjzasx42nioynauh4u6ncvdg.proxy.test", env({}))).toBeUndefined();
     expect(labels.verify("https://g4fjzasx42nioynauh4u6ncvdg.evil.test", env({}))).toBeUndefined();
     expect(labels.verify(A, env({ o: "https://site-a.test", s: "https://site-a.test" }))).toBeUndefined();
-    expect(labels.verify(B, env({ o: "https://xsite-b.test" }))).toBeNull();
-    expect(labels.hostOf("https://xsite-b.test")).toBeNull();
   });
 
   it("asks the service worker once per origin", async () => {
@@ -201,6 +214,46 @@ describe("createSiteLabels", () => {
     const expected = run();
     for (const [name, target, property, replacement] of REPLACED_BUILTINS) {
       expect(withReplaced(target, property, replacement, run), name).toEqual(expected);
+    }
+  });
+});
+
+describe("site label memory", () => {
+  it("keeps at most 512 origins, starting over when full", async () => {
+    const asked: string[] = [];
+    const labels = createSiteLabels(
+      sites,
+      () => "https://site-a.test",
+      async (origin) => {
+        asked.push(origin);
+        return B;
+      },
+    );
+    const origin = (index: number) => `https://s${index}.site-b.test`;
+    for (let index = 0; index < 512; index++) await labels.resolve(origin(index));
+    expect(labels.hostOf(origin(0))).toBe(B);
+    expect(labels.hostOf(origin(511))).toBe(B);
+    await labels.resolve(origin(512));
+    expect(labels.hostOf(origin(0))).toBeNull();
+    expect(labels.hostOf(origin(511))).toBeNull();
+    expect(labels.hostOf(origin(512))).toBe(B);
+    await labels.resolve(origin(0));
+    expect(asked.filter((entry) => entry === origin(0))).toHaveLength(2);
+    await labels.resolve(origin(512));
+    expect(asked.filter((entry) => entry === origin(512))).toHaveLength(1);
+  });
+
+  it("forgets the oldest the same while a page has replaced built-ins", async () => {
+    for (const [name, target, property, replacement] of REPLACED_BUILTINS) {
+      const labels = createSiteLabels(
+        sites,
+        () => "https://site-a.test",
+        async () => B,
+      );
+      for (let index = 0; index < 512; index++) await labels.resolve(`https://s${index}.site-b.test`);
+      withReplaced(target, property, replacement, () => labels.verify(B, env({ o: "https://site-b.test" })));
+      expect(labels.hostOf("https://site-b.test"), name).toBe(B);
+      expect(labels.hostOf("https://s0.site-b.test"), name).toBeNull();
     }
   });
 });
