@@ -96,6 +96,9 @@ function fakeGlobals() {
     indexedDB: new IDBFactory(),
     CacheStorage,
     caches: new CacheStorage(),
+    Promise,
+    Object,
+    Array,
     BroadcastChannel,
     Worker,
     SharedWorker,
@@ -191,6 +194,7 @@ describe("installWorker", () => {
       openSealed: () => null,
       inherit: () => {},
       accepts: () => true,
+      keepsOrigin: () => true,
     };
     const partition = () => prefixFor(ctx.realUrl().origin);
     const win = page.globals as unknown as Realm;

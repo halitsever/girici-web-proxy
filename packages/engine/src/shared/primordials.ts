@@ -13,13 +13,24 @@ const nativeStartsWith = strings.startsWith;
 const nativeEndsWith = strings.endsWith;
 const nativeSlice = strings.slice;
 const nativeIndexOf = strings.indexOf;
+const nativeLastIndexOf = strings.lastIndexOf;
 const nativeIncludes = strings.includes;
 const nativeToLowerCase = strings.toLowerCase;
 const nativeTrim = strings.trim;
 const nativeCodePointAt = strings.codePointAt;
+const nativeCharCodeAt = strings.charCodeAt;
 const nativeArrayIncludes = Array.prototype.includes;
 const nativeIsArray = Array.isArray;
 const nativeParseInt = parseInt;
+const NativeNumber = Number;
+const nativeIsNaN = Number.isNaN;
+const nativeNow = Date.now;
+const nativeDateParse = Date.parse;
+const nativeAtob = atob;
+const nativeThen = Promise.prototype.then;
+const objectCreate = Object.create;
+const ownKeys = Reflect.ownKeys;
+const isEnumerable = Object.prototype.propertyIsEnumerable;
 const NativeJson = JSON;
 const jsonStringify = JSON.stringify;
 const jsonParse = JSON.parse;
@@ -30,6 +41,7 @@ const bufferOf = ownDescriptor(typedArrays, "buffer")?.get as () => ArrayBuffer;
 const typedLength = ownDescriptor(typedArrays, "length")?.get as () => number;
 const nativeDecode = TextDecoder.prototype.decode;
 const utf8Decoder = new TextDecoder();
+const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
 const nativeExec = RegExp.prototype.exec;
 const nativeSetHas = Set.prototype.has;
 const objectToString = Object.prototype.toString;
@@ -61,6 +73,22 @@ export function indexOf(text: string, search: string, from?: number): number {
   return apply(nativeIndexOf, text, [search, from]);
 }
 
+export function lastIndexOf(text: string, search: string): number {
+  return apply(nativeLastIndexOf, text, [search]);
+}
+
+/** Splits on a non-empty separator. String.prototype.split would look `Symbol.split` up on the page's String.prototype. */
+export function splitText(text: string, separator: string): string[] {
+  const parts: string[] = [];
+  let start = 0;
+  for (let at = indexOf(text, separator); at >= 0; at = indexOf(text, separator, start)) {
+    append(parts, sliceOf(text, start, at));
+    start = at + separator.length;
+  }
+  append(parts, sliceOf(text, start));
+  return parts;
+}
+
 export function includes(text: string, search: string): boolean {
   return apply(nativeIncludes, text, [search]);
 }
@@ -77,8 +105,72 @@ export function codePointAt(text: string, index: number): number | undefined {
   return apply(nativeCodePointAt, text, [index]);
 }
 
+export function charCodeAt(text: string, index: number): number {
+  return apply(nativeCharCodeAt, text, [index]);
+}
+
 export function parseHex(text: string): number {
   return nativeParseInt(text, 16);
+}
+
+/** Number(value) and Number.isNaN, which a page can replace on its own globals. */
+export const toNumber = NativeNumber as (value: unknown) => number;
+export const isNotANumber = nativeIsNaN as (value: unknown) => boolean;
+
+/** Date.now(); expiry checks must not ask the page what time it is. */
+export function now(): number {
+  return nativeNow();
+}
+
+/** Date.parse, as cookie expiry dates are read. */
+export function parseDate(text: string): number {
+  return nativeDateParse(text);
+}
+
+/** atob; throws for text that is not base64. */
+export function fromBase64(text: string): string {
+  return nativeAtob(text);
+}
+
+/** UTF-8 that throws on an invalid sequence instead of putting U+FFFD in its place. */
+export function strictUtf8(bytes: Uint8Array): string {
+  return apply(nativeDecode, strictUtf8Decoder, [bytes]);
+}
+
+/** Captured then; it still reads `constructor` and @@species on the promise, so pass only the window's own promises. */
+export function promiseThen<T, U>(
+  promise: PromiseLike<T>,
+  onFulfilled: (value: T) => U | PromiseLike<U>,
+  onRejected?: (reason: unknown) => U | PromiseLike<U>,
+): Promise<U> {
+  return apply(nativeThen, promise, [onFulfilled, onRejected]);
+}
+
+/** Object.create(proto), for objects that belong to another realm's prototypes. */
+export function createObject<T extends object>(proto: object | null): T {
+  return objectCreate(proto) as T;
+}
+
+/** A data property made as an object literal makes it, past any setter on the target's prototypes. */
+export function defineData(target: object, key: PropertyKey, value: unknown): void {
+  defineProperty(target, key, {
+    __proto__: null,
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  } as PropertyDescriptor);
+}
+
+/** `{ ...source }` into `target`: own enumerable keys, read in order, with natives taken at load. */
+export function assignOwn<T extends object>(target: T, source: unknown): T {
+  if ((typeof source !== "object" && typeof source !== "function") || source === null) return target;
+  const keys = ownKeys(source);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index] as PropertyKey;
+    if (apply(isEnumerable, source, [key])) defineData(target, key, (source as Record<PropertyKey, unknown>)[key]);
+  }
+  return target;
 }
 
 export function exec(pattern: RegExp, text: string): RegExpExecArray | null {

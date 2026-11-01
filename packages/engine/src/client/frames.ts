@@ -1,5 +1,15 @@
-import { append, define, hrefOf, NativeWeakSet } from "../shared/primordials.ts";
+import {
+  append,
+  define,
+  exec,
+  hrefOf,
+  listIncludes,
+  lowerCase,
+  NativeWeakSet,
+  originOf,
+} from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
+import type { AssignHref } from "./invoke.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
@@ -48,6 +58,9 @@ const FRAME_ELEMENTS = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElem
 const SVG_DOCUMENT_ELEMENTS = ["HTMLIFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
 const NO_CHILDREN: readonly unknown[] = [];
 const PLUGIN_WALKS = [16, 50, 100, 250, 500, 1000, 2000];
+/** open() targets that name a window already showing a page, which no first page can share. */
+const SAME_WINDOW = ["_self", "_parent", "_top"];
+const SEVERED = /noopener|noreferrer/i;
 
 // Taken at load: adoption runs inside page calls, after page code may have replaced these.
 const apply = Reflect.apply;
@@ -131,6 +144,7 @@ export function installFrames(
   clientUrl: string,
   steps: DocumentSteps,
   guard: WindowGuard,
+  assignHref: AssignHref,
 ): FrameAdopter {
   const lengthOf = ownDescriptor(win, "length")?.get;
   const ownerDocument = ownDescriptor(win.Node.prototype, "ownerDocument")?.get;
@@ -304,12 +318,46 @@ export function installFrames(
     define(proto, "getSVGDocument", { ...descriptor, value: maskNative(hooked, native) });
   }
 
+  /** A window open(url) makes for another origin, whose first page would keep that window and this realm's hooks. */
+  const headsElsewhere = (url: unknown, target: unknown, features: unknown): boolean => {
+    if (target !== undefined && listIncludes(SAME_WINDOW, lowerCase(toText(target)))) return false;
+    // Such a window is never handed to this realm, so nothing here adopts it.
+    if (features !== undefined && exec(SEVERED, toText(features)) !== null) return false;
+    const destination = openedOrigin(url, ctx.origin);
+    return destination !== undefined && destination !== originOf(ctx.realUrl());
+  };
+  const showsPage = (opened: object): boolean => {
+    try {
+      return (opened as { location: Location }).location.href !== "about:blank";
+    } catch {
+      // Only a window of another real origin hides its address.
+      return true;
+    }
+  };
+  /** Assigned from this window's realm, so its page is the navigation's source and referrer, as it is for open(url). */
+  const sendTo = (opened: object, url: string): void => {
+    try {
+      assignHref((opened as { location: Location }).location, url);
+    } catch {
+      // A window closed meanwhile has nothing to load.
+    }
+  };
   const open = win.open;
   const openWindow = maskNative(function (this: unknown, ...args: unknown[]) {
+    const url = args[0];
+    const navigating = url !== undefined && url !== null && url !== "";
+    if (navigating && headsElsewhere(url, args[1], args[2])) {
+      // Browsers give a page sent to a blank popup a fresh window, without the hooks adopted into the blank one.
+      const blank = apply(open, this ?? win, ["", args[1], args[2]]) as Window | null;
+      // A named window that already shows a page gets a fresh window anyway, and open() keeps its history entry.
+      if (blank && showsPage(blank)) return apply(open, this ?? win, args) as Window | null;
+      adopt(blank, true);
+      if (blank) sendTo(blank, toText(url));
+      return blank;
+    }
     const opened = apply(open, this ?? win, args) as Window | null;
     // A popup opened with a URL keeps this blank window only until that page arrives and renews it.
-    const url = args[0];
-    adopt(opened, url !== undefined && url !== null && url !== "");
+    adopt(opened, navigating);
     return opened;
   }, open) as typeof win.open;
   win.open = openWindow;

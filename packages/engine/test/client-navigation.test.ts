@@ -209,6 +209,41 @@ describe("installNavigation", () => {
   });
 });
 
+describe("submits held for cookie writes", () => {
+  it("checks the submitter without the page's Array.prototype.some", () => {
+    const fake = fakeWindow();
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    const writes = { pendingWrites: () => Promise.resolve() } as unknown as CookieBridge;
+    const nav = installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      writes,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      noBlobs,
+    );
+    fake.listeners.length = 0;
+    nav.listen();
+    const form = new fake.win.HTMLFormElement({ action: "/search" });
+    const submitter = new FakeElement({ formtarget: "sink" });
+    const event = new fake.win.Event("submit", [form]);
+    Object.defineProperty(event, "submitter", { value: submitter });
+    const seen: unknown[] = [];
+    const page = {
+      value(this: unknown[]) {
+        seen.push(this);
+        return false;
+      },
+    };
+    withReplaced(Array.prototype, "some", page, () => {
+      for (const [type, listener] of fake.listeners) if (type === "submit") listener(event);
+    });
+    expect(seen).toEqual([]);
+    // The override leaves the submit to the browser.
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 describe("blob links", () => {
   it("restores a clicked link's blob swap at once when Array.prototype.includes is replaced", () => {
     const swaps: unknown[] = [];

@@ -1,4 +1,4 @@
-import { PROTOCOL_VERSION } from "../shared/protocol.ts";
+import { COOKIE_BATCH_LIMIT, PROTOCOL_VERSION } from "../shared/protocol.ts";
 import type { CookieService } from "./cookies/jar.ts";
 
 interface Waiter {
@@ -35,11 +35,13 @@ export class CookieRpc {
       return new Response(null, { status: 400 });
     }
     if (typeof body !== "object" || body === null) return new Response(null, { status: 400 });
-    const { v, seq, cookie } = body as Record<string, unknown>;
+    const { v, seq, cookie, cookies } = body as Record<string, unknown>;
     if (v !== PROTOCOL_VERSION) return new Response(null, { status: 409 });
-    if (typeof seq !== "number" || typeof cookie !== "string" || !pageUrl) return new Response(null, { status: 400 });
+    const batch = cookies === undefined ? (typeof cookie === "string" ? [cookie] : null) : batchOf(cookies, cookie);
+    if (typeof seq !== "number" || !batch || !pageUrl) return new Response(null, { status: 400 });
 
-    if (!options.blocked) await this.#cookies.setFromScript(pageUrl, cookie);
+    // In order, so the jar ends with the page's last write.
+    if (!options.blocked) for (const text of batch) await this.#cookies.setFromScript(pageUrl, text);
     this.#markProcessed(clientId, seq);
     const visible = options.blocked ? [] : await this.#cookies.snapshot(pageUrl);
     return new Response(JSON.stringify({ cookies: visible }), {
@@ -82,4 +84,11 @@ export class CookieRpc {
       if (waiter.seq <= processed) waiter.resolve();
     }
   }
+}
+
+/** A batch body's cookies: 1 to COOKIE_BATCH_LIMIT strings, and no single `cookie` beside them. */
+function batchOf(cookies: unknown, cookie: unknown): string[] | null {
+  if (cookie !== undefined || !Array.isArray(cookies)) return null;
+  if (cookies.length === 0 || cookies.length > COOKIE_BATCH_LIMIT) return null;
+  return cookies.every((text) => typeof text === "string") ? (cookies as string[]) : null;
 }
