@@ -131,10 +131,14 @@ export class SpentChallenges {
     this.#max = max;
   }
 
-  /** False for a repeat, or while the set is full of live entries. */
+  /** False for a repeat. A full set drops its oldest entry, so a flood of answers cannot lock out everyone else. */
   spend(id: string, expires: number, now = Date.now()): boolean {
     this.#sweep(now);
-    if (this.#spent.has(id) || this.#spent.size >= this.#max) return false;
+    if (this.#spent.has(id)) return false;
+    if (this.#spent.size >= this.#max) {
+      const oldest = this.#spent.keys().next();
+      if (!oldest.done) this.#spent.delete(oldest.value);
+    }
     this.#spent.set(id, expires);
     return true;
   }
@@ -143,13 +147,11 @@ export class SpentChallenges {
     return this.#spent.size;
   }
 
-  /** Entries arrive in roughly expiry order, so the head is swept cheaply and the whole set only when full. */
+  /** Entries arrive in roughly expiry order, so sweeping the head is enough and stays cheap. */
   #sweep(now: number): void {
     for (const [id, expires] of this.#spent) {
       if (expires >= now) break;
       this.#spent.delete(id);
     }
-    if (this.#spent.size < this.#max) return;
-    for (const [id, expires] of this.#spent) if (expires < now) this.#spent.delete(id);
   }
 }

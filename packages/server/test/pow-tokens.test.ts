@@ -63,8 +63,17 @@ describe("proof-of-work tokens", () => {
     expect(spent.spend("a", 100, 0)).toBe(true);
     expect(spent.spend("a", 100, 0)).toBe(false);
     expect(spent.spend("b", 100, 0)).toBe(true);
-    expect(spent.spend("c", 100, 0)).toBe(false);
     expect(spent.spend("c", 300, 101)).toBe(true);
     expect(spent.size).toBe(1);
+  });
+
+  it("forgets its oldest entry when full instead of refusing right answers", () => {
+    const spent = new SpentChallenges(2);
+    expect(spent.spend("a", 100, 0)).toBe(true);
+    expect(spent.spend("b", 100, 0)).toBe(true);
+    expect(spent.spend("c", 100, 0)).toBe(true);
+    expect(spent.size).toBe(2);
+    expect(spent.spend("b", 100, 0)).toBe(false);
+    expect(spent.spend("c", 100, 0)).toBe(false);
   });
 });

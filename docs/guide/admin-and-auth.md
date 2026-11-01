@@ -158,6 +158,8 @@ Limits:
 - The check needs JavaScript and Web Workers.
 - Each challenge can be answered once. Girici remembers answered challenges in memory, so after a restart or on
   another replica an answer works once more during the five minutes the challenge lives.
+- Girici remembers up to 100,000 answered challenges. If a flood of solves from many addresses fills that within
+  five minutes, it forgets the oldest ones, and those can be answered once more. Other visitors keep passing.
 
 ## Scaling later
 
