@@ -12,6 +12,8 @@ import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { powGate, powUpgradeGate } from "./pow/gate.ts";
+import { powRouter } from "./routes/pow.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
@@ -61,6 +63,12 @@ const limiter = config.rateLimit > 0 ? tokenBucket({ perMinute: config.rateLimit
 const blocklist = new HostBlocklist(config.blockedHosts, authStore.blockedHosts());
 // A fresh code at every start until setup is done, unless the operator fixed one.
 const setupCode = config.setupToken ?? generateSetupCode();
+// The browser check: an admin switch, so it is always wired and reads the switch on each request.
+const pow = {
+  gate: powGate({ store: authStore }),
+  router: powRouter({ store: authStore, difficulty: config.powDifficulty }),
+  upgradeGate: powUpgradeGate({ store: authStore }),
+};
 const agent = createUpstreamAgent({
   proxy: config.upstreamProxy,
   testUpstreams: config.testUpstreams,
@@ -78,6 +86,8 @@ const server = createHttpServer(
     limiter,
     blocklist,
     setupToken: setupCode,
+    powGate: pow.gate,
+    powRouter: pow.router,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
@@ -113,6 +123,7 @@ const wsRelay = attachWsRelay(server, {
   trust,
   limiter,
   blocklist,
+  upgradeGates: [pow.upgradeGate],
 });
 server.on("error", (error) => {
   logger.error(error.message);
