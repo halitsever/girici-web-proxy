@@ -37,6 +37,13 @@ export { expect };
 /** Turns on this browser's "Encrypt page addresses" switch through the UI's stored settings. */
 export async function enableSealing(page: Page): Promise<void> {
   await page.goto("/settings");
+  if (isSiteProject(test.info())) {
+    // Site hosts read the switch from the settings cookie the root sets.
+    const saved = page.waitForResponse((res) => res.url().endsWith("/_g/prefs") && res.status() === 204);
+    await page.getByRole("switch", { name: "Encrypt page addresses" }).click();
+    await saved;
+    return;
+  }
   // Settings registers the worker, and WebKit leaves an install a reload cuts short stuck for good.
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
