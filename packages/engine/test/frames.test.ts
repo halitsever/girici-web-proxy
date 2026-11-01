@@ -210,6 +210,38 @@ describe("installFrames", () => {
     expect(seen).toEqual(Array.from({ length: count }, () => inserted));
   });
 
+  it("hands the insertion target to the backstop with each node", () => {
+    const { ctors, top, node, adopter } = setup();
+    const element = node(top);
+    const seen: unknown[][] = [];
+    adopter.useBackstop((value, target) => seen.push([value, target]));
+    const child = { child: true };
+    (ctors.Node!.prototype.appendChild as (this: unknown, ...args: unknown[]) => void).call(element, child);
+    (ctors.Element!.prototype.append as (this: unknown, ...args: unknown[]) => void).call(element, child, "text");
+    Reflect.set(ctors.Document!.prototype, "body", child, element);
+    Reflect.set(ctors.HTMLTableElement!.prototype, "caption", child, element);
+    expect(seen).toEqual([
+      [child, element],
+      [child, element],
+      ["text", element],
+      [child, element],
+      [child, element],
+    ]);
+  });
+
+  it("names no target for nodes inserted beside an element", () => {
+    const { ctors, top, node, adopter } = setup();
+    const element = node(top);
+    const seen: unknown[][] = [];
+    adopter.useBackstop((value, target) => seen.push([value, target]));
+    const child = { child: true };
+    for (const method of ["before", "after", "replaceWith"]) {
+      (ctors.Element!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(element, child);
+      (ctors.CharacterData!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(element, child);
+    }
+    expect(seen).toEqual(Array.from({ length: 6 }, () => [child, null]));
+  });
+
   it("adopts the children a mutation adds to another frame's document", () => {
     const { ctors, make, node, installed, adopter } = setup();
     const other = make();

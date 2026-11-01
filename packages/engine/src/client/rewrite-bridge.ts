@@ -1,6 +1,6 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
-import { keyword, rewriteHtml } from "../rewrite/html.ts";
+import { keyword, rewriteHtml, rewriteImportMap } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { mapRefresh } from "../rewrite/refresh.ts";
 import { stripClientTag } from "../shared/client-tag.ts";
@@ -23,12 +23,18 @@ export interface RewriteBridge {
   metaUrl(url: string): string;
 }
 
+/** Rewriters for script text written at run time; a worker has no script elements to need them. */
+export interface ScriptBridge {
+  module(code: string): string;
+  importMap(text: string): string;
+}
+
 export function createRewriteBridge(
   ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy"> &
     Partial<Pick<UrlContext, "realUrl" | "opaque" | "openSealed">>,
   frameTag: (base: URL) => string,
   blobs: Pick<BlobDocuments, "swap" | "original"> = { swap: (url) => url, original: (url) => url },
-): RewriteBridge {
+): RewriteBridge & ScriptBridge {
   const swapBlob = blobs.swap;
   // The document's own origin, not its base's, is what its javascript: URLs carry.
   const owner = () => (ctx.realUrl ? originOf(ctx.realUrl()) : undefined);
@@ -54,6 +60,8 @@ export function createRewriteBridge(
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
     jsBody: (code) => rewriteJs(code, { kind: "handler" }),
+    module: (code) => rewriteJs(code, { kind: "module" }),
+    importMap: (text) => rewriteImportMap(text, ctx.realBase(), ctx.origin, opaque()),
     html,
     // A tag carried over from an earlier rewrite is dropped first, since its cookie snapshot may be stale.
     srcdoc: (markup) =>
