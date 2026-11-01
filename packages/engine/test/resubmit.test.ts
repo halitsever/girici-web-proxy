@@ -81,6 +81,22 @@ describe("resubmitResponse", () => {
     expect(html).toContain('<input type="hidden" name="b" value="ü">');
   });
 
+  it("rebuilds a multipart form whose file input was left empty, keeping that input empty", async () => {
+    const form = new FormData();
+    form.append("a", "1");
+    form.append("f", new File([], ""));
+    form.append("b", "2");
+    // Browsers read an empty file input's part back as a File with no name; Node's parser makes it a string.
+    const request = {
+      headers: new Headers({ "content-type": "multipart/form-data; boundary=x" }),
+      clone: () => ({ formData: async () => form }),
+    } as unknown as Request;
+    const html = await (await resubmitResponse(request, other))!.text();
+    expect(html).toContain(
+      '<input type="hidden" name="a" value="1"><input type="file" name="f"><input type="hidden" name="b" value="2">',
+    );
+  });
+
   it("leaves file uploads to a redirect", async () => {
     const form = new FormData();
     form.append("a", "1");

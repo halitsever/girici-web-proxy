@@ -16,7 +16,7 @@ let scriptHash: Promise<string> | null = null;
 export async function resubmitResponse(request: Request, location: string): Promise<Response | null> {
   const type = mimeOf(request.headers.get("content-type")) ?? "";
   if (!REBUILT.has(type)) return null;
-  let entries: Array<[string, string]> | null;
+  let entries: Array<[string, string | null]> | null;
   try {
     entries = await entriesOf(request.clone(), type);
   } catch {
@@ -27,7 +27,10 @@ export async function resubmitResponse(request: Request, location: string): Prom
   const domain = target.host.slice(target.host.indexOf(".") + 1);
   let fields = "";
   for (const [name, value] of entries) {
-    fields += `<input type="hidden" name="${escapeAttribute(name)}" value="${escapeAttribute(value)}">`;
+    fields +=
+      value === null
+        ? `<input type="file" name="${escapeAttribute(name)}">`
+        : `<input type="hidden" name="${escapeAttribute(name)}" value="${escapeAttribute(value)}">`;
   }
   const html = `<!doctype html>
 <html lang="en">
@@ -55,13 +58,15 @@ export async function resubmitResponse(request: Request, location: string): Prom
   });
 }
 
-async function entriesOf(request: Request, type: string): Promise<Array<[string, string]> | null> {
+/** Null stands for a file input left empty, which posts a nameless, empty part that an empty input posts again. */
+async function entriesOf(request: Request, type: string): Promise<Array<[string, string | null]> | null> {
   if (type === "application/x-www-form-urlencoded") return [...new URLSearchParams(await request.text())];
   if (type === "text/plain") return plainEntries(await request.text());
-  const entries: Array<[string, string]> = [];
+  const entries: Array<[string, string | null]> = [];
   for (const [name, value] of await request.formData()) {
-    if (typeof value !== "string") return null;
-    entries.push([name, value]);
+    if (typeof value === "string") entries.push([name, value]);
+    else if (value.name === "" && value.size === 0) entries.push([name, null]);
+    else return null;
   }
   return entries;
 }
