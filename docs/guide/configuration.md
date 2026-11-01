@@ -55,6 +55,30 @@ it can, use `socks5://`.
 YouTube ties its playback tokens to the IP that minted them, which is why minting goes through the same
 proxy as the video traffic.
 
+## Bandwidth limits
+
+`GIRICI_BANDWIDTH_LIMIT` and `GIRICI_DAILY_QUOTA` cap how much traffic each visitor moves through a public
+instance. A visitor is a client address, the same key the rate limit uses, so behind a reverse proxy set
+[`GIRICI_TRUST_PROXY`](#trust-proxy) first. IPv6 clients share a budget per /64.
+
+Both count the bodies Girici relays, downloads and uploads alike, plus WebSocket messages both ways. Headers and
+Girici's own pages and scripts are not counted.
+
+The per-minute limit is a bucket that holds one minute's worth and refills continuously. A request starts while
+any budget is left, and a response that has started always finishes, even when it takes the bucket below zero.
+The visitor then waits until the bucket climbs back above zero. A video that started under the limit keeps
+playing; the limit bites on the next request.
+
+The daily quota counts from midnight UTC and starts over at the next one.
+
+Once either budget is spent, relay requests get `429` with a `Retry-After` header, and pages show a notice
+saying when to try again. New WebSockets are refused the same way, and an open one closes with code 1008 when it
+goes over. The signed-in admin is never refused or cut, even when they share an address with visitors who spent
+theirs.
+
+The counts live in memory: a restart resets them, and each replica counts on its own. Responses the browser
+serves from its own cache cost nothing and count nothing.
+
 ## Data directory
 
 The admin account and settings live in `${GIRICI_DATA_DIR}/girici.db`. SQLite runs in WAL mode, so

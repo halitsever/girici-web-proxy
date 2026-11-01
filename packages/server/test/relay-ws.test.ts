@@ -6,6 +6,7 @@ import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
+import { bandwidthUpgradeGate, ByteMeter, meterObserver } from "../src/http/bandwidth.ts";
 import { compileTrust } from "../src/http/client-ip.ts";
 import { tokenBucket } from "../src/http/rate-limit.ts";
 import type { RelayObserver } from "../src/http/relay-observer.ts";
@@ -516,6 +517,40 @@ describe("open-instance seams", () => {
     ]);
     expect(answers.every(([kind]) => kind === "ws")).toBe(true);
     expect(socketsClosed()).toBe(0);
+  });
+
+  it("refuses an upgrade over the quota with 429, and closes an open socket that goes over with 1008", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    store.setPublicAccess(true);
+    const meter = new ByteMeter({ perMinute: 64, perDay: 0 });
+    const url = await relayServer(await echoUpstream(), {
+      authStore: store,
+      upgradeGates: [bandwidthUpgradeGate({ meter, store })],
+      allowFrame: (key) => meter.check(key).ok,
+      observer: meterObserver(meter),
+    });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+    const late: string[] = [];
+    ws.on("message", (data: Buffer) => late.push(data.toString()));
+    const done = closed(ws);
+    ws.send("x".repeat(100));
+    expect(await done).toEqual({ code: 1008, reason: "quota" });
+    expect(late).toEqual([]);
+
+    const answer = await rawUpgrade(url);
+    expect(answer).toMatch(/^HTTP\/1\.1 429 Too Many Requests\r\n/);
+    expect(answer).toMatch(/\r\nRetry-After: [1-9]\d*\r\n/);
+
+    const own = connect(url, originOf(url), `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`);
+    await opened(own);
+    own.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(own)).t).toBe("open");
+    own.send("y".repeat(1000));
+    expect(await nextMessage(own)).toBe("y".repeat(1000));
   });
 });
 
