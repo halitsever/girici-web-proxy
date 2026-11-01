@@ -1,3 +1,4 @@
+import type { SiteDomain } from "@girici/engine/shared";
 import type { RequestHandler, Response } from "express";
 import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
@@ -8,21 +9,33 @@ import type { UpgradeGate } from "../ws/relay-ws.ts";
 import { issueVisitor, powKey, readVisitor, VISITOR_RENEW_MS, VISITOR_TTL_MS } from "./tokens.ts";
 
 export const VISITOR_COOKIE = "__Host-girici-visitor";
+/** `__Host-` cannot carry Domain=, which the cookie needs to reach every site host in subdomain mode. */
+export const SITE_VISITOR_COOKIE = "__Secure-girici-visitor";
 /** Safari drops Secure cookies set by plain-http pages, so those pages get this one, as with the session. */
 export const PLAIN_VISITOR_COOKIE = "girici-visitor";
 
 export interface PowGateOptions {
   store: AuthStore;
   now?: () => number;
+  /** Subdomain mode, where the root issues the cookie and the site hosts' relays read it. */
+  siteDomain?: SiteDomain;
 }
 
-export function setVisitorCookie(res: Response, name: string, token: string): void {
+/** The name a cookie for this page's scheme takes. */
+export function visitorCookieName(https: boolean, siteDomain?: SiteDomain): string {
+  if (!https) return PLAIN_VISITOR_COOKIE;
+  return siteDomain ? SITE_VISITOR_COOKIE : VISITOR_COOKIE;
+}
+
+export function setVisitorCookie(res: Response, name: string, token: string, siteDomain?: SiteDomain): void {
+  // Kept off page loads on site hosts, as the site session is; every relay path is under /_g/.
+  const scope = siteDomain ? { domain: siteDomain.host, path: "/_g/" } : { path: "/" };
   res.cookie(name, token, {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    ...scope,
     maxAge: VISITOR_TTL_MS,
-    secure: name === VISITOR_COOKIE,
+    secure: name !== PLAIN_VISITOR_COOKIE,
   });
 }
 
@@ -33,7 +46,7 @@ function visitorOf(
   client: string,
   now: number,
 ): { name: string; iat: number } | null {
-  for (const name of [VISITOR_COOKIE, PLAIN_VISITOR_COOKIE]) {
+  for (const name of [VISITOR_COOKIE, SITE_VISITOR_COOKIE, PLAIN_VISITOR_COOKIE]) {
     for (const token of cookieValues(cookieHeader, [name])) {
       const visitor = readVisitor(key, token, client, now);
       if (visitor) return { name, iat: visitor.iat };
@@ -43,7 +56,7 @@ function visitorOf(
 }
 
 /** Sits behind authGate, so on a private instance only the admin gets here, and the admin is exempt. */
-export function powGate({ store, now = Date.now }: PowGateOptions): RequestHandler {
+export function powGate({ store, now = Date.now, siteDomain }: PowGateOptions): RequestHandler {
   return (req, res, next) => {
     if (!store.proofOfWork()) {
       next();
@@ -55,7 +68,10 @@ export function powGate({ store, now = Date.now }: PowGateOptions): RequestHandl
     const visitor = visitorOf(key, req.headers.cookie, client, at);
     if (visitor) {
       // Renewed on use, so a visitor who keeps browsing is not checked again every day.
-      if (at - visitor.iat > VISITOR_RENEW_MS) setVisitorCookie(res, visitor.name, issueVisitor(key, client, at));
+      if (at - visitor.iat > VISITOR_RENEW_MS) {
+        const name = visitorCookieName(visitor.name !== PLAIN_VISITOR_COOKIE, siteDomain);
+        setVisitorCookie(res, name, issueVisitor(key, client, at), siteDomain);
+      }
       next();
       return;
     }

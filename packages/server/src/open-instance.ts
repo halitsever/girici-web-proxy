@@ -28,7 +28,7 @@ export function openInstanceTools({
   db,
   logger,
 }: {
-  config: Pick<Config, "bandwidthLimit" | "dailyQuota" | "metricsToken" | "powDifficulty">;
+  config: Pick<Config, "bandwidthLimit" | "dailyQuota" | "metricsToken" | "powDifficulty" | "siteDomain">;
   store: AuthStore;
   db: DatabaseSync;
   logger: Logger;
@@ -62,8 +62,8 @@ export function openInstanceTools({
   return {
     app: {
       observer,
-      powGate: powGate({ store }),
-      powRouter: powRouter({ store, difficulty: config.powDifficulty }),
+      powGate: powGate({ store, siteDomain: config.siteDomain }),
+      powRouter: powRouter({ store, difficulty: config.powDifficulty, siteDomain: config.siteDomain }),
       bandwidthGate: meter ? bandwidthGate({ meter, store }) : undefined,
       metricsRouter: config.metricsToken ? metricsRouter({ token: config.metricsToken, stats }) : undefined,
       statusRouter: statusRouter({

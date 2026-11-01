@@ -1,11 +1,11 @@
-import { POW_PATH } from "@girici/engine/shared";
+import { POW_PATH, type SiteDomain } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { servedOverHttps } from "../auth/cookie.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
 import { rateLimiter } from "../http/rate-limit.ts";
-import { PLAIN_VISITOR_COOKIE, setVisitorCookie, VISITOR_COOKIE } from "../pow/gate.ts";
+import { setVisitorCookie, visitorCookieName } from "../pow/gate.ts";
 import {
   issueChallenge,
   issueVisitor,
@@ -20,6 +20,8 @@ export interface PowRouterOptions {
   difficulty: number;
   spent?: SpentChallenges;
   now?: () => number;
+  /** Subdomain mode: the cookie goes to every site host, whose relays check it. */
+  siteDomain?: SiteDomain;
 }
 
 /** Hands out challenges and trades a solved one for the visitor cookie. Ungated, so a refused visitor gets here. */
@@ -28,6 +30,7 @@ export function powRouter({
   difficulty,
   spent = new SpentChallenges(),
   now = Date.now,
+  siteDomain,
 }: PowRouterOptions): Router {
   // Exact paths only: the service worker guards these by name, so a variant such as /_g/Pow/ must miss too.
   const router = Router({ caseSensitive: true, strict: true });
@@ -69,8 +72,9 @@ export function powRouter({
       }
       setVisitorCookie(
         res,
-        servedOverHttps(req) ? VISITOR_COOKIE : PLAIN_VISITOR_COOKIE,
+        visitorCookieName(servedOverHttps(req), siteDomain),
         issueVisitor(key, client, at),
+        siteDomain,
       );
       res.setHeader("Cache-Control", "no-store");
       res.status(204).end();

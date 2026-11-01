@@ -136,7 +136,9 @@ signed-in admin is never checked. It is off by default.
 
 A visitor without a pass sees a page titled "Checking your browser". The browser hashes a challenge from the server
 with SHA-256 until it finds a number that gives enough leading zero bits, sends that number back, and receives a
-`girici-visitor` cookie (`__Host-girici-visitor` on https). The page then opens the address the visitor asked for,
+`girici-visitor` cookie (`__Host-girici-visitor` on https). In [subdomain mode](./subdomain-mode.md) the check runs
+on the root and the cookie goes to every site host (`__Secure-girici-visitor` on https, with `Domain=` and
+`Path=/_g/`). The page then opens the address the visitor asked for,
 encrypted or not. Until then the relay, the WebSocket relay and the YouTube token minter refuse that browser. A
 proxied page inside a frame cannot show the check, so the frame says to reload the page instead.
 

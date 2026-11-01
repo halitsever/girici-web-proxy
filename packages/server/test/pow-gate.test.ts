@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { parseSiteDomain } from "@girici/engine/shared";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -90,6 +91,35 @@ describe("powGate", () => {
     const fresh = await hit(base, { cookie: `girici-visitor=${visitor("127.0.0.1", Date.now() - 600_000)}` });
     expect(fresh.status).toBe(204);
     expect(fresh.headers.get("set-cookie")).toBeNull();
+  });
+});
+
+describe("powGate in subdomain mode", () => {
+  it("takes the site domain's visitor cookie and renews it for every site host", async () => {
+    const domain = parseSiteDomain("proxy.test");
+    if (!domain) throw new Error("bad domain");
+    const app = express();
+    app.use("/_g/r", powGate({ store, siteDomain: domain }), (_req, res) => {
+      res.status(204).end();
+    });
+    const site = createServer(app);
+    await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+    try {
+      const at = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
+      const old = Date.now() - 2 * 3_600_000;
+      const secure = await hit(at, { cookie: `__Secure-girici-visitor=${visitor("127.0.0.1", old)}` });
+      expect(secure.status).toBe(204);
+      expect(secure.headers.get("set-cookie")).toMatch(
+        /^__Secure-girici-visitor=[^;]+;.*Domain=proxy\.test; Path=\/_g\/;.*; Secure/,
+      );
+      const plain = await hit(at, { cookie: `girici-visitor=${visitor("127.0.0.1", old)}` });
+      expect(plain.headers.get("set-cookie")).toMatch(/^girici-visitor=[^;]+;.*Domain=proxy\.test; Path=\/_g\//);
+      // A page on any site host can add a same-name cookie; the one that verifies still counts.
+      const shadowed = `girici-visitor=junk; girici-visitor=${visitor("127.0.0.1")}`;
+      expect((await hit(at, { cookie: shadowed })).status).toBe(204);
+    } finally {
+      await new Promise<void>((resolve) => site.close(() => resolve()));
+    }
   });
 });
 

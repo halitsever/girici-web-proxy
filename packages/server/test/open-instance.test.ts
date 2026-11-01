@@ -29,7 +29,14 @@ function tools(limits: { bandwidthLimit?: number; dailyQuota?: number } = {}) {
   store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
   store.setPublicAccess(true);
   const wired = openInstanceTools({
-    config: { bandwidthLimit: 0, dailyQuota: 0, metricsToken: TOKEN, powDifficulty: 4, ...limits },
+    config: {
+      bandwidthLimit: 0,
+      dailyQuota: 0,
+      metricsToken: TOKEN,
+      powDifficulty: 4,
+      siteDomain: undefined,
+      ...limits,
+    },
     store,
     db,
     logger: createLogger("error", () => {}),

@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { AuthStore } from "../src/auth/store.ts";
@@ -10,10 +11,10 @@ import { meetsDifficulty } from "../src/pow/tokens.ts";
 let server: Server;
 afterEach(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
-async function listen(): Promise<string> {
+async function listen(siteDomain?: SiteDomain): Promise<string> {
   const store = new AuthStore(openDb(":memory:"));
   const app = express();
-  app.use(powRouter({ store, difficulty: 4 }));
+  app.use(powRouter({ store, difficulty: 4, siteDomain }));
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -71,6 +72,22 @@ describe("powRouter", () => {
     );
     expect(ok.status).toBe(204);
     expect(ok.headers.get("set-cookie")).toMatch(/^__Host-girici-visitor=[^;]+;.*; Secure/);
+  });
+
+  it("hands the visitor cookie to every site host in subdomain mode", async () => {
+    const base = await listen(parseSiteDomain("proxy.test") ?? undefined);
+    const plain = await challengeFrom(base);
+    const http = await answer(base, { challenge: plain.challenge, nonce: solveForTest(plain.challenge, 4) });
+    expect(http.headers.get("set-cookie")).toMatch(
+      /^girici-visitor=[^;]+; Max-Age=86400; Domain=proxy\.test; Path=\/_g\/; .*HttpOnly; SameSite=Lax/,
+    );
+    const secure = await challengeFrom(base);
+    const https = await answer(
+      base,
+      { challenge: secure.challenge, nonce: solveForTest(secure.challenge, 4) },
+      base.replace("http:", "https:"),
+    );
+    expect(https.headers.get("set-cookie")).toMatch(/^__Secure-girici-visitor=[^;]+;.*Domain=proxy\.test;.*; Secure/);
   });
 
   it("refuses an answer from another site before reading it", async () => {
