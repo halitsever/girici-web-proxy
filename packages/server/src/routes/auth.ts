@@ -36,7 +36,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
 
   router.get("/_g/auth/state", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json(state(store, isAuthed(store, req)));
+    res.json(state(store, isAuthed(store, req), options.siteDomain));
   });
 
   router.post("/_g/setup", json, (req, res) => {
@@ -57,7 +57,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
     }
     const admin = store.createAdmin(creds);
     issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
-    res.json(state(store, true));
+    res.json(state(store, true, options.siteDomain));
   });
 
   router.post("/_g/login", json, (req, res) => {
@@ -73,7 +73,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       return;
     }
     issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
-    res.json(state(store, true));
+    res.json(state(store, true, options.siteDomain));
   });
 
   const ownOrigin = (req: Request, res: Response, next: NextFunction) => {
@@ -96,6 +96,8 @@ interface AuthState {
   authed: boolean;
   public: boolean;
   sealAddresses: boolean;
+  /** The site domain's `value` in subdomain mode, so the UI knows which mode it runs in. */
+  siteDomain: string | null;
   admin?: { username: string; name: string; email: string };
 }
 
@@ -103,13 +105,14 @@ function isAuthed(store: AuthStore, req: Request): boolean {
   return sessionAdmin(store, req.headers.cookie) !== null;
 }
 
-function state(store: AuthStore, authed: boolean): AuthState {
+function state(store: AuthStore, authed: boolean, siteDomain: SiteDomain | undefined): AuthState {
   const admin = store.admin();
   return {
     setup: admin === null,
     authed,
     public: store.publicAccess(),
     sealAddresses: store.sealAddresses(),
+    siteDomain: siteDomain?.value ?? null,
     admin: authed && admin ? { username: admin.username, name: admin.name, email: admin.email } : undefined,
   };
 }

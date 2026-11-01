@@ -46,6 +46,15 @@ describe("authRouter state", () => {
     expect(await res.json()).toMatchObject({ setup: true, authed: false, public: false });
   });
 
+  it("names the site domain in the sign-in state", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const sites = await listen(store, { siteDomain: parseSiteDomain("proxy.test:8443")! });
+    expect(await (await fetch(`${sites}/_g/auth/state`)).json()).toMatchObject({ siteDomain: "proxy.test:8443" });
+    server.close();
+    const single = await listen(store);
+    expect(await (await fetch(`${single}/_g/auth/state`)).json()).toMatchObject({ siteDomain: null });
+  });
+
   it("tells every visitor whether addresses are encrypted", async () => {
     const store = new AuthStore(openDb(":memory:"));
     const base = await listen(store);

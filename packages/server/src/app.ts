@@ -94,7 +94,7 @@ export function createApp({
   app.use(site(wsSealRouter(authStore)));
   app.use(site(relayRouter({ ...relay, logger })));
   app.use(root(uiRouter(webDistDir, authStore)));
-  if (sites) app.use(onHosts(["site"], siteHostRouter(sites)));
+  if (sites) app.use(onHosts(["site"], siteHostRouter(sites, authStore)));
   app.use(site(engineRouter(engineBundlesDir)));
   app.use(site(bootstrapRouter(sites)));
   app.use(root(legacyRouter()));
