@@ -79,6 +79,12 @@ checks on that address. Keep the rate limit on, use the blocked sites list, and 
 with a correct `GIRICI_TRUST_PROXY` value (see [Reverse proxies](/guide/reverse-proxy)), or every visitor shares one
 rate limit.
 
+- The [shared-link warning](/guide/admin-and-auth#shared-link-warning) tells a visitor who arrives by link that the
+  page comes from another site through a proxy. It does not prove that site is genuine: the address bar shows your
+  server, so a phishing page looks as trustworthy as the real one.
+- The [browser check](/guide/admin-and-auth#browser-check) raises the cost of automated abuse. It does not stop a
+  determined client, which can solve the puzzle like any browser.
+
 ## Out of scope
 
 - Hiding proxy use from a site's bot checks. A correct proxy can still be refused.
