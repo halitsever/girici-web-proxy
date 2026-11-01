@@ -11,6 +11,11 @@ import type { WorkerIdentity } from "./worker-identity.ts";
 
 /** The script request can overtake the announcement its page sent first. */
 export const SHARED_START_WAIT_MS = 1000;
+/**
+ * A page that joins a running instance announces too, but the browser fetches no script for it. Kept this short, its
+ * leftover never outlives the nonce it names or lets another page start the instance long after.
+ */
+export const SHARED_START_TTL_MS = 5000;
 
 export interface SharedStart {
   scriptUrl: string;
@@ -68,7 +73,7 @@ export function announceSharedStart(
   return true;
 }
 
-/** Announced shared starts per address, each handed to one script request. */
+/** Announced shared starts per address, each handed to one script request, newest first. */
 export class SharedWorkerStarts {
   readonly #ttlMs: number;
   readonly #perPath: number;
@@ -79,7 +84,7 @@ export class SharedWorkerStarts {
   #size = 0;
 
   constructor(options: { ttlMs?: number; perPath?: number; limit?: number; now?: () => number } = {}) {
-    this.#ttlMs = options.ttlMs ?? 30_000;
+    this.#ttlMs = options.ttlMs ?? SHARED_START_TTL_MS;
     this.#perPath = options.perPath ?? 16;
     this.#limit = options.limit ?? 500;
     this.#now = options.now ?? Date.now;
@@ -104,9 +109,11 @@ export class SharedWorkerStarts {
 
   take(path: string, waitMs = SHARED_START_WAIT_MS): Promise<{ nonce: string; identity: WorkerIdentity } | null> {
     this.#prune();
-    const entry = this.#byPath.get(path)?.[0];
-    if (entry) {
-      this.#drop(path, 0);
+    // The newest, since older ones are more likely what joining pages left behind.
+    const list = this.#byPath.get(path);
+    const entry = list?.[list.length - 1];
+    if (list && entry) {
+      this.#drop(path, list.length - 1);
       return Promise.resolve({ nonce: entry.nonce, identity: entry.identity });
     }
     if (waitMs <= 0) return Promise.resolve(null);

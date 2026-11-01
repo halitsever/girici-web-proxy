@@ -4,6 +4,7 @@ import {
   announceSharedStart,
   answerSharedWorker,
   readSharedStart,
+  SHARED_START_TTL_MS,
   SHARED_START_WAIT_MS,
   SharedWorkerStarts,
   startFits,
@@ -206,21 +207,33 @@ describe("announceSharedStart", () => {
 describe("SharedWorkerStarts", () => {
   const n = (index: number) => String(index).padStart(32, "0");
 
-  it("hands out announcements oldest first and forgets them after their time", async () => {
+  it("hands out the newest announcement first and forgets them after their time", async () => {
     let now = 0;
     const starts = new SharedWorkerStarts({ ttlMs: 50, now: () => now });
     starts.announce("/a", n(1), identity);
     starts.announce("/a", n(2), identity);
-    expect((await starts.take("/a", 0))?.nonce).toBe(n(1));
+    expect((await starts.take("/a", 0))?.nonce).toBe(n(2));
     now = 51;
     expect(await starts.take("/a", 0)).toBeNull();
+  });
+
+  it("gives a page that joined a running worker's leftover to no start a few seconds later", async () => {
+    let now = 0;
+    const starts = new SharedWorkerStarts({ now: () => now });
+    // A page that joins an instance announces too, but its browser fetches no script for it.
+    starts.announce("/a", n(1), identity);
+    now = SHARED_START_TTL_MS + 1;
+    expect(await starts.take("/a", 0)).toBeNull();
+    starts.announce("/a", n(2), identity);
+    expect((await starts.take("/a", 0))?.nonce).toBe(n(2));
+    expect(SHARED_START_TTL_MS).toBeLessThanOrEqual(5000);
   });
 
   it("keeps the newest few per address", async () => {
     const starts = new SharedWorkerStarts({ perPath: 2 });
     for (let index = 1; index <= 3; index++) starts.announce("/a", n(index), identity);
-    expect((await starts.take("/a", 0))?.nonce).toBe(n(2));
     expect((await starts.take("/a", 0))?.nonce).toBe(n(3));
+    expect((await starts.take("/a", 0))?.nonce).toBe(n(2));
     expect(await starts.take("/a", 0)).toBeNull();
   });
 
