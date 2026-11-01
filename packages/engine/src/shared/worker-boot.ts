@@ -1,4 +1,4 @@
-import { WORKER_NONCE_PARAM } from "./protocol.ts";
+import { SHARED_WORKER_PATH, WORKER_NONCE_PARAM } from "./protocol.ts";
 
 export interface WorkerBoot {
   runtimeUrl: string;
@@ -12,7 +12,8 @@ export interface WorkerBoot {
 }
 
 /** Taken at load, so a page that replaces it cannot steer what a worker runs first. */
-const quote = JSON.stringify;
+export const quote = JSON.stringify;
+const encode = encodeURIComponent;
 
 /** A worker's first script: it hands the runtime its boot values, then loads the runtime before the real script. */
 export function workerBootstrapCode(boot: WorkerBoot): string {
@@ -25,4 +26,9 @@ export function workerBootstrapCode(boot: WorkerBoot): string {
   return boot.module
     ? `${globals}await import(${runtime});await import(${script});`
     : `${globals}importScripts(${runtime},${script});`;
+}
+
+/** Built the same in every tab, so tabs of one site name one address and the browser joins them to one worker. */
+export function sharedWorkerPath(scriptUrl: string, partition: string, module: boolean): string {
+  return `${SHARED_WORKER_PATH}?s=${encode(scriptUrl)}&p=${encode(partition)}&t=${module ? "module" : "classic"}`;
 }

@@ -1,8 +1,9 @@
-import { PROTOCOL_VERSION, WORKER_NONCE_PARAM } from "../shared/protocol.ts";
+import { PROTOCOL_VERSION, SHARED_WORKER_PATH, WORKER_NONCE_PARAM } from "../shared/protocol.ts";
 import type { ClientRecordStore } from "./client-records.ts";
 
 const STORE = "workers";
 const NONCE = /^[A-Za-z0-9_-]{22,64}$/;
+const MAX_SHARED_PATH = 4096;
 
 /** The page that started a worker: its real URL and the schemeful site of its top-level page. */
 export interface WorkerIdentity {
@@ -26,10 +27,17 @@ export function readNonce(url: URL): string | null {
   return nonce !== null && NONCE.test(nonce) ? nonce : null;
 }
 
-/** The nonce in an announcement body, or null when the body is not one. */
-export function readAnnouncement(body: unknown): string | null {
-  const { v, n } = (body ?? {}) as { v?: unknown; n?: unknown };
-  return v === PROTOCOL_VERSION && typeof n === "string" && NONCE.test(n) ? n : null;
+/**
+ * The nonce in an announcement body and, for a shared worker, the path and query of its address, written as the
+ * browser will request it. Null when the body is not an announcement or names any other address.
+ */
+export function readAnnouncement(body: unknown): { nonce: string; shared: string | null } | null {
+  const { v, n, w } = (body ?? {}) as { v?: unknown; n?: unknown; w?: unknown };
+  if (v !== PROTOCOL_VERSION || typeof n !== "string" || !NONCE.test(n)) return null;
+  if (w === undefined) return { nonce: n, shared: null };
+  if (typeof w !== "string" || w.length > MAX_SHARED_PATH || !w.startsWith(`${SHARED_WORKER_PATH}?`)) return null;
+  const address = new URL(w, "https://shared.invalid");
+  return { nonce: n, shared: address.pathname + address.search };
 }
 
 /** Answers an announcement: 400 when the body is not one, 403 when the caller has no identity to bind the nonce to. */
@@ -38,17 +46,19 @@ export async function answerAnnouncement(
   from: string,
   callerIdentity: () => Promise<WorkerIdentity | null>,
   registry: WorkerRegistry,
+  onShared?: (path: string, nonce: string, identity: WorkerIdentity) => void,
 ): Promise<Response> {
-  let nonce: string | null;
+  let announcement: { nonce: string; shared: string | null } | null;
   try {
-    nonce = readAnnouncement(await request.json());
+    announcement = readAnnouncement(await request.json());
   } catch {
-    nonce = null;
+    announcement = null;
   }
-  if (!nonce) return new Response(null, { status: 400 });
+  if (!announcement) return new Response(null, { status: 400 });
   const identity = await callerIdentity();
   if (!identity) return new Response(null, { status: 403 });
-  registry.announce(nonce, identity, from);
+  registry.announce(announcement.nonce, identity, from);
+  if (announcement.shared !== null) onShared?.(announcement.shared, announcement.nonce, identity);
   return new Response(null, { status: 204 });
 }
 

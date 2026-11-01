@@ -5,6 +5,7 @@ import {
   HEADER,
   POT_PATH,
   PROTOCOL_VERSION,
+  SHARED_WORKER_PATH,
   SITE_DATA_RPC_PATH,
   TOP_SITE_QUERY,
   WORKER_RPC_PATH,
@@ -23,6 +24,7 @@ import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from ".
 import { isSealedPath } from "../shared/sealed-address.ts";
 import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess, type Route } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
+import { announceSharedStart, answerSharedWorker, SharedWorkerStarts } from "./shared-workers.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
@@ -72,6 +74,7 @@ const ui = new UiClients(clientRecords, {
     new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
 });
 const workers = new WorkerRegistry(clientRecords);
+const sharedStarts = new SharedWorkerStarts();
 // A UI tab can message the worker before the activation that records it has finished.
 let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
@@ -173,6 +176,11 @@ self.addEventListener("fetch", (event) => {
   }
   if (url.origin === self.location.origin && url.pathname === WORKER_RPC_PATH && event.request.method === "POST") {
     event.respondWith(handleWorkerRpc(event));
+    return;
+  }
+  if (url.origin === self.location.origin && url.pathname === SHARED_WORKER_PATH) {
+    const deps = { origin: self.location.origin, runtimePath: WORKER_PATH, starts: sharedStarts };
+    event.respondWith(answerSharedWorker(event.request, url, deps));
     return;
   }
   if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
@@ -429,7 +437,14 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
  * never the body, decides the identity the nonce binds to.
  */
 async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
-  return answerAnnouncement(event.request, event.clientId, () => callerIdentity(event), workers);
+  const shared = { origin: self.location.origin, starts: sharedStarts };
+  return answerAnnouncement(
+    event.request,
+    event.clientId,
+    () => callerIdentity(event),
+    workers,
+    (path, nonce, identity) => announceSharedStart(path, nonce, identity, shared),
+  );
 }
 
 /** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */
