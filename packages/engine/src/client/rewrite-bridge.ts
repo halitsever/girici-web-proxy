@@ -1,9 +1,15 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { keyword, rewriteHtml, rewriteImportMap } from "../rewrite/html.ts";
-import { rewriteJs, type FunctionBodyKind } from "../rewrite/js.ts";
+import {
+  rewriteFunction,
+  rewriteJs,
+  type ConstructorKind,
+  type FunctionBodyKind,
+  type FunctionSource,
+} from "../rewrite/js.ts";
 import { mapRefresh } from "../rewrite/refresh.ts";
-import { stripClientTag } from "../shared/client-tag.ts";
+import { blankClientConfigs, stripClientTag } from "../shared/client-tag.ts";
 import { originOf } from "../shared/primordials.ts";
 import { attributeKind, restoreAttribute } from "./attribute-values.ts";
 import type { OpenSealed } from "../shared/sealed-address.ts";
@@ -15,6 +21,8 @@ export interface RewriteBridge {
   js(code: string): string;
   /** A Function constructor body; the generator and async constructors name their own kind. */
   jsBody(code: string, kind?: "handler" | FunctionBodyKind): string;
+  /** What a Function, generator or async constructor compiles: its joined parameters and its body. */
+  jsFunction(params: string, body: string, kind: ConstructorKind): FunctionSource;
   html(html: string): string;
   /** A srcdoc document with the runtime tag in front, since it has no address to load the runtime through. */
   srcdoc(markup: string): string;
@@ -52,11 +60,11 @@ export function createRewriteBridge(
       owner: owner(),
       opaque: opaque(),
     });
-  // Nested srcdoc values come back through the same path, so the tag goes at every level. It carries the page's
-  // cookies, so it comes out before the parser, whose code runs on whatever built-ins this realm has now.
+  // Nested srcdoc values come back through the same path, so the tag goes at every level. Tags carry the page's
+  // cookies, so their configs, nested ones too, are emptied before the parser, which runs on page built-ins.
   const unsrcdoc = (markup: string): string =>
     unrewriteHtmlAttributes(
-      stripClientTag(markup, clientUrl),
+      stripClientTag(blankClientConfigs(markup, clientUrl), clientUrl),
       ctx.realBase(),
       ctx.origin,
       unsrcdoc,
@@ -67,6 +75,7 @@ export function createRewriteBridge(
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
     jsBody: (code, kind = "handler") => rewriteJs(code, { kind }),
+    jsFunction: (params, body, kind) => rewriteFunction(params, body, kind),
     module: (code) => rewriteJs(code, { kind: "module" }),
     importMap: (text) => rewriteImportMap(text, ctx.realBase(), ctx.origin, opaque()),
     html,

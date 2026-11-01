@@ -284,13 +284,15 @@ export function install(
           scripts,
         ),
     ],
-    ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsBody)],
+    ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsFunction)],
     ["workers", () => installWorkers(win, ctx, partition, ownAnnounce)],
     ["cookies", () => append(listeners, (cookies = installCookies(win, ctx, config, container, ownLocation.reload)))],
     [
       "navigation",
       () => {
-        const navigation = installNavigation(win, ctx, cookies, invoke, guard, blobs);
+        const navigation = installNavigation(win, ctx, cookies, invoke, guard, blobs, (target, destination) =>
+          frames?.prepareTarget(target, destination),
+        );
         append(listeners, navigation);
         frames?.useOpen(navigation.open);
       },

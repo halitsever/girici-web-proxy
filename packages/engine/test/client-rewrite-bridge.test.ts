@@ -64,6 +64,27 @@ describe("createRewriteBridge", () => {
     expect(bridge.unhtml(dom)).toBe(`<iframe srcdoc="${escape(input)}"></iframe>`);
   });
 
+  it("reads nested srcdoc documents back without handing their tags' cookies to the page's built-ins", async () => {
+    const cookies = [
+      { name: "s3cr3t", value: "1", domain: "site.test", path: "/", hostOnly: true, secure: false, expires: null },
+    ];
+    const tagWithCookies = () => clientTag(CLIENT, { v: 2, cookies: [{ ...cookies[0]!, creation: 1 }] });
+    const bridge = createRewriteBridge(ctx, tagWithCookies, CLIENT);
+    const input = '<iframe srcdoc="<iframe srcdoc=&quot;<p>x</p>&quot;></iframe>"></iframe>';
+    const stored = bridge.srcdoc(input);
+    expect(stored.split("s3cr3t").length).toBe(4);
+    const out = [""];
+    const seen = await spyBuiltins(
+      "s3cr3t",
+      () => {
+        out[0] = bridge.unsrcdoc(stored);
+      },
+      { descriptorFields: false },
+    );
+    expect(seen).toEqual([]);
+    expect(out[0]).toBe(bridge.unsrcdoc(input));
+  });
+
   it("restores nested srcdoc documents", () => {
     const bridge = createRewriteBridge(ctx, frameTag, CLIENT);
     const input = '<iframe srcdoc="<p>x</p>"></iframe>';

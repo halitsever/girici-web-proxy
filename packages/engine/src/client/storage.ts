@@ -1,5 +1,5 @@
 import { prefixFor, sameSite } from "../shared/partition.ts";
-import { append, define, originOf, ownValue, parseUrl } from "../shared/primordials.ts";
+import { append, define, originOf, ownValue, parseUrl, toNumber } from "../shared/primordials.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm } from "./url-context.ts";
@@ -95,7 +95,8 @@ export function createPartitionedStorage(
       const own = keys();
       for (let index = 0; index < own.length; index++) removeItem(prefix + own[index]);
     },
-    key: (index: number) => (ownValue(keys(), index) as string | undefined) ?? null,
+    // One conversion of the page's index, as the native makes one.
+    key: (index: unknown) => (ownValue(keys(), toNumber(index)) as string | undefined) ?? null,
   } as Record<string, unknown>;
   // Sharing the native prototype keeps `instanceof Storage` true for the page.
   const target = create(protoOf(native) as object) as Storage;

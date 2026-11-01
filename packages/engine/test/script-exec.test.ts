@@ -19,9 +19,9 @@ describe("installScriptExec", () => {
     installScriptExec(
       realm,
       (code) => code,
-      (code) => {
-        bodies.push(code);
-        return code;
+      (params, body) => {
+        bodies.push(body);
+        return { params, body };
       },
     );
     SAMPLES.forEach((sample, index) => run(`${sample}.constructor("return ${index}")`));
@@ -34,14 +34,53 @@ describe("installScriptExec", () => {
     installScriptExec(
       realm,
       (code) => code,
-      (code, kind) => {
+      (params, body, kind) => {
         kinds.push(kind);
-        return code;
+        return { params, body };
       },
     );
     run(`Function("return 1")`);
     SAMPLES.forEach((sample) => run(`${sample}.constructor("return 1")`));
-    expect(kinds).toEqual(["handler", "generator", "async", "asyncGenerator"]);
+    expect(kinds).toEqual(["function", "generator", "async", "asyncGenerator"]);
+  });
+
+  it("hands the rewriter the parameters and body as the constructor reads them, objects and all", () => {
+    const { realm, run } = childRealm();
+    const seen: unknown[] = [];
+    installScriptExec(
+      realm,
+      (code) => code,
+      (params, body) => {
+        seen.push([params, body]);
+        return { params: params.replace("location", "where"), body: body.replace("location", "where") };
+      },
+    );
+    const made = run(`
+      let reads = 0;
+      const body = { toString() { reads++; return "return [a, b, location]" } };
+      const fn = Function("a = location", { toString() { reads++; return "b" } }, body);
+      [fn.toString(), reads]
+    `) as [string, number];
+    expect(seen).toEqual([["a = location,b", "return [a, b, location]"]]);
+    expect(made[0]).toBe("function anonymous(a = where,b\n) {\nreturn [a, b, where]\n}");
+    // Each argument is read once.
+    expect(made[1]).toBe(2);
+    expect(() => run(`Function(Symbol("x"))`)).toThrow(TypeError);
+  });
+
+  it("rewrites a timer handler that is neither a function nor a string, read as the native reads it", () => {
+    const { realm, run } = childRealm();
+    const scripts: string[] = [];
+    installScriptExec(
+      realm,
+      (code) => {
+        scripts.push(code);
+        return code;
+      },
+      (params, body) => ({ params, body }),
+    );
+    run(`setTimeout({ toString() { return "location.href" } }); setInterval(null)`);
+    expect(scripts).toEqual(["location.href", "null"]);
   });
 
   it("leaves the constructors of the realm that adopts the window alone", () => {
@@ -53,7 +92,7 @@ describe("installScriptExec", () => {
     installScriptExec(
       childRealm().realm,
       (code) => code,
-      (code) => code,
+      (params, body) => ({ params, body }),
     );
     expect(constructors()).toEqual(own);
   });
@@ -63,7 +102,7 @@ describe("installScriptExec", () => {
     installScriptExec(
       realm,
       (code) => code,
-      (code) => code,
+      (params, body) => ({ params, body }),
     );
     const construct = Reflect.construct;
     const leaked: unknown[] = [];

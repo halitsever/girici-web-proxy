@@ -19,6 +19,7 @@ function setup() {
     rewrite: {
       js: (c) => c,
       jsBody: (c) => c,
+      jsFunction: (params, body) => ({ params, body }),
       html: (h) => h,
       unhtml: (h) => h,
       srcdoc: (h) => `<script data-engine></script>${h}`,
@@ -160,6 +161,7 @@ describe("createHelpers", () => {
       rewrite: {
         js: (c) => `/*rw*/${c}`,
         jsBody: (c) => `/*rw*/${c}`,
+        jsFunction: (params, body) => ({ params, body }),
         html: (h) => `/*rw*/${h}`,
         unhtml: (h) => h,
         srcdoc: (h) => h,

@@ -58,6 +58,11 @@ export const NativeMap = Map;
 /** String(value), which runs the value's own conversion once and gives a primitive the checks can trust. */
 export const toText = NativeString as (value: unknown) => string;
 
+/** ToString as a native conversion runs it, which throws for a symbol where String() would not. */
+export function stringOf(value: unknown): string {
+  return `${value as string}`;
+}
+
 export function startsWith(text: string, prefix: string): boolean {
   return apply(nativeStartsWith, text, [prefix]);
 }

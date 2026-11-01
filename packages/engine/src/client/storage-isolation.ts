@@ -31,8 +31,8 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "databases",
     (native) =>
       function (this: unknown) {
-        return promiseThen(
-          page.later(() => apply(native, this, [])),
+        return page.filter(
+          () => apply(native, this, []),
           (all) => stripNamed(all as Named[], strip, page),
         );
       },
@@ -44,8 +44,8 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "keys",
     (native) =>
       function (this: unknown) {
-        return promiseThen(
-          page.later(() => apply(native, this, [])),
+        return page.filter(
+          () => apply(native, this, []),
           (found) => {
             const all = found as string[];
             const own = page.list<string>();
@@ -96,8 +96,8 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     "query",
     (native) =>
       function (this: unknown) {
-        return promiseThen(
-          page.later(() => apply(native, this, [])),
+        return page.filter(
+          () => apply(native, this, []),
           (found) => {
             const result = found as { held?: Named[]; pending?: Named[] };
             const out = assignOwn(page.object(), result);
@@ -126,6 +126,8 @@ interface Named {
 interface PageRealm {
   /** run() as a promise of the window's realm, rejected if run throws. */
   later<T>(run: () => T | PromiseLike<T>): Promise<T>;
+  /** The native promise run() returns, settled into what `take` makes of its answer; only `take` sees that answer. */
+  filter<T, U>(run: () => unknown, take: (raw: T) => U): Promise<U>;
   object<T extends object>(): T;
   list<T>(): T[];
 }
@@ -138,9 +140,22 @@ function pageRealm(win: Realm): PageRealm {
   const PagePromise = win.Promise;
   const objectProto = win.Object.prototype;
   const PageArray = win.Array;
+  const later = <T>(run: () => T | PromiseLike<T>) => new PagePromise<T>((resolve) => resolve(run()));
   return {
     __proto__: null,
-    later: <T>(run: () => T | PromiseLike<T>) => new PagePromise<T>((resolve) => resolve(run())),
+    later,
+    filter: <T, U>(run: () => unknown, take: (raw: T) => U): Promise<U> => {
+      let raw: unknown;
+      try {
+        raw = run();
+      } catch (error) {
+        return new PagePromise<U>((_resolve, reject) => reject(error));
+      }
+      if (typeof raw !== "object" || raw === null) return later(() => take(raw as T));
+      // An own constructor, so then() reads neither the page's Promise.prototype.constructor nor its then.
+      defineData(raw, "constructor", PagePromise);
+      return promiseThen(raw as Promise<T>, take);
+    },
     object: <T extends object>() => createObject<T>(objectProto),
     list: <T>() => new PageArray<T>(),
   } as PageRealm;
