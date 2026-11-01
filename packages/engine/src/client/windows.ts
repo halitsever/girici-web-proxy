@@ -1,4 +1,4 @@
-import type { Invoke } from "./invoke.ts";
+import type { AssignHref, Invoke } from "./invoke.ts";
 import { post } from "./messaging.ts";
 import { maskNative } from "./native-mask.ts";
 import {
@@ -86,6 +86,7 @@ export function createWindowGuard(
   ctx: UrlContext,
   invoke: Invoke,
   swapBlob: (url: string) => string = (url) => url,
+  assignHref?: AssignHref,
 ): WindowGuard {
   // Taken before the messaging and window hooks replace them; window members are own properties of each window.
   const DOMException = win.DOMException;
@@ -99,6 +100,8 @@ export function createWindowGuard(
     parent: getter("parent"),
     opener: getter("opener"),
   };
+  const frameElementOf = getter("frameElement");
+  const getAttribute = win.Element?.prototype.getAttribute;
 
   const selfOrigin = () => originOf(ctx.realUrl());
   const addressOrigin = (target: object): string | null => {
@@ -134,10 +137,24 @@ export function createWindowGuard(
   const isOtherTab = (value: object): boolean =>
     value !== win && read(value, "parent") === value && value !== read(win, "top");
 
+  /** A blank frame whose element names another origin's page, which will arrive in this very window. */
+  const frameHeading = (value: object): string | undefined => {
+    try {
+      if (!frameElementOf || !getAttribute) return undefined;
+      if ((value as { location: { href: string } }).location.href !== "about:blank") return undefined;
+      const element = apply(frameElementOf, value, []) as Element | null;
+      if (!element || apply(getAttribute, element, ["srcdoc"]) !== null) return undefined;
+      return openedOrigin(apply(getAttribute, element, ["src"]), ctx.origin);
+    } catch {
+      return undefined;
+    }
+  };
+
   const wrap = (value: unknown, headedTo?: string): unknown => {
     if (!isWindow(value) || isWrapper(value) || apply(setHas, given, [value])) return value;
     const cached = apply(mapGet, wrappers, [value]) as object | undefined;
     if (cached) return cached;
+    if (headedTo === undefined && value !== win) headedTo = frameHeading(value);
     // A frame handed out as is stays so: whoever got it keeps it anyway, and one window must stay one object.
     if (sameOrigin(value) && (headedTo === undefined || headedTo === selfOrigin()) && !isOtherTab(value)) {
       apply(setAdd, given, [value]);
@@ -167,7 +184,7 @@ export function createWindowGuard(
     // location and its members cannot be redefined by a page.
     const location = (target as { location: Location }).location;
     if (replace) invoke(location.replace, location, [proxied]);
-    else {
+    else if (!assignHref?.(location, proxied)) {
       const set = ownDescriptor(location, "href")?.set;
       if (set) invoke(set, location, [proxied]);
     }

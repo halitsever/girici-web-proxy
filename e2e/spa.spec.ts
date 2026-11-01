@@ -30,6 +30,11 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   expect(out.nested).toBe("site-a.test");
   expect(out.evalDirect).toBe("https://site-a.test/exec");
   expect(out.toString).toBe(true);
+  expect([out.generator, out.async, out.asyncGenerator]).toEqual([
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+  ]);
 });
 
 test("hooked functions report native source to tamper checks", async ({ page }) => {

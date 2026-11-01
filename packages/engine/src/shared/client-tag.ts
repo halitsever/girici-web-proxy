@@ -1,3 +1,4 @@
+import { indexOf, sliceOf } from "./primordials.ts";
 import type { ClientConfig } from "./protocol.ts";
 
 // Taken at load: the runtime builds tags inside page calls, after page code may have replaced these.
@@ -17,13 +18,16 @@ export function clientTag(src: string, config: ClientConfig): string {
   return `<script src="${src}" data-girici="${escapeAttribute(encode(config) ?? "null")}"></script>`;
 }
 
+const TAG_END = '"></script>';
+
 /** Takes the runtime tag back out of a srcdoc the page reads, so it sees the markup it wrote. */
 export function stripClientTag(markup: string, clientUrl: string): string {
+  // The tag carries the page's cookies, so only natives taken at load see it.
   const open = `<script src="${clientUrl}" data-girici="`;
-  const start = markup.indexOf(open);
+  const start = indexOf(markup, open);
   if (start < 0) return markup;
-  const end = markup.indexOf('"></script>', start + open.length);
-  return end < 0 ? markup : markup.slice(0, start) + markup.slice(end + '"></script>'.length);
+  const end = indexOf(markup, TAG_END, start + open.length);
+  return end < 0 ? markup : sliceOf(markup, 0, start) + sliceOf(markup, end + TAG_END.length);
 }
 
 /**

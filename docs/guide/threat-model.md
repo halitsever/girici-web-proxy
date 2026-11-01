@@ -38,6 +38,10 @@ pages usually reach each other, but not for all of them. These gaps are known an
   `Object.assign(window, { location: url })`, reaches the real one. Such a page can navigate outside the proxy.
 - **Rewriters run in the page realm.** The code that rewrites a page's scripts and HTML runs in the same JavaScript
   world as the page. A hostile page can interfere with it and with the built-ins it relies on.
+- **Frames that start blank.** A page from another site that loads in a frame the embedding page created blank (its
+  address set before insertion, or parser-inserted and adopted before its first page arrives) still runs on hooks
+  from the embedding page's JavaScript world. Only per-site origin isolation, described below, separates such frames
+  fully.
 - **The origin private file system is not partitioned.** `navigator.storage.getDirectory()` returns one folder that
   every site shares.
 - **Blob URLs are shared.** A site that learns another site's `blob:` URL can read it.

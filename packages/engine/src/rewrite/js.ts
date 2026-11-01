@@ -8,10 +8,20 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 export const STANDALONE_SHIM =
   'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},A:function(o){var k="location";return{get v(){return o[k]},set v(x){o[k]=x}}},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
 
+/** Bodies the generator and async constructors compile; each parses only inside a function of its own kind. */
+export type FunctionBodyKind = "generator" | "async" | "asyncGenerator";
+
 export interface JsRewriteOptions {
-  kind?: "classic" | "module" | "handler";
+  kind?: "classic" | "module" | "handler" | FunctionBodyKind;
   standalone?: boolean;
 }
+
+const BODY_HEADS: Record<FunctionBodyKind, string> = {
+  generator: "(function* () {\n",
+  async: "(async function () {\n",
+  asyncGenerator: "(async function* () {\n",
+};
+const BODY_TAIL = "\n})";
 
 /** `assign` is a destructuring or for-in/of target, where `location` gets a setter that converts the URL. */
 type Role = "read" | "target" | "assign" | "binding" | "callee";
@@ -49,7 +59,10 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
   ) {
     return source;
   }
-  const program = parse(source, options.kind ?? "classic");
+  const kind = options.kind ?? "classic";
+  if (kind === "generator" || kind === "async" || kind === "asyncGenerator")
+    return rewriteBody(source, BODY_HEADS[kind]);
+  const program = parse(source, kind);
   if (!program) return source;
   const output = new MagicString(source);
   try {
@@ -72,7 +85,33 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
   return output.toString();
 }
 
-function parse(source: string, kind: NonNullable<JsRewriteOptions["kind"]>): ESTree.Program | null {
+/** Parses a body inside a function of its kind, as its constructor does, and returns the body alone, rewritten. */
+function rewriteBody(body: string, head: string): string {
+  const wrapped = head + body + BODY_TAIL;
+  let program: ESTree.Program;
+  try {
+    program = parseScript(wrapped, PARSE_OPTIONS);
+  } catch {
+    return body;
+  }
+  // A body that closes the function early is one the constructor refuses, so it is left as it is.
+  const statement = program.body[0];
+  const wrapper = statement?.type === "ExpressionStatement" ? statement.expression : undefined;
+  if (program.body.length !== 1 || wrapper?.type !== "FunctionExpression" || wrapper.end !== wrapped.length - 1) {
+    return body;
+  }
+  const output = new MagicString(wrapped);
+  try {
+    new LocationRewriter(wrapped, output).visit(program, "read", false);
+  } catch {
+    return body;
+  }
+  if (!output.hasChanged()) return body;
+  const rewritten = output.toString();
+  return rewritten.slice(head.length, rewritten.length - BODY_TAIL.length);
+}
+
+function parse(source: string, kind: "classic" | "module" | "handler"): ESTree.Program | null {
   try {
     if (kind === "module") return parseModule(source, PARSE_OPTIONS);
     if (kind === "handler") return parseScript(source, { ...PARSE_OPTIONS, globalReturn: true });

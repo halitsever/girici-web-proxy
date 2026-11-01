@@ -102,6 +102,19 @@ describe("createHelpers", () => {
     expect(helpers.site()).toBe("https://site.test");
   });
 
+  it("D never hands the window to a Proxy the page replaced", () => {
+    const { helpers, win } = setup();
+    const seen: unknown[] = [];
+    const NativeProxy = Proxy;
+    const PageProxy = function (target: object, handler: ProxyHandler<object>) {
+      seen.push(target, handler);
+      return new NativeProxy(target, handler);
+    };
+    const view = withReplaced(globalThis, "Proxy", { value: PageProxy }, () => helpers.D(win)) as typeof win;
+    expect(seen).toEqual([]);
+    expect(view.document).toBe(win.document);
+  });
+
   it("wraps window links read through destructuring when Reflect.get is replaced", () => {
     const { helpers, win, frame } = setup();
     const withLinks = Object.assign(win, { parent: frame });
