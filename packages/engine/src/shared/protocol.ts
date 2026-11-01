@@ -21,6 +21,8 @@ export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
 /** A page announces each worker it starts here; the worker names the same nonce when it loads the runtime. */
 export const WORKER_RPC_PATH = "/_g/rpc/worker";
 export const WORKER_NONCE_PARAM = "n";
+/** A SharedWorker's script address, which tabs of one site share so the browser joins them to one instance. */
+export const SHARED_WORKER_PATH = "/_g/rpc/shared-worker";
 // Only the service worker calls these two; pages never need them.
 export const POT_PATH = "/_g/pot";
 export const WS_SEAL_PATH = "/_g/ws-seal";

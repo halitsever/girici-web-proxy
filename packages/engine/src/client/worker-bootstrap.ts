@@ -1,17 +1,9 @@
 import { joined } from "../shared/primordials.ts";
-import { PROTOCOL_VERSION, WORKER_NONCE_PARAM, WORKER_RPC_PATH } from "../shared/protocol.ts";
+import { PROTOCOL_VERSION, WORKER_RPC_PATH } from "../shared/protocol.ts";
+import { workerBootstrapCode } from "../shared/worker-boot.ts";
 import { hookConstructor } from "./constructors.ts";
 
-export interface WorkerBoot {
-  runtimeUrl: string;
-  /** Announced to the service worker by the starting realm; the runtime import names it to claim that binding. */
-  nonce: string;
-  scriptUrl: string;
-  /** The worker's real URL, since its own location is a blob or proxy address. */
-  base: string;
-  partition: string;
-  module: boolean;
-}
+export { workerBootstrapCode, type WorkerBoot } from "../shared/worker-boot.ts";
 
 /** Where a worker script loads from and the real URL it runs under. */
 export interface WorkerSource {
@@ -42,7 +34,6 @@ export interface WorkerStart {
 }
 
 // Taken at load, before page code can replace them and steer the bootstrap or receive a native.
-const quote = JSON.stringify;
 const apply = Reflect.apply;
 const toText = String;
 const NativeURL = URL;
@@ -54,19 +45,6 @@ const HEX = "0123456789abcdef";
 const then = Promise.prototype.then;
 const defineProperty = Object.defineProperty;
 const iteratorKey = Symbol.iterator;
-
-/** A worker's first script: it hands the runtime its boot values, then loads the runtime before the real script. */
-export function workerBootstrapCode(boot: WorkerBoot): string {
-  const runtime = quote(`${boot.runtimeUrl}?${WORKER_NONCE_PARAM}=${boot.nonce}`);
-  const script = quote(boot.scriptUrl);
-  // Nested workers announce their own nonce, so the global keeps the plain runtime URL.
-  const globals =
-    `self.__giriciBase=${quote(boot.base)};self.__giriciRuntime=${quote(boot.runtimeUrl)};` +
-    `self.__giriciPartition=${quote(boot.partition)};`;
-  return boot.module
-    ? `${globals}await import(${runtime});await import(${script});`
-    : `${globals}importScripts(${runtime},${script});`;
-}
 
 /** Starts every Worker and SharedWorker from a bootstrap blob, so the runtime is in place before the real script. */
 export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {

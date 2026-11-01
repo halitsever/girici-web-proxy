@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
-import { hookWorkers, workerBootstrapCode, type WorkerGlobals } from "../src/client/worker-bootstrap.ts";
+import { hookWorkers, type WorkerGlobals } from "../src/client/worker-bootstrap.ts";
+import { workerBootstrapCode } from "../src/shared/worker-boot.ts";
 
 const boot = {
   runtimeUrl: "http://p.test/_g/worker.X.js",
