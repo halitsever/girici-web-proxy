@@ -1,3 +1,11 @@
+import type { RequestHandler } from "express";
+import { isAdminCookie } from "../auth/gate.ts";
+import type { AuthStore } from "../auth/store.ts";
+import type { UpgradeGate } from "../ws/relay-ws.ts";
+import { clientKey } from "./client-ip.ts";
+import { NO_OBSERVER, type RelayObserver } from "./relay-observer.ts";
+import { sendRelayError } from "./relay-error.ts";
+
 export type MeterResult = { ok: true } | { ok: false; retryAfter: number; scope: "minute" | "day" };
 
 interface Usage {
@@ -99,4 +107,35 @@ export class ByteMeter {
       if (full && !counted) this.#usage.delete(key);
     }
   }
+}
+
+interface GateOptions {
+  meter: ByteMeter;
+  store: AuthStore;
+}
+
+/** The admin is never refused, so the session is checked only once the meter says no. */
+export function bandwidthGate({ meter, store }: GateOptions): RequestHandler {
+  return (req, res, next) => {
+    const result = meter.check(clientKey(req.ip ?? "?"));
+    if (result.ok || isAdminCookie(store, req.headers.cookie)) {
+      next();
+      return;
+    }
+    res.setHeader("Retry-After", String(result.retryAfter));
+    sendRelayError(res, "quota", 429);
+  };
+}
+
+export function bandwidthUpgradeGate({ meter, store }: GateOptions): UpgradeGate {
+  return (req, key) => {
+    const result = meter.check(key);
+    if (result.ok || isAdminCookie(store, req.headers.cookie)) return null;
+    return { code: "quota", status: 429, retryAfter: result.retryAfter };
+  };
+}
+
+/** Both directions share one budget: either way the bytes cross this server's link. */
+export function meterObserver(meter: ByteMeter): RelayObserver {
+  return { ...NO_OBSERVER, bytes: (key, count) => meter.add(key, count) };
 }

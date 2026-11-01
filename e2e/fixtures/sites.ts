@@ -1900,6 +1900,17 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/video-page": html(VIDEO_PAGE),
     "/sample.webm": rangeRoute(sampleWebm, "video/webm"),
     "/sample.mp4": rangeRoute(sampleMp4, "video/mp4"),
+    /** ?kb=N KiB of filler, so a spec can spend a visitor's bandwidth in one request. */
+    "/bulk": (req, res) => {
+      const kb = Number(new URL(req.url ?? "/", "http://fixture").searchParams.get("kb"));
+      if (!Number.isInteger(kb) || kb < 1 || kb > 4096) {
+        res.writeHead(400, { "content-type": "text/plain" });
+        res.end("kb must be a whole number from 1 to 4096");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/octet-stream", "content-length": String(kb * 1024) });
+      res.end(Buffer.alloc(kb * 1024, "x"));
+    },
     "/mse": html(MSE),
     "/abortable": abortable.stream,
     "/abortable/aborts": abortable.count,
