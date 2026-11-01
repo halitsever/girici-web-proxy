@@ -86,7 +86,8 @@ export function createApp({
   app.use(siteHeaders());
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter(authStore, logger));
-  if (metricsRouter) app.use(metricsRouter);
+  // A scraper may reach the server by an internal name, such as a compose service, which is no host of the instance.
+  if (metricsRouter) app.use(onHosts(["single", "root", "other"], metricsRouter));
   app.use(robotsRouter());
   // In subdomain mode the root serves people and site hosts serve proxied sites; other hosts get nothing more.
   const root = (handler: RequestHandler) => onHosts(["single", "root"], handler);
