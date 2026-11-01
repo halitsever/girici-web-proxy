@@ -3,6 +3,7 @@ import { MasterSealer } from "../src/shared/sealed-address.ts";
 import {
   classifyRequest,
   isGuardedPath,
+  isHostReservedPath,
   isUiWindow,
   realUrlOf,
   requestClientUrl,
@@ -122,6 +123,27 @@ describe("reservedAccess", () => {
   it("keeps the service worker's own endpoints away from every page", () => {
     expect(reservedAccess("/_g/pot", call, ui, origin, known)).toBe("deny");
     expect(reservedAccess("/_g/ws-seal", call, ui, origin, known)).toBe("deny");
+  });
+
+  it("refuses admin paths to every client on a site host", () => {
+    const nav = { mode: "navigate" as RequestMode, destination: "document" as RequestDestination, method: "GET" };
+    expect(reservedAccess("/_g/admin/settings", call, ui, origin, known, true)).toBe("deny");
+    expect(reservedAccess("/_g/login", nav, undefined, origin, known, true)).toBe("deny");
+  });
+});
+
+describe("isHostReservedPath", () => {
+  it("leaves the root and robots.txt to the page on a site host", () => {
+    expect(isHostReservedPath("/", true)).toBe(false);
+    expect(isHostReservedPath("/robots.txt", true)).toBe(false);
+    expect(isHostReservedPath("/_g/sw.js", true)).toBe(true);
+    expect(isHostReservedPath("/_g/sites/config", true)).toBe(true);
+    expect(isHostReservedPath("/~/https/a.test/", true)).toBe(false);
+  });
+
+  it("reserves what single-origin mode reserves without a site", () => {
+    for (const path of ["/", "/robots.txt", "/_g/sw.js"]) expect(isHostReservedPath(path, false)).toBe(true);
+    expect(isHostReservedPath("/~/https/a.test/", false)).toBe(false);
   });
 });
 

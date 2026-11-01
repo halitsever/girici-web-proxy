@@ -1,4 +1,3 @@
-import { isReservedPath } from "../shared/codec.ts";
 import {
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
@@ -6,6 +5,7 @@ import {
   POT_PATH,
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
+  SITES_CONFIG_PATH,
   TOP_SITE_QUERY,
   WORKER_RPC_PATH,
   WS_PREP_PATH,
@@ -21,9 +21,18 @@ import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
 import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
-import { classifyRequest, isGuardedPath, realUrlOf, requestClientUrl, reservedAccess, type Route } from "./route.ts";
+import {
+  classifyRequest,
+  isGuardedPath,
+  isHostReservedPath,
+  realUrlOf,
+  requestClientUrl,
+  reservedAccess,
+  type Route,
+} from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
+import { createIdbSiteStore, SiteModeService } from "./site-mode.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
@@ -89,13 +98,32 @@ cookies.onChange((changes) => {
   announced = announced.then(() => announceCookies(changes)).catch(() => {});
 });
 
+// In subdomain mode the root's settings arrive with this host's config instead of from a UI tab.
+const siteMode = new SiteModeService({
+  fetch: (init) => fetch(`${self.location.origin}${SITES_CONFIG_PATH}`, init),
+  store: createIdbSiteStore(),
+  protocol: self.location.protocol,
+  host: self.location.host,
+  apply: (state) =>
+    prefs.set({
+      blockThirdPartyCookies: state.prefs.blockThirdPartyCookies,
+      sealAddresses: state.prefs.sealAddresses,
+      instanceSeal: state.instanceSeal,
+    }),
+});
+
 self.addEventListener("install", (event) => {
-  event.waitUntil(runtime.install().then(() => self.skipWaiting()));
+  // A network error fails the install so the browser tries again, rather than guessing the mode.
+  event.waitUntil(Promise.all([runtime.install(), siteMode.refresh(true)]).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
-  seeding = seedUiClients();
-  refreshInstanceSeal(true);
+  // A site host has no UI tabs to record, and its instance switch comes with its config.
+  seeding = inSingleMode(() => {
+    const seeded = seedUiClients();
+    refreshInstanceSeal(true);
+    return seeded;
+  });
   const cleanup = caches
     .keys()
     .then((keys) =>
@@ -130,6 +158,15 @@ async function uiReady(): Promise<void> {
   await Promise.all([ui.ready(), seeding]);
 }
 
+/** Runs `work` only in single-origin mode: at once when the mode is known, as it always is off a site host. */
+function inSingleMode(work: () => Promise<void>): Promise<void> {
+  if (siteMode.settled() === "single") return work();
+  return siteMode.ready().then(
+    () => (siteMode.settled() === "single" ? work() : undefined),
+    () => undefined,
+  );
+}
+
 self.addEventListener("message", (event) => {
   // The bootstrap page asks for control at once instead of waiting for the next navigation.
   if ((event.data as { type?: unknown } | null)?.type === "girici:claim") {
@@ -137,70 +174,76 @@ self.addEventListener("message", (event) => {
     return;
   }
   const answer = event.ports[0];
+  // A site host has no UI, so nothing there may change the settings or ask for a sealed address.
   event.waitUntil(
-    uiReady().then(async () => {
-      const sealRequest = readSealMessage(event.data, event.source as Client | null, self.location.origin, ui);
-      if (sealRequest !== null) {
-        answer?.postMessage({ path: await sealing.addressFor(sealRequest).catch(() => null) });
-        return;
-      }
-      const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
-      if (!update) return;
-      await prefs.set(update);
-      // The UI cannot turn the admin's switch off, only have the worker ask the server again.
-      if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
-      // The UI waits for this answer before navigating, so the next page already sees the new choice.
-      answer?.postMessage({ ok: true });
-    }),
+    inSingleMode(() =>
+      uiReady().then(async () => {
+        const sealRequest = readSealMessage(event.data, event.source as Client | null, self.location.origin, ui);
+        if (sealRequest !== null) {
+          answer?.postMessage({ path: await sealing.addressFor(sealRequest).catch(() => null) });
+          return;
+        }
+        const update = readPrefsMessage(event.data, event.source as Client | null, self.location.origin, ui);
+        if (!update) return;
+        await prefs.set(update);
+        // The UI cannot turn the admin's switch off, only have the worker ask the server again.
+        if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
+        // The UI waits for this answer before navigating, so the next page already sees the new choice.
+        answer?.postMessage({ ok: true });
+      }),
+    ),
   );
 });
 
 self.addEventListener("fetch", (event) => {
+  const mode = siteMode.settled();
+  if (mode !== null) {
+    const answer = respond(event, mode === "site");
+    if (answer) event.respondWith(answer);
+    return;
+  }
+  // A worker restarted on a site host reads its stored mode before it routes anything.
+  event.respondWith(
+    siteMode.ready().then(
+      () => respond(event, siteMode.settled() === "site") ?? fetch(event.request),
+      () => (event.request.mode === "navigate" ? htmlError("connect", 502, null) : Response.error()),
+    ),
+  );
+});
+
+/** The worker's answer to a request, or null to leave it to the browser. */
+function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
   const url = new URL(event.request.url);
-  if (loadsUi(event.request, url, self.location.origin)) {
+  const origin = self.location.origin;
+  if (loadsUi(event.request, url, origin, site)) {
     if (event.resultingClientId) ui.add(event.resultingClientId);
     // Answering keeps the page controlled under this ID, which Playwright's Firefox loses when a navigation falls
     // back. Once the worker answers, a server that is down gets Girici's error page instead of the browser's.
-    event.respondWith(fetch(event.request).catch(() => htmlError("connect", 502, url)));
-    return;
+    return fetch(event.request).catch(() => htmlError("connect", 502, url));
   }
+  const own = url.origin === origin;
   // The query is ignored for serving: a worker's import carries the nonce its page announced.
-  if (url.origin === self.location.origin && runtime.has(url.pathname)) {
+  if (own && runtime.has(url.pathname)) {
     const nonce = readNonce(url);
     if (nonce && event.clientId) event.waitUntil(workers.claim(event.clientId, nonce));
-    event.respondWith(runtime.response(url.pathname));
-    return;
+    return runtime.response(url.pathname);
   }
-  if (url.origin === self.location.origin && url.pathname === WORKER_RPC_PATH && event.request.method === "POST") {
-    event.respondWith(handleWorkerRpc(event));
-    return;
-  }
-  if (url.origin === self.location.origin && url.pathname === COOKIE_RPC_PATH && event.request.method === "POST") {
-    event.respondWith(handleCookieRpc(event));
-    return;
-  }
-  if (url.origin === self.location.origin && url.pathname === WS_PREP_PATH && event.request.method === "POST") {
-    event.respondWith(handleWsPrep(event));
-    return;
-  }
-  if (url.origin === self.location.origin && url.pathname === SITE_DATA_RPC_PATH && event.request.method === "POST") {
-    event.respondWith(handleSiteDataRpc(event));
-    return;
-  }
-  if (url.origin === self.location.origin && isGuardedPath(url.pathname)) {
+  const post = event.request.method === "POST";
+  if (own && url.pathname === WORKER_RPC_PATH && post) return handleWorkerRpc(event);
+  if (own && url.pathname === COOKIE_RPC_PATH && post) return handleCookieRpc(event);
+  if (own && url.pathname === WS_PREP_PATH && post) return handleWsPrep(event);
+  if (own && url.pathname === SITE_DATA_RPC_PATH && post) return handleSiteDataRpc(event);
+  if (own && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
       // A navigation has no client yet, so only its shape is judged.
-      if (reservedAccess(url.pathname, event.request, undefined, self.location.origin, ui) === "deny") {
-        event.respondWith(forbiddenResponse());
-      }
-      return;
+      const denied = reservedAccess(url.pathname, event.request, undefined, origin, ui, site) === "deny";
+      return denied ? Promise.resolve(forbiddenResponse()) : null;
     }
-    event.respondWith(guardReserved(event, url.pathname));
-    return;
+    return guardReserved(event, url.pathname, site);
   }
-  if (url.origin === self.location.origin && isReservedPath(url.pathname)) return;
-  event.respondWith(handle(event));
-});
+  if (own && isHostReservedPath(url.pathname, site)) return null;
+  return handle(event, site);
+}
 
 async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
   const [clients] = await Promise.all([self.clients.matchAll({ type: "window" }), sealing.ready()]);
@@ -214,13 +257,13 @@ async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
 }
 
 /** A client that cannot be looked up in time counts as a page, not as the UI. */
-async function guardReserved(event: FetchEvent, pathname: string): Promise<Response> {
+async function guardReserved(event: FetchEvent, pathname: string, site: boolean): Promise<Response> {
   const [client] = await Promise.all([clientOf(event), uiReady()]);
-  const decision = reservedAccess(pathname, event.request, client, self.location.origin, ui);
+  const decision = reservedAccess(pathname, event.request, client, self.location.origin, ui, site);
   return decision === "allow" ? fetch(event.request) : forbiddenResponse();
 }
 
-async function handle(event: FetchEvent): Promise<Response> {
+async function handle(event: FetchEvent, site: boolean): Promise<Response> {
   const { request } = event;
   const origin = self.location.origin;
   const navigation = request.mode === "navigate";
@@ -230,7 +273,7 @@ async function handle(event: FetchEvent): Promise<Response> {
   const identity = await identityOf(event, client);
   const clientUrl = requestClientUrl({ client, identity }, origin);
   const topLevelGet = navigation && request.destination === "document" && request.method === "GET";
-  if (topLevelGet) refreshInstanceSeal();
+  if (topLevelGet && !site) refreshInstanceSeal();
   await Promise.all([cookies.ready(), sealing.ready()]);
   const master = await sealing.sealerFor(isSealedPath(new URL(request.url).pathname));
   let route: Route;

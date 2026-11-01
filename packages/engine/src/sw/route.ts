@@ -121,6 +121,11 @@ function isOwnOrigin(value: string, origin: string): boolean {
   }
 }
 
+/** Paths the network answers; on a site host `/` and `/robots.txt` belong to the page's own site. */
+export function isHostReservedPath(pathname: string, siteMode: boolean): boolean {
+  return siteMode ? pathname.startsWith("/_g/") : isReservedPath(pathname);
+}
+
 /** The real URL behind one of our proxy URLs, or null for the Girici UI and foreign URLs. */
 export function realUrlOf(value: string | null, origin: string, open?: OpenSealed): URL | null {
   if (!value) return null;
@@ -211,7 +216,8 @@ export interface ReservedRequest {
 
 /**
  * Proxied pages share our origin, so the browser sends the admin's cookie with their calls too. Only the UI's own
- * calls and top-level page loads pass; the worker's own fetches never come through its fetch handler.
+ * calls and top-level page loads pass; the worker's own fetches never come through its fetch handler. A site host
+ * has no UI, so nothing passes there.
  */
 export function reservedAccess(
   pathname: string,
@@ -219,8 +225,9 @@ export function reservedAccess(
   client: ClientShape | null | undefined,
   origin: string,
   ui: UiClientSet,
+  siteMode = false,
 ): "allow" | "deny" {
-  if (WORKER_ONLY.has(normalizePath(pathname))) return "deny";
+  if (siteMode || WORKER_ONLY.has(normalizePath(pathname))) return "deny";
   if (request.mode === "navigate") {
     return request.destination === "document" && request.method === "GET" ? "allow" : "deny";
   }
