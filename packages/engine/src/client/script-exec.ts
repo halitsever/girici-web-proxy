@@ -1,5 +1,5 @@
-import type { FunctionBodyKind } from "../rewrite/js.ts";
-import { apply, define, joined } from "../shared/primordials.ts";
+import type { ConstructorKind, FunctionBodyKind, FunctionSource } from "../rewrite/js.ts";
+import { apply, define, joined, stringOf } from "../shared/primordials.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm } from "./url-context.ts";
 
@@ -15,14 +15,17 @@ const SAMPLE_KINDS: readonly FunctionBodyKind[] = ["generator", "async", "asyncG
 export function installScriptExec(
   win: Realm,
   rewriteScript: (code: string) => string,
-  rewriteBody: (code: string, kind: "handler" | FunctionBodyKind) => string,
+  rewriteFunction: (params: string, body: string, kind: ConstructorKind) => FunctionSource,
 ): void {
-  const wrapConstructor = (native: AnyFunction, kind: "handler" | FunctionBodyKind): AnyFunction => {
+  const wrapConstructor = (native: AnyFunction, kind: ConstructorKind): AnyFunction => {
     const hooked = function (this: unknown, ...args: unknown[]): unknown {
-      const body = args[args.length - 1];
-      // The last argument is the function body; earlier ones are parameter names.
-      if (args.length > 0 && typeof body === "string") args[args.length - 1] = rewriteBody(body, kind);
-      return construct(native as never, args, (new.target ?? hooked) as never);
+      if (args.length === 0) return construct(native as never, args, (new.target ?? hooked) as never);
+      // Each argument becomes text once, in order, as the constructor would make it; the last one is the body.
+      let params = "";
+      for (let index = 0; index < args.length - 1; index++) params += (index ? "," : "") + stringOf(args[index]);
+      const source = rewriteFunction(params, stringOf(args[args.length - 1]), kind);
+      const texts = args.length > 1 ? [source.params, source.body] : [source.body];
+      return construct(native as never, texts, (new.target ?? hooked) as never);
     } as AnyFunction;
     // Sharing the native prototype keeps `instanceof` and `.prototype` intact.
     (hooked as { prototype: unknown }).prototype = (native as { prototype: unknown }).prototype;
@@ -32,7 +35,7 @@ export function installScriptExec(
 
   const FunctionCtor = win.Function as unknown as AnyFunction;
   const samples = realmSamples(FunctionCtor);
-  const hookedFunction = wrapConstructor(FunctionCtor, "handler");
+  const hookedFunction = wrapConstructor(FunctionCtor, "function");
   win.Function = hookedFunction as unknown as FunctionConstructor;
   // `(function(){}).constructor` reaches the native ctor through the shared prototype, so route it too.
   define(win.Function.prototype, "constructor", {
@@ -57,8 +60,10 @@ export function installScriptExec(
     const name = timers[index] as (typeof timers)[number];
     const native = win[name] as unknown as AnyFunction;
     // Through apply: a replaced Function.prototype.call would be handed the native timer, which runs code unrewritten.
+    // A handler that is not a function is code, as the native would read it: text made once, then rewritten.
     const hooked = function (this: unknown, handler: unknown, ...rest: unknown[]): unknown {
-      return apply(native, win, joined([typeof handler === "string" ? rewriteScript(handler) : handler], rest));
+      const code = typeof handler === "function" ? handler : rewriteScript(stringOf(handler));
+      return apply(native, win, joined([code], rest));
     } as AnyFunction;
     maskNative(hooked, native);
     (win as unknown as Record<string, unknown>)[name] = hooked;

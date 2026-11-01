@@ -1,19 +1,18 @@
-import {
-  append,
-  define,
-  exec,
-  hrefOf,
-  listIncludes,
-  lowerCase,
-  NativeWeakSet,
-  originOf,
-} from "../shared/primordials.ts";
+import { append, define, hrefOf, listIncludes, lowerCase, NativeWeakSet, originOf } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
 import type { AssignHref } from "./invoke.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentSteps } from "./renewal.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
-import { openedOrigin, type WindowGuard } from "./windows.ts";
+import {
+  markWindow,
+  openedOrigin,
+  seversOpener,
+  WINDOW_BOUND,
+  WINDOW_MADE,
+  windowMark,
+  type WindowGuard,
+} from "./windows.ts";
 
 /** Gives a same-origin child window the runtime; windows that already carry one are left to renew themselves. */
 export interface FrameAdopter {
@@ -28,6 +27,11 @@ export interface FrameAdopter {
   useOpen(open: (this: unknown, ...args: unknown[]) => unknown): void;
   /** Called with each inserted node first, so frames another parser made get their values rewritten. */
   useBackstop(check: (node: unknown) => void): void;
+  /**
+   * Readies the window a link or form aimed at `target` loads into: a new one is opened blank, and a blank one the
+   * browser could keep for a page of another origin than `destination` is replaced.
+   */
+  prepareTarget(target: string, destination: string | undefined): void;
 }
 
 export interface FrameWalker {
@@ -60,7 +64,8 @@ const NO_CHILDREN: readonly unknown[] = [];
 const PLUGIN_WALKS = [16, 50, 100, 250, 500, 1000, 2000];
 /** open() targets that name a window already showing a page, which no first page can share. */
 const SAME_WINDOW = ["_self", "_parent", "_top"];
-const SEVERED = /noopener|noreferrer/i;
+/** Targets that never name an existing window. */
+const UNNAMED = ["", "_blank", "_self", "_parent", "_top"];
 
 // Taken at load: adoption runs inside page calls, after page code may have replaced these.
 const apply = Reflect.apply;
@@ -318,14 +323,6 @@ export function installFrames(
     define(proto, "getSVGDocument", { ...descriptor, value: maskNative(hooked, native) });
   }
 
-  /** A window open(url) makes for another origin, whose first page would keep that window and this realm's hooks. */
-  const headsElsewhere = (url: unknown, target: unknown, features: unknown): boolean => {
-    if (target !== undefined && listIncludes(SAME_WINDOW, lowerCase(toText(target)))) return false;
-    // Such a window is never handed to this realm, so nothing here adopts it.
-    if (features !== undefined && exec(SEVERED, toText(features)) !== null) return false;
-    const destination = openedOrigin(url, ctx.origin);
-    return destination !== undefined && destination !== originOf(ctx.realUrl());
-  };
   const showsPage = (opened: object): boolean => {
     try {
       return (opened as { location: Location }).location.href !== "about:blank";
@@ -343,22 +340,79 @@ export function installFrames(
     }
   };
   const open = win.open;
-  const openWindow = maskNative(function (this: unknown, ...args: unknown[]) {
-    const url = args[0];
-    const navigating = url !== undefined && url !== null && url !== "";
-    if (navigating && headsElsewhere(url, args[1], args[2])) {
-      // Browsers give a page sent to a blank popup a fresh window, without the hooks adopted into the blank one.
-      const blank = apply(open, this ?? win, ["", args[1], args[2]]) as Window | null;
-      // A named window that already shows a page gets a fresh window anyway, and open() keeps its history entry.
-      if (blank && showsPage(blank)) return apply(open, this ?? win, args) as Window | null;
-      adopt(blank, true);
-      if (blank) sendTo(blank, toText(url));
-      return blank;
+  const nameSetter = ownDescriptor(win, "name")?.set;
+  const nativeOpen = (self: unknown, url: string, target: string | undefined, features: string | undefined) =>
+    apply(open, self, [url, target, features]) as Window | null;
+  /** Any own property counts, so a page cannot pass a window off as unmarked with an accessor. */
+  const hasOwnKey = (opened: object, key: string): boolean => {
+    try {
+      return ownDescriptor(opened, key) !== undefined;
+    } catch {
+      return true;
     }
-    const opened = apply(open, this ?? win, args) as Window | null;
-    // A popup opened with a URL keeps this blank window only until that page arrives and renews it.
-    adopt(opened, navigating);
-    return opened;
+  };
+  /** A window no engine has adopted or marked yet, which the open() just called made. */
+  const isNew = (opened: object): boolean => !hasOwnKey(opened, "__g$") && !hasOwnKey(opened, WINDOW_MADE);
+  /**
+   * Browsers keep the window open(url) made, while it is still blank, for whichever page arrives in it first. A window
+   * made by open("") never is kept; anything else this realm cannot vouch for counts as kept.
+   */
+  const reusable = (opened: object): boolean => !isNew(opened) && windowMark(opened, WINDOW_MADE) !== "blank";
+  const rename = (opened: object, name: string): void => {
+    try {
+      if (nameSetter) apply(nameSetter, opened, [name]);
+    } catch {
+      // A window that closed meanwhile names nothing.
+    }
+  };
+  /** The window open("", target) gives, or a fresh one in its place if the named one could be kept. */
+  const blankFor = (self: unknown, target: string | undefined, features: string | undefined): Window | null => {
+    let blank = nativeOpen(self, "", target, features);
+    if (blank && !showsPage(blank) && reusable(blank)) {
+      // Renamed out of the way, so the name gets a window of its own; measured in Chromium, Firefox and WebKit.
+      const kept = blank;
+      rename(kept, "");
+      blank = nativeOpen(self, "", target, features);
+      if (blank && !isNew(blank)) blank = nativeOpen(self, "", "_blank", features);
+      // A blocked popup leaves the name where it was.
+      if (!blank && target !== undefined) rename(kept, target);
+    }
+    if (blank && isNew(blank)) markWindow(blank, WINDOW_MADE, "blank");
+    return blank;
+  };
+  const openWindow = maskNative(function (this: unknown, ...args: unknown[]) {
+    const self = this ?? win;
+    // Each argument becomes text once, so the checks below and the browser read the same values.
+    const url = args[0] === undefined ? "" : toText(args[0]);
+    const target = args[1] === undefined ? undefined : toText(args[1]);
+    const features = args[2] === undefined ? undefined : toText(args[2]);
+    if (url === "") {
+      const opened = nativeOpen(self, url, target, features);
+      if (opened && isNew(opened)) markWindow(opened, WINDOW_MADE, "blank");
+      adopt(opened, false);
+      return opened;
+    }
+    const own = originOf(ctx.realUrl());
+    const destination = openedOrigin(url, ctx.origin, ctx.realBase());
+    const sameWindow = target !== undefined && listIncludes(SAME_WINDOW, lowerCase(target));
+    // A severed window is never handed to this realm, so nothing here adopts it.
+    if (destination === own || sameWindow || (features !== undefined && seversOpener(features))) {
+      const opened = nativeOpen(self, url, target, features);
+      // The browser keeps this window, while blank, for the first page that arrives; other realms must know.
+      if (opened && isNew(opened)) markWindow(opened, WINDOW_MADE, "url");
+      // A popup opened with a URL keeps this blank window only until that page arrives and renews it.
+      adopt(opened, true);
+      return opened;
+    }
+    // Any other address, javascript: included, goes to a window made blank: a page sent there gets a fresh window.
+    const blank = blankFor(self, target, features);
+    // A named window that already shows a page gets a fresh window anyway, and open() keeps its history entry.
+    if (blank && showsPage(blank)) return nativeOpen(self, url, target, features);
+    if (!blank) return blank;
+    adopt(blank, true);
+    if (destination !== undefined) markWindow(blank, WINDOW_BOUND, destination);
+    sendTo(blank, url);
+    return blank;
   }, open) as typeof win.open;
   win.open = openWindow;
 
@@ -375,7 +429,8 @@ export function installFrames(
     (url, rest) => {
       if (windowOpen) return apply(windowOpen, win, [url, rest[0], rest[1]]);
       const proxied = url === undefined || url === null || url === "" ? url : ctx.toProxy(toText(url));
-      return guard.wrap(apply(openWindow, win, [proxied, rest[0], rest[1]]), openedOrigin(proxied, ctx.origin));
+      const opened = apply(openWindow, win, [proxied, rest[0], rest[1]]);
+      return guard.wrap(opened, openedOrigin(proxied, ctx.origin, ctx.realBase()));
     },
     reopenedFor,
   );
@@ -433,6 +488,15 @@ export function installFrames(
     },
     useBackstop: (check) => {
       backstop = check;
+    },
+    prepareTarget: (target, destination) => {
+      if (listIncludes(UNNAMED, lowerCase(target))) return;
+      const blank = blankFor(win, target, undefined);
+      if (!blank || showsPage(blank)) return;
+      adopt(blank, false);
+      if (destination !== undefined && destination !== originOf(ctx.realUrl())) {
+        markWindow(blank, WINDOW_BOUND, destination);
+      }
     },
     walk: walker.walk,
     walkFor: (target) => {

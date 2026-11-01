@@ -133,6 +133,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     rewrite: {
       js: (code) => code,
       jsBody: (code) => code,
+      jsFunction: (params, body) => ({ params, body }),
       html: (html) => html,
       srcdoc: (markup) => markup,
       unhtml: (html) => html,

@@ -1,15 +1,21 @@
 import type { AssignHref, Invoke } from "./invoke.ts";
 import { post } from "./messaging.ts";
 import { maskNative } from "./native-mask.ts";
+import { encodeUrl } from "../shared/codec.ts";
 import {
   apply,
   define,
+  exec,
   hrefOf,
+  lowerCase,
   NativeWeakMap,
   NativeWeakSet,
+  newUrl,
   originOf,
   parseUrl,
   pathnameOf,
+  sliceOf,
+  toNumber,
   toText,
 } from "../shared/primordials.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
@@ -42,6 +48,37 @@ const mapGet = WeakMap.prototype.get;
 const mapSet = WeakMap.prototype.set;
 const setHas = WeakSet.prototype.has;
 const setAdd = WeakSet.prototype.add;
+const hasOwn = Object.prototype.hasOwnProperty;
+
+/** Fixed own properties the engine puts on a window it opens, which the engine of every realm reads. */
+export const WINDOW_MADE = "__g$made";
+/** The real origin a blank window was sent to: until that page arrives, every realm keeps it locked. */
+export const WINDOW_BOUND = "__g$to";
+
+/** Non-configurable, so no page takes it off again; a window that already has the key keeps its first value. */
+export function markWindow(target: unknown, key: string, value: string): boolean {
+  try {
+    return reflectDefine(target as object, key, {
+      __proto__: null,
+      value,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    } as PropertyDescriptor);
+  } catch {
+    return false;
+  }
+}
+
+/** A mark's value, read as an own data property only. */
+export function windowMark(target: unknown, key: string): unknown {
+  try {
+    const descriptor = ownDescriptor(target, key);
+    return descriptor && apply(hasOwn, descriptor, ["value"]) ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The cross-origin members browsers expose. A null prototype keeps page additions to Object.prototype out of `in`. */
 const CROSS_ORIGIN_KEYS: Record<string, true> = Object.assign(Object.create(null) as Record<string, true>, {
@@ -60,12 +97,73 @@ const CROSS_ORIGIN_KEYS: Record<string, true> = Object.assign(Object.create(null
   opener: true,
 });
 
-/** The real origin a window opened with the proxied URL `proxied` is headed to, or undefined for a blank one. */
-export function openedOrigin(proxied: unknown, origin: string): string | undefined {
+/**
+ * The real origin a window opened with the proxied URL `proxied` is headed to, or undefined for a blank one. A
+ * relative URL the rewriter left as it was resolves against the document's base, `base`, as the browser resolves it.
+ */
+export function openedOrigin(proxied: unknown, origin: string, base?: URL): string | undefined {
   if (proxied === undefined || proxied === null || proxied === "") return undefined;
-  const address = parseUrl(toText(proxied), origin);
+  const address = parseUrl(toText(proxied), proxyBase(origin, base));
   const destination = address ? realUrlOf(hrefOf(address), origin) : null;
   return destination ? originOf(destination) : undefined;
+}
+
+function proxyBase(origin: string, base: URL | undefined): string {
+  if (!base) return origin;
+  try {
+    return hrefOf(newUrl(encodeUrl(base), origin));
+  } catch {
+    // A base that is no web address resolves nothing the proxy serves.
+    return origin;
+  }
+}
+
+const INTEGER = /^[+-]?[0-9]+/;
+
+/** Whether window features ask for noopener, read with the HTML standard's tokenizer and boolean feature rules. */
+export function seversOpener(features: string): boolean {
+  const tokens = featureTokens(features);
+  return isFeatureSet(tokens, "noopener") || isFeatureSet(tokens, "noreferrer");
+}
+
+function isSeparator(char: string): boolean {
+  return (
+    char === "=" || char === "," || char === " " || char === "\t" || char === "\n" || char === "\f" || char === "\r"
+  );
+}
+
+function featureTokens(features: string): Record<string, string> {
+  const tokens = { __proto__: null } as unknown as Record<string, string>;
+  const at = (index: number) => sliceOf(features, index, index + 1);
+  const end = features.length;
+  let position = 0;
+  while (position < end) {
+    while (position < end && isSeparator(at(position))) position++;
+    const nameStart = position;
+    while (position < end && !isSeparator(at(position))) position++;
+    const name = lowerCase(sliceOf(features, nameStart, position));
+    while (position < end && at(position) !== "=") {
+      if (at(position) === "," || !isSeparator(at(position))) break;
+      position++;
+    }
+    let value = "";
+    if (position < end && isSeparator(at(position))) {
+      while (position < end && isSeparator(at(position)) && at(position) !== ",") position++;
+      const valueStart = position;
+      while (position < end && !isSeparator(at(position))) position++;
+      value = lowerCase(sliceOf(features, valueStart, position));
+    }
+    if (name !== "") tokens[name] = value;
+  }
+  return tokens;
+}
+
+function isFeatureSet(tokens: Record<string, string>, name: string): boolean {
+  if (!apply(hasOwn, tokens, [name])) return false;
+  const value = tokens[name] as string;
+  if (value === "" || value === "yes" || value === "true") return true;
+  const parsed = exec(INTEGER, value);
+  return parsed !== null && toNumber(parsed[0]) !== 0;
 }
 
 function isWindow(value: unknown): value is object {
@@ -144,7 +242,7 @@ export function createWindowGuard(
       if ((value as { location: { href: string } }).location.href !== "about:blank") return undefined;
       const element = apply(frameElementOf, value, []) as Element | null;
       if (!element || apply(getAttribute, element, ["srcdoc"]) !== null) return undefined;
-      return openedOrigin(apply(getAttribute, element, ["src"]), ctx.origin);
+      return openedOrigin(apply(getAttribute, element, ["src"]), ctx.origin, ctx.realBase());
     } catch {
       return undefined;
     }
@@ -154,7 +252,11 @@ export function createWindowGuard(
     if (!isWindow(value) || isWrapper(value) || apply(setHas, given, [value])) return value;
     const cached = apply(mapGet, wrappers, [value]) as object | undefined;
     if (cached) return cached;
-    if (headedTo === undefined && value !== win) headedTo = frameHeading(value);
+    if (headedTo === undefined && value !== win) {
+      // Another realm's engine may have sent this blank window to another site; its mark locks it here too.
+      const bound = windowMark(value, WINDOW_BOUND);
+      headedTo = typeof bound === "string" ? bound : frameHeading(value);
+    }
     // A frame handed out as is stays so: whoever got it keeps it anyway, and one window must stay one object.
     if (sameOrigin(value) && (headedTo === undefined || headedTo === selfOrigin()) && !isOtherTab(value)) {
       apply(setAdd, given, [value]);
