@@ -1,6 +1,12 @@
+import { hkdfSync } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { sep } from "node:path";
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
+import { labelSiteOf } from "../../packages/engine/src/shared/label-site.ts";
+import { siteLabel } from "../../packages/engine/src/shared/site-label.ts";
+import { SITES, SITE_SECRET } from "./site-mode.ts";
+
+export { PRIVATE_SITES, SITES, SITE_SECRET } from "./site-mode.ts";
 
 const TRAP_LOG = "http://127.0.0.1:41999/log";
 
@@ -50,6 +56,18 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
 }
 
 export const INSTANCE = "http://127.0.0.1:41002";
+
+const LABEL_KEY = new Uint8Array(hkdfSync("sha256", SITE_SECRET, "girici", "girici/v1 label", 32));
+
+/** The origin of the host that serves `url`'s site on the subdomain-mode server at `base`. */
+export function siteHost(url: string, base: string = SITES): string {
+  const root = new URL(base);
+  return `${root.protocol}//${siteLabel(LABEL_KEY, labelSiteOf(new URL(url)))}.${root.host}`;
+}
+
+export function isSiteProject(info: TestInfo): boolean {
+  return info.project.name.endsWith("-sites");
+}
 
 export async function signIn(page: Page, base: string): Promise<void> {
   await page.goto(`${base}/_g/login`);
