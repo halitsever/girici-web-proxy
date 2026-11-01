@@ -1902,7 +1902,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sample.mp4": rangeRoute(sampleMp4, "video/mp4"),
     "/mse": html(MSE),
     "/abortable": abortable.stream,
-    "/abortable/aborts": abortable.count,
+    "/abortable/aborted": abortable.check,
     "/slow-stream": slowStreamRoute(800),
     "/sinks": html(SINKS),
     "/sinks-write": html(SINKS_WRITE),
