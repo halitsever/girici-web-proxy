@@ -68,6 +68,7 @@ same-origin rule separates sites. Between sites, most of the gaps listed above c
   `location`, is a real cross-origin window, and the browser refuses access to it.
 - **Rewriters in the page realm.** A page that breaks its own rewriter reaches only its own host's data.
 - **The origin private file system and blob URLs.** Both belong to one host.
+- **Shared workers.** A shared worker's address belongs to its site's host, so another site cannot reach it.
 - **Girici's own storage.** A page reaches only the cookie jar and storage of its own host.
 - **The UI.** History and settings live on the root, a different origin from every site.
 
