@@ -1,5 +1,5 @@
 import type { RequestHandler, Response } from "express";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
 import { cookieValues } from "../http/cookie-values.ts";
@@ -59,7 +59,7 @@ export function powGate({ store, now = Date.now }: PowGateOptions): RequestHandl
       next();
       return;
     }
-    if (isAdminCookie(store, req.headers.cookie)) {
+    if (isSessionCookie(store, req.headers.cookie)) {
       next();
       return;
     }
@@ -72,7 +72,7 @@ export function powUpgradeGate({ store, now = Date.now }: PowGateOptions): Upgra
   return (req, key) => {
     if (!store.proofOfWork()) return null;
     const visitor = visitorOf(powKey(store.sessionSecret()), req.headers.cookie, key, now());
-    if (visitor || isAdminCookie(store, req.headers.cookie)) return null;
+    if (visitor || isSessionCookie(store, req.headers.cookie)) return null;
     return { code: "challenge", status: 403 };
   };
 }

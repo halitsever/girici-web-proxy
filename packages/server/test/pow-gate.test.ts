@@ -2,7 +2,12 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import {
+  createSessionToken,
+  createSiteSessionToken,
+  PLAIN_SITE_SESSION_COOKIE,
+  SESSION_COOKIE,
+} from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { powGate, powUpgradeGate } from "../src/pow/gate.ts";
@@ -12,12 +17,14 @@ let server: Server;
 let base: string;
 let store: AuthStore;
 let adminCookie: string;
+let siteSessionCookie: string;
 
 beforeAll(async () => {
   store = new AuthStore(openDb(":memory:"));
   const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
   store.setPublicAccess(true);
   adminCookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
+  siteSessionCookie = `${PLAIN_SITE_SESSION_COOKIE}=${createSiteSessionToken(admin.id, store.sessionSecret())}`;
   const app = express();
   app.set("trust proxy", 1);
   app.use("/_g/r", powGate({ store }), (_req, res) => {
@@ -56,6 +63,10 @@ describe("powGate", () => {
     expect((await hit(base, { cookie: adminCookie })).status).toBe(204);
   });
 
+  it("passes the admin on a site host, where only the site session arrives", async () => {
+    expect((await hit(base, { cookie: siteSessionCookie })).status).toBe(204);
+  });
+
   it("checks a visitor again after their address changes", async () => {
     const cookie = `girici-visitor=${visitor("198.51.100.1")}`;
     expect((await hit(base, { cookie, xff: "198.51.100.1" })).status).toBe(204);
@@ -90,5 +101,6 @@ describe("powUpgradeGate", () => {
     const carrying = { headers: { cookie: `girici-visitor=${visitor("c")}` } } as IncomingMessage;
     expect(gate(carrying, "c")).toBeNull();
     expect(gate({ headers: { cookie: adminCookie } } as IncomingMessage, "c")).toBeNull();
+    expect(gate({ headers: { cookie: siteSessionCookie } } as IncomingMessage, "c")).toBeNull();
   });
 });

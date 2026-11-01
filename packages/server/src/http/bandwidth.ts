@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import type { UpgradeGate } from "../ws/relay-ws.ts";
 import { clientKey } from "./client-ip.ts";
@@ -118,7 +118,7 @@ interface GateOptions {
 export function bandwidthGate({ meter, store }: GateOptions): RequestHandler {
   return (req, res, next) => {
     const result = meter.check(clientKey(req.ip ?? "?"));
-    if (result.ok || isAdminCookie(store, req.headers.cookie)) {
+    if (result.ok || isSessionCookie(store, req.headers.cookie)) {
       next();
       return;
     }
@@ -130,7 +130,7 @@ export function bandwidthGate({ meter, store }: GateOptions): RequestHandler {
 export function bandwidthUpgradeGate({ meter, store }: GateOptions): UpgradeGate {
   return (req, key) => {
     const result = meter.check(key);
-    if (result.ok || isAdminCookie(store, req.headers.cookie)) return null;
+    if (result.ok || isSessionCookie(store, req.headers.cookie)) return null;
     return { code: "quota", status: 429, retryAfter: result.retryAfter };
   };
 }
