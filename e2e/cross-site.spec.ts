@@ -1,3 +1,4 @@
+import type { FrameLocator, Page } from "@playwright/test";
 import { expect, openThroughUi, test } from "./support/test.ts";
 
 test("refuses another site's popup document but keeps messaging and navigation", async ({ page }) => {
@@ -122,5 +123,58 @@ for (const [name, open] of [
       global: "SecurityError",
       closed: false,
     });
+  });
+}
+
+// The page wraps its own built-ins, then opens or embeds the victim; "seed" writes from a second tab of the victim's
+// site. An embedded victim is third-party, so only its writes reach the cookie code.
+const COOKIE_PATHS = [
+  ["popup", "read"],
+  ["popup", "write"],
+  ["popup", "sync"],
+  ["popup", "listen"],
+  ["popup", "store"],
+  ["frame", "write"],
+  ["frame", "store"],
+] as const;
+for (const [via, scenario] of COOKIE_PATHS) {
+  const made = via === "popup" ? "opens" : "embeds";
+  test(`keeps the cookies of a site a page ${made} out of that page's own built-ins: ${scenario}`, async ({
+    page,
+    context,
+  }) => {
+    await openThroughUi(page, `https://site-a.test/xs-cookie-spy?do=${scenario}`);
+    const seed = async () => {
+      const other = await context.newPage();
+      await other.goto("/~/https/site-b.test/xs-cookie-victim?do=seed");
+      await expect(other.locator("#results")).not.toBeEmpty();
+    };
+    if (scenario === "read") await seed();
+    let victim: Page | FrameLocator;
+    if (via === "popup") {
+      const popupEvent = page.waitForEvent("popup");
+      await page.click("#open");
+      const popup = await popupEvent;
+      await popup.waitForURL(/\/~\/https\/site-b\.test\/xs-cookie-victim/);
+      victim = popup;
+    } else {
+      await page.click("#frame");
+      victim = page.frameLocator("#victim");
+    }
+    await expect(victim.locator("#results")).not.toBeEmpty();
+    if (scenario === "listen") {
+      await seed();
+      // The worker's message reaches the victim a moment after the other tab's write lands.
+      await page.waitForTimeout(500);
+    }
+    const results = JSON.parse((await victim.locator("#results").textContent()) ?? "{}") as { store?: unknown };
+    const stored = via === "popup" ? [true, true, true, true] : [false, false, false, false];
+    if (scenario === "store") expect([stored, "absent"]).toContainEqual(results.store);
+    await page.click("#check");
+    await expect(page.locator("#results")).not.toBeEmpty();
+    expect(JSON.parse((await page.locator("#results").textContent()) ?? "null")).toEqual([]);
+    if (via === "frame" || results.store === "absent") return;
+    await victim.locator("#read").click();
+    await expect(victim.locator("#cookie")).toContainText("xsl_");
   });
 }

@@ -1,9 +1,11 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { installStorageIsolation } from "../src/client/storage-isolation.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { recordingCalls } from "./recording-calls.ts";
 import { withReplaced } from "./replaced-builtins.ts";
+import { spyBuiltins } from "./spied-builtins.ts";
 
 function ctxFor(origin: string): UrlContext {
   return { realUrl: () => new URL(`${origin}/`) } as unknown as UrlContext;
@@ -76,17 +78,101 @@ function fakeCachesWin(backing: Map<string, Map<string, string>>) {
   return { CacheStorage, caches: new CacheStorage() } as unknown as Realm;
 }
 
+/** A window's own Promise, Object and Array, from another realm than the runtime's, as in a window the browser reused. */
+const PAGE = runInNewContext("({ Promise, Object, Array })") as {
+  Promise: PromiseConstructor;
+  Object: ObjectConstructor;
+  Array: ArrayConstructor;
+};
+
+type CookieItem = { name: string; value: string };
+interface CookieStoreShim {
+  get(name: unknown): Promise<CookieItem | null>;
+  getAll(): Promise<CookieItem[]>;
+  set(name: unknown, value?: unknown): Promise<void>;
+  delete(name: unknown): Promise<void>;
+}
+
+function cookieStoreWin(document: { cookie: string }) {
+  const store = {} as CookieStoreShim;
+  const win = { cookieStore: store, document, ...PAGE } as unknown as Realm;
+  return { win, store };
+}
+
 describe("installStorageIsolation", () => {
   it("supports the string and object forms of cookieStore.get", async () => {
-    const store: Record<string, unknown> = {};
-    const win = {
-      cookieStore: store,
-      document: { cookie: "session=abc; theme=dark" },
-    } as unknown as Realm;
+    const { win, store } = cookieStoreWin({ cookie: "session=abc; theme=dark" });
     installStorageIsolation(win, ctxFor("https://site.test"), () => prefixFor("https://site.test"));
-    const get = store.get as (name: unknown) => Promise<{ name: string; value: string } | null>;
-    expect(await get("theme")).toEqual({ name: "theme", value: "dark" });
-    expect(await get({ name: "session" })).toEqual({ name: "session", value: "abc" });
+    expect(await store.get("theme")).toEqual({ name: "theme", value: "dark" });
+    expect(await store.get({ name: "session" })).toEqual({ name: "session", value: "abc" });
+    expect(await store.get("none")).toBeNull();
+  });
+
+  it("keeps cookieStore on the mirror for a store the next document of the window gets", async () => {
+    class CookieStore {
+      get(): Promise<unknown> {
+        return Promise.resolve("native");
+      }
+    }
+    const document = { cookie: "a=1" };
+    const win = { cookieStore: new CookieStore(), CookieStore, document, ...PAGE } as unknown as Realm;
+    installStorageIsolation(win, ctxFor("https://site.test"), () => prefixFor("https://site.test"));
+    const next = new CookieStore() as unknown as CookieStoreShim;
+    expect(Object.getOwnPropertyNames(next)).toEqual([]);
+    expect(await next.get("a")).toEqual({ name: "a", value: "1" });
+  });
+
+  it("answers cookieStore in the page's own realm, out of reach of the built-ins of the realm that made it", async () => {
+    const secret = "s3cr3t";
+    const writes: string[] = [];
+    let cookie = `${secret}a=1; ${secret}b=${secret}2; ${secret}c`;
+    const { win, store } = cookieStoreWin({
+      get cookie() {
+        return cookie;
+      },
+      set cookie(value: string) {
+        // Not push, which the spies wrap.
+        writes[writes.length] = value;
+      },
+    });
+    const url = new URL(`https://site.test/${secret}/page`);
+    const ctx = { realUrl: () => url } as unknown as UrlContext;
+    installStorageIsolation(win, ctx, () => prefixFor("https://site.test"));
+    const named = { name: `${secret}a` };
+    const item = { name: `${secret}d`, value: `${secret}4` };
+    const answers: unknown[] = [];
+    const seen = await spyBuiltins(secret, async () => {
+      answers[0] = await store.get(`${secret}b`);
+      answers[1] = await store.get(named);
+      answers[2] = await store.getAll();
+      answers[3] = await store.set(`${secret}c`, `${secret}3`);
+      answers[4] = await store.set(item);
+      answers[5] = await store.delete(named);
+      cookie = "";
+      answers[6] = await store.get(`${secret}b`);
+    });
+    expect(seen).toEqual([]);
+    expect(answers).toEqual([
+      { name: `${secret}b`, value: `${secret}2` },
+      { name: `${secret}a`, value: "1" },
+      [
+        { name: `${secret}a`, value: "1" },
+        { name: `${secret}b`, value: `${secret}2` },
+        { name: `${secret}`, value: `${secret}c` },
+      ],
+      undefined,
+      undefined,
+      undefined,
+      null,
+    ]);
+    expect(Object.getPrototypeOf(answers[0])).toBe(PAGE.Object.prototype);
+    expect(Object.getPrototypeOf(answers[2])).toBe(PAGE.Array.prototype);
+    expect(store.get("x")).toBeInstanceOf(PAGE.Promise);
+    expect(writes).toEqual([
+      `${secret}c=${secret}3; path=/${secret}/page`,
+      `${secret}d=${secret}4; path=/${secret}/page`,
+      `${secret}a=; expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+    ]);
   });
 
   it("confines caches.match to the current origin", async () => {

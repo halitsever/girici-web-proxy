@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
@@ -243,6 +243,13 @@ const cookieEcho: Route = (req, res) => {
 const cookieApi: Route = (_req, res) => {
   res.writeHead(200, { "content-type": "text/plain", "set-cookie": "api=1; Path=/" });
   res.end("ok");
+};
+/** Sets a script-visible cookie whose fresh name and value carry the cookie spy's marker, and answers with it. */
+const xsSync: Route = (_req, res) => {
+  const id = randomBytes(6).toString("hex");
+  const pair = `xsl_s${id}=xsl_w${id}`;
+  res.writeHead(200, { "content-type": "text/plain", "set-cookie": `${pair}; Path=/` });
+  res.end(pair);
 };
 const COOKIE_SCRIPT = page(
   "Cookie script",
@@ -1287,6 +1294,283 @@ const XS_OPENED = page(
 </script>`,
 );
 
+// Wraps its own built-ins, then opens or embeds the victim with this page's query. The browser reuses the blank window
+// it made, so this page's runtime serves the victim; "check" lists each value with the victim's marker that reached a
+// wrapper.
+const XS_COOKIE_SPY = page(
+  "Cookie spy",
+  `<button id="open">open</button><button id="frame">frame</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  const spy = (() => {
+    "use strict";
+    const mark = "xs" + "l_";
+    const found = [];
+    const R = Reflect;
+    const apply = R.apply;
+    const construct = R.construct;
+    const ownKeys = R.ownKeys;
+    const getDesc = R.getOwnPropertyDescriptor;
+    const define = R.defineProperty;
+    const includes = String.prototype.includes;
+    const charAt = String.prototype.charAt;
+    const toTag = Object.prototype.toString;
+    const stringValue = String.prototype.valueOf;
+    const nativeAtob = atob;
+    const exec = RegExp.prototype.exec;
+    const decode = TextDecoder.prototype.decode;
+    const decoder = new TextDecoder();
+    const nativeThen = Promise.prototype.then;
+    const NativePromise = Promise;
+    const hrefOf = getDesc(URL.prototype, "href").get;
+    const stringify = JSON.stringify;
+    const base64 = /^[A-Za-z0-9+/_-]{12,}={0,2}$/;
+    let busy = false;
+
+    const note = (where, text) => {
+      if (found.length < 100) define(found, found.length, { __proto__: null, value: where + ": " + text, writable: true, enumerable: true, configurable: true });
+    };
+    const fromBase64 = (text) => {
+      let out = "";
+      for (let i = 0; i < text.length; i++) {
+        const c = apply(charAt, text, [i]);
+        out += c === "-" ? "+" : c === "_" ? "/" : c;
+      }
+      while (out.length % 4) out += "=";
+      return nativeAtob(out);
+    };
+    const scanText = (where, text) => {
+      if (apply(includes, text, [mark])) return note(where, text);
+      if (apply(exec, base64, [text]) === null) return;
+      try {
+        const plain = fromBase64(text);
+        if (apply(includes, plain, [mark])) note(where, "base64 of " + plain);
+      } catch {}
+    };
+    const watch = (where, value) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(where, value, 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const scan = (where, value, depth) => {
+      if (typeof value === "string") return scanText(where, value);
+      if (typeof value !== "object" || value === null || depth > 3) return;
+      let tag;
+      try {
+        tag = apply(toTag, value, []);
+      } catch {
+        return;
+      }
+      if (tag === "[object String]") return scanText(where, apply(stringValue, value, []));
+      if (tag === "[object XMLHttpRequest]") return note(where, "an XMLHttpRequest");
+      if (tag === "[object URL]") return scanText(where, apply(hrefOf, value, []));
+      if (tag === "[object Uint8Array]" || tag === "[object ArrayBuffer]") {
+        try {
+          scanText(where, apply(decode, decoder, [value]));
+        } catch {}
+        return;
+      }
+      if (tag === "[object Promise]") {
+        try {
+          apply(nativeThen, value, [(settled) => watch(where + " settled", settled), () => {}]);
+        } catch {}
+        return;
+      }
+      if (tag !== "[object Array]" && tag !== "[object Object]") return;
+      let keys;
+      try {
+        keys = ownKeys(value);
+      } catch {
+        return;
+      }
+      for (let i = 0; i < keys.length && i < 64; i++) {
+        try {
+          const d = getDesc(value, keys[i]);
+          if (d && "value" in d) scan(where, d.value, depth + 1);
+        } catch {}
+      }
+    };
+    const watchCall = (label, self, args) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(label, self, 0);
+        for (let i = 0; i < args.length; i++) scan(label, args[i], 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const method = (owner, key, label) => {
+      const d = getDesc(owner, key);
+      if (!d || typeof d.value !== "function") return;
+      const original = d.value;
+      const wrapped = function (...args) {
+        watchCall(label, this, args);
+        return new.target ? construct(original, args, new.target) : apply(original, this, args);
+      };
+      define(owner, key, { __proto__: null, value: wrapped, writable: true, enumerable: d.enumerable, configurable: true });
+    };
+    const getter = (owner, key, label) => {
+      const d = getDesc(owner, key);
+      if (!d || typeof d.get !== "function") return;
+      const get = d.get;
+      const wrapped = function () {
+        watchCall(label, this, []);
+        return apply(get, this, []);
+      };
+      define(owner, key, { __proto__: null, get: wrapped, set: d.set, enumerable: d.enumerable, configurable: true });
+    };
+    const global = (name) => {
+      const original = window[name];
+      const wrapped = function (...args) {
+        watchCall(name, undefined, args);
+        return new.target ? construct(original, args, new.target) : apply(original, this, args);
+      };
+      const keys = ownKeys(original);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (key !== "length" && key !== "name" && key !== "prototype") define(wrapped, key, getDesc(original, key));
+      }
+      if (original.prototype) wrapped.prototype = original.prototype;
+      window[name] = wrapped;
+    };
+    const methods = (owner, label, keys) => {
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        method(owner, key, label + "." + (typeof key === "symbol" ? key.description : key));
+      }
+    };
+
+    methods(Array.prototype, "Array.prototype", ["filter", "map", "sort", "join", "push", "find", "findIndex", "forEach", "some", "every", "indexOf", "includes", "slice", "concat", "reduce", "splice", "values", "entries", "keys", "flat", "flatMap", "at", Symbol.iterator]);
+    methods(Array, "Array", ["from", "of", "isArray"]);
+    methods(String.prototype, "String.prototype", ["split", "slice", "substring", "substr", "trim", "trimStart", "trimEnd", "indexOf", "lastIndexOf", "includes", "startsWith", "endsWith", "replace", "replaceAll", "toLowerCase", "toUpperCase", "charAt", "charCodeAt", "codePointAt", "at", "repeat", "match", "matchAll", "padStart", "padEnd", "concat", "localeCompare", "normalize", "toString", "valueOf", Symbol.iterator]);
+    methods(String, "String", ["fromCharCode", "fromCodePoint", "raw"]);
+    methods(RegExp.prototype, "RegExp.prototype", ["exec", "test", Symbol.replace, Symbol.split, Symbol.match, Symbol.matchAll, Symbol.search]);
+    const urlParts = ["href", "origin", "protocol", "username", "password", "host", "hostname", "port", "pathname", "search", "hash", "searchParams"];
+    for (let i = 0; i < urlParts.length; i++) getter(URL.prototype, urlParts[i], "URL.prototype." + urlParts[i]);
+    methods(URL.prototype, "URL.prototype", ["toString", "toJSON"]);
+    methods(Date, "Date", ["parse", "now", "UTC"]);
+    methods(Number, "Number", ["isNaN", "isFinite", "parseInt", "parseFloat", "isInteger"]);
+    methods(JSON, "JSON", ["parse", "stringify"]);
+    methods(Promise, "Promise", ["all", "allSettled", "race", "any", "resolve", "reject"]);
+    methods(Promise.prototype, "Promise.prototype", ["then", "catch", "finally"]);
+    define(Promise.prototype, "constructor", {
+      __proto__: null,
+      get() {
+        watchCall("Promise.prototype.constructor", this, []);
+        return NativePromise;
+      },
+      set() {},
+      configurable: true,
+    });
+    define(Object.prototype, "then", {
+      __proto__: null,
+      get() {
+        watchCall("Object.prototype.then", this, []);
+        return undefined;
+      },
+      set() {},
+      configurable: true,
+    });
+    methods(Object, "Object", ["keys", "values", "entries", "assign", "fromEntries"]);
+    methods(Uint8Array, "Uint8Array", ["from", "of"]);
+    methods(TextDecoder.prototype, "TextDecoder.prototype", ["decode"]);
+    methods(TextEncoder.prototype, "TextEncoder.prototype", ["encode"]);
+    methods(WeakSet.prototype, "WeakSet.prototype", ["has", "add"]);
+    methods(WeakMap.prototype, "WeakMap.prototype", ["get", "set", "has"]);
+    methods(Set.prototype, "Set.prototype", ["has", "add"]);
+    methods(Map.prototype, "Map.prototype", ["get", "set", "has"]);
+    methods(Function.prototype, "Function.prototype", ["call", "apply", "bind"]);
+    const globals = ["atob", "btoa", "String", "Number", "URL", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "isNaN"];
+    for (let i = 0; i < globals.length; i++) global(globals[i]);
+
+    return () => {
+      busy = true;
+      return stringify(found);
+    };
+  })();
+  const victim = "https://site-b.test/xs-cookie-victim" + location.search;
+  document.getElementById("open").onclick = () => {
+    open(victim);
+  };
+  document.getElementById("frame").onclick = () => {
+    const frame = document.createElement("iframe");
+    frame.id = "victim";
+    frame.src = victim;
+    document.body.appendChild(frame);
+  };
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = spy();
+  };
+</script>`,
+);
+
+// Gives its address, and each cookie it sets or reads, a fresh value that starts with the spy's marker. "do" picks
+// one cookie path; "seed" is a second tab whose writes reach the others as worker messages.
+const XS_COOKIE_VICTIM = page(
+  "Cookie victim",
+  `<button id="read">read</button><pre id="cookie"></pre><pre id="results"></pre>
+<script>
+  const mark = "xs" + "l" + "_";
+  const fresh = (kind) => mark + kind + Math.random().toString(36).slice(2, 10);
+  const scenario = new URLSearchParams(location.search).get("do");
+  const secrets = [];
+  const report = (extra) => {
+    document.getElementById("results").textContent = JSON.stringify(Object.assign({ scenario, secrets }, extra));
+  };
+  document.getElementById("read").onclick = () => {
+    document.getElementById("cookie").textContent = document.cookie;
+  };
+  const xhr = (url) =>
+    new Promise((resolve) => {
+      const request = new XMLHttpRequest();
+      request.open("GET", url);
+      request.onload = () => resolve(request.responseText);
+      request.send();
+    });
+  const write = async () => {
+    const name = fresh("n");
+    const value = fresh("v");
+    secrets.push(name, value);
+    document.cookie = name + "=" + value + "; path=/; max-age=3600; expires=Fri, 01 Jan 2100 00:00:00 GMT";
+    // Echo waits for the write to reach the worker's jar.
+    await fetch("/cookie/echo");
+  };
+  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
+  (async () => {
+    if (scenario === "seed" || scenario === "write") {
+      await write();
+      report({});
+    } else if (scenario === "read") {
+      report({ cookie: document.cookie });
+    } else if (scenario === "sync") {
+      const one = await (await fetch("/cookie/xs-sync")).text();
+      const two = await xhr("/cookie/xs-sync");
+      secrets.push(one, two);
+      report({});
+    } else if (scenario === "store") {
+      if (!window.cookieStore) return report({ store: "absent" });
+      const name = fresh("n");
+      const value = fresh("v");
+      secrets.push(name, value);
+      await cookieStore.set(name, value);
+      const one = await cookieStore.get(name);
+      const named = await cookieStore.get({ name });
+      const all = await cookieStore.getAll();
+      // document.cookie shows the cookie only when it went through the runtime, not the browser's own store.
+      const mirrored = document.cookie.includes(name);
+      report({ store: [one?.value === value, named?.value === value, all.some((c) => c.name === name), mirrored] });
+    } else {
+      report({});
+    }
+  })();
+</script>`,
+);
+
 const EMBED_STORAGE = page(
   "Embed storage",
   `<iframe id="b" src="https://site-b.test/storage"></iframe>
@@ -1922,6 +2206,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/xs-held": html(XS_HELD),
+    "/xs-cookie-spy": html(XS_COOKIE_SPY),
     "/xs-sealed-opener": html(XS_SEALED_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
@@ -2111,6 +2396,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/storage-events": html(STORAGE_EVENTS),
     "/xs-child": html(XS_CHILD),
     "/xs-opened": html(XS_OPENED),
+    "/xs-cookie-victim": html(XS_COOKIE_VICTIM),
+    "/cookie/xs-sync": xsSync,
     "/xs-js-child": html(XS_JS_CHILD),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
