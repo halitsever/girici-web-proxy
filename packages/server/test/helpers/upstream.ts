@@ -1,9 +1,10 @@
 import { createServer, type RequestListener, type Server } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import type { AddressInfo, LookupFunction } from "node:net";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import { generate } from "selfsigned";
 import { errorHandler } from "../../src/http/error-handler.ts";
+import type { RelayObserver } from "../../src/http/relay-observer.ts";
 import { createHttpServer } from "../../src/http/server.ts";
 import { createLogger } from "../../src/log.ts";
 import { relayRouter } from "../../src/routes/relay.ts";
@@ -54,6 +55,9 @@ export async function startRelay(options: {
   lookup?: LookupFunction;
   /** When given, collects warn-level log lines. */
   logLines?: string[];
+  observer?: RelayObserver;
+  /** Runs ahead of the relay, as the app's gates do. */
+  before?: RequestHandler;
 }): Promise<{ base: string; close(): Promise<void> }> {
   const lines = options.logLines;
   const logger = lines ? createLogger("warn", (line) => lines.push(line)) : createLogger("error", () => {});
@@ -65,6 +69,7 @@ export async function startRelay(options: {
     lookup: options.lookup,
   });
   const app = express();
+  if (options.before) app.use(options.before);
   app.use(
     relayRouter({
       agent,
@@ -72,6 +77,7 @@ export async function startRelay(options: {
       maxRequestBody: options.maxRequestBody ?? 50 * 1024 * 1024,
       logger,
       blocklist: options.blocklist,
+      observer: options.observer,
     }),
   );
   app.use(errorHandler(logger));

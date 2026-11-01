@@ -82,6 +82,15 @@ describe("HttpRelayTransport", () => {
     expect(seen[0]?.init.signal?.aborted).toBe(true);
   });
 
+  it("passes the wait of a refusal on", async () => {
+    const refusal = (retryAfter: string) =>
+      returning(
+        new Response("", { status: 429, headers: { "x-girici-error": "quota", "retry-after": retryAfter } }),
+      ).send(request(), ctx);
+    expect(await refusal("42")).toEqual({ ok: false, code: "quota", status: 429, retryAfter: 42 });
+    expect(await refusal("soon")).toEqual({ ok: false, code: "quota", status: 429 });
+  });
+
   it("reports relay errors, malformed envelopes and failed fetches", async () => {
     expect(
       await returning(new Response("", { status: 403, headers: { "x-girici-error": "ssrf_blocked" } })).send(

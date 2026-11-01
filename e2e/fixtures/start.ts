@@ -11,6 +11,7 @@ import { openDb } from "../../packages/server/src/db/open.ts";
 import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
 import { handleFixture } from "./sites.ts";
+import { GATES_PORT, METRICS_TOKEN, QUOTA_PORT } from "./servers.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
@@ -21,13 +22,21 @@ const SEEDED_LOGO = Buffer.from(
     '<script>document.title="ran"</script></svg>',
 );
 
+interface SeedOptions {
+  brand?: boolean;
+  deepLinkWarning?: boolean;
+  proofOfWork?: boolean;
+}
+
 /** An admin and public access, so the auth gate does not block the proxy tests. */
-function seedDataDir(withBrand = false): string {
+function seedDataDir(options: SeedOptions = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
   const seed = new AuthStore(openDb(join(dir, "girici.db")));
   seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
   seed.setPublicAccess(true);
-  if (withBrand) {
+  if (options.deepLinkWarning !== undefined) seed.setDeepLinkWarning(options.deepLinkWarning);
+  if (options.proofOfWork !== undefined) seed.setProofOfWork(options.proofOfWork);
+  if (options.brand) {
     new BrandStore(join(dir, "brand"), seed).update({
       name: SEEDED_BRAND_NAME,
       logo: { bytes: SEEDED_LOGO, type: "image/svg+xml" },
@@ -60,7 +69,7 @@ const upstreams = Object.fromEntries([
   ...HTTPS_HOSTS.map((host) => [host, "127.0.0.1:41443"]),
   ["site-c.test", "127.0.0.1:41080"],
 ]);
-function spawnGirici(port: number, dataDir: string): ChildProcess {
+function spawnGirici(port: number, dataDir: string, env: Record<string, string> = {}): ChildProcess {
   return spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
     stdio: "inherit",
     env: {
@@ -72,6 +81,8 @@ function spawnGirici(port: number, dataDir: string): ChildProcess {
       GIRICI_TEST_CA: CERT_PATH,
       GIRICI_TEST_UPSTREAMS: JSON.stringify(upstreams),
       GIRICI_DATA_DIR: dataDir,
+      GIRICI_METRICS_TOKEN: METRICS_TOKEN,
+      ...env,
     },
   });
 }
@@ -89,16 +100,28 @@ async function waitHealthy(port: number): Promise<void> {
   throw new Error(`Server on port ${port} did not become healthy`);
 }
 
-// Instance-wide writes (brand, sealing) go to this one, so the main server keeps its settings.
-const instance = spawnGirici(41002, seedDataDir(true));
-await waitHealthy(41002);
-const girici = spawnGirici(41000, seedDataDir());
-for (const child of [instance, girici]) {
+const children: ChildProcess[] = [];
+
+function start(port: number, seed: SeedOptions, env?: Record<string, string>): void {
+  const child = spawnGirici(port, seedDataDir(seed), env);
+  children.push(child);
+  // One server down fails the run instead of leaving the others to answer for it.
   child.on("exit", (code) => process.exit(code ?? 1));
 }
+
+process.on("exit", () => {
+  for (const child of children) child.kill();
+});
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
-    instance.kill(signal);
-    girici.kill(signal);
+    for (const child of children) child.kill(signal);
   });
 }
+
+// Instance-wide writes (brand, sealing, the warning) go to 41002, so the main server keeps its settings.
+start(41002, { brand: true });
+start(GATES_PORT, { deepLinkWarning: false, proofOfWork: true }, { GIRICI_POW_DIFFICULTY: "4" });
+start(QUOTA_PORT, { deepLinkWarning: false }, { GIRICI_BANDWIDTH_LIMIT: "1MB" });
+await Promise.all([41002, GATES_PORT, QUOTA_PORT].map(waitHealthy));
+// Playwright waits on this one, so it starts last. Direct /~/ loads in the specs need the warning off.
+start(41000, { deepLinkWarning: false });

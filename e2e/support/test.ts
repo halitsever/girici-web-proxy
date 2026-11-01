@@ -1,6 +1,9 @@
 import { writeFile } from "node:fs/promises";
 import { sep } from "node:path";
 import { test as base, expect, type Page } from "@playwright/test";
+import { GATES_PORT, QUOTA_PORT } from "../fixtures/servers.ts";
+
+export { METRICS_TOKEN } from "../fixtures/servers.ts";
 
 const TRAP_LOG = "http://127.0.0.1:41999/log";
 
@@ -50,6 +53,10 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
 }
 
 export const INSTANCE = "http://127.0.0.1:41002";
+/** Public, warning off, browser check on at difficulty 4. */
+export const GATES = `http://127.0.0.1:${GATES_PORT}`;
+/** Public, warning off, 1 MB a minute per visitor. */
+export const QUOTA = `http://127.0.0.1:${QUOTA_PORT}`;
 
 export async function signIn(page: Page, base: string): Promise<void> {
   await page.goto(`${base}/_g/login`);

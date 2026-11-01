@@ -62,6 +62,25 @@ describe("openDb", () => {
     store.close();
   });
 
+  it("brings a version 1 database to version 2 with the traffic table", () => {
+    const path = dbPath();
+    const old = new DatabaseSync(path);
+    old.exec(MIGRATIONS[0] ?? "");
+    old.exec("PRAGMA user_version = 1");
+    new AuthStore(old).createAdmin({ username: "admin", name: "A", email: "a@a.a", password: "pw-123456" });
+    old.close();
+
+    const db = openDb(path);
+    expect(pragma(db, "user_version")).toBe(2);
+    expect(new AuthStore(db).verifyLogin("admin", "pw-123456")?.username).toBe("admin");
+    db.prepare("INSERT INTO traffic_daily (day, requests) VALUES (?, ?)").run("2026-11-01", 4);
+    expect(db.prepare("SELECT requests, bytes_down FROM traffic_daily").get()).toEqual({
+      requests: 4,
+      bytes_down: 0,
+    });
+    db.close();
+  });
+
   it("opens the same file again without migrating twice", () => {
     const path = dbPath();
     openDb(path).close();

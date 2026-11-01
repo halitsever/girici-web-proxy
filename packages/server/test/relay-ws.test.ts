@@ -6,8 +6,10 @@ import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
+import { bandwidthUpgradeGate, ByteMeter, meterObserver } from "../src/http/bandwidth.ts";
 import { compileTrust } from "../src/http/client-ip.ts";
 import { tokenBucket } from "../src/http/rate-limit.ts";
+import type { RelayObserver } from "../src/http/relay-observer.ts";
 import { createTunnelDialer } from "../src/upstream/agent.ts";
 import { HostBlocklist } from "../src/upstream/blocklist.ts";
 import { SsrfBlockedError } from "../src/upstream/ssrf.ts";
@@ -17,6 +19,7 @@ import {
   PerClientCount,
   tlsIdentity,
   validateWsTarget,
+  type UpgradeGate,
   type WsRelayHandle,
   type WsRelayOptions,
 } from "../src/ws/relay-ws.ts";
@@ -127,6 +130,55 @@ function refusal(ws: WebSocket): Promise<number> {
     ws.on("open", () => reject(new Error("opened despite the limit")));
     setTimeout(() => reject(new Error("no refusal")), 3000);
   });
+}
+
+/** Sends a bare upgrade and reads whatever comes back until the server closes the socket. */
+function rawUpgrade(url: string): Promise<string> {
+  const { port } = new URL(url);
+  const raw = netConnect(Number(port), "127.0.0.1");
+  cleanups.push(() => raw.destroy());
+  raw.write(
+    [
+      "GET /_g/ws HTTP/1.1",
+      `Host: 127.0.0.1:${port}`,
+      `Origin: http://127.0.0.1:${port}`,
+      "Upgrade: websocket",
+      "Connection: Upgrade",
+      "Sec-WebSocket-Version: 13",
+      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      "Sec-WebSocket-Protocol: girici.v1",
+      "",
+      "",
+    ].join("\r\n"),
+  );
+  return new Promise((resolve, reject) => {
+    let text = "";
+    raw.on("data", (chunk: Buffer) => (text += chunk.toString()));
+    raw.on("close", () => resolve(text));
+    raw.on("error", reject);
+    setTimeout(() => reject(new Error(`no close after ${JSON.stringify(text)}`)), 3000);
+  });
+}
+
+async function until(condition: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("condition never held");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/** An observer that keeps everything it hears. */
+function listening() {
+  const answers: Array<[string, string | null]> = [];
+  const bytes: Array<[string, number, string]> = [];
+  let socketsClosed = 0;
+  const observer: RelayObserver = {
+    bytes: (key, count, direction) => bytes.push([key, count, direction]),
+    answered: (kind, code) => answers.push([kind, code]),
+    socketClosed: () => socketsClosed++,
+  };
+  return { observer, answers, bytes, socketsClosed: () => socketsClosed };
 }
 
 describe("mapCloseCode", () => {
@@ -337,6 +389,168 @@ describe("ws relay (integration)", () => {
     await opened(ws);
     ws.send(JSON.stringify({ u: "ws://ws.test/" }));
     expect((await closed(ws)).code).toBe(1011);
+  });
+});
+
+describe("open-instance seams", () => {
+  it("answers an upgrade with the first refusing gate's status and wait", async () => {
+    const record: string[] = [];
+    const { observer, answers } = listening();
+    const gates: UpgradeGate[] = [
+      (_req, key) => {
+        record.push(`a:${key}`);
+        return null;
+      },
+      () => {
+        record.push("b");
+        return { code: "quota", status: 429, retryAfter: 7 };
+      },
+      () => {
+        record.push("c");
+        return null;
+      },
+    ];
+    const url = await relayServer(await echoUpstream(), { upgradeGates: gates, observer });
+    const answer = await rawUpgrade(url);
+    expect(answer).toMatch(/^HTTP\/1\.1 429 Too Many Requests\r\n/);
+    expect(answer).toMatch(/\r\nRetry-After: 7\r\n/);
+    expect(record).toEqual(["a:127.0.0.1", "b"]);
+    expect(answers).toEqual([["ws", "quota"]]);
+    const challenged = await relayServer(await echoUpstream(), {
+      upgradeGates: [() => ({ code: "challenge", status: 403 })],
+    });
+    const refused = await rawUpgrade(challenged);
+    expect(refused).toMatch(/^HTTP\/1\.1 403 Forbidden\r\n/);
+    expect(refused).not.toMatch(/Retry-After/);
+  });
+
+  it("closes a socket with 1008 once its client may not move more bytes, unless the admin opened it", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    store.setPublicAccess(true);
+    let allowed = true;
+    const url = await relayServer(await echoUpstream(), { authStore: store, allowFrame: () => allowed });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+    ws.send("one");
+    expect(await nextMessage(ws)).toBe("one");
+    allowed = false;
+    const late: string[] = [];
+    ws.on("message", (data: Buffer) => late.push(data.toString()));
+    const done = closed(ws);
+    ws.send("two");
+    expect(await done).toEqual({ code: 1008, reason: "quota" });
+    expect(late).toEqual([]);
+
+    const cookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
+    const own = connect(url, originOf(url), cookie);
+    await opened(own);
+    own.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(own)).t).toBe("open");
+    own.send("three");
+    expect(await nextMessage(own)).toBe("three");
+  });
+
+  it("reports an opened socket, its bytes and its close", async () => {
+    const { observer, answers, bytes, socketsClosed } = listening();
+    const url = await relayServer(await echoUpstream(), { observer });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+    ws.send("ping");
+    expect(await nextMessage(ws)).toBe("ping");
+    ws.close();
+    await until(() => socketsClosed() === 1);
+    expect(answers).toEqual([["ws", null]]);
+    const total = (direction: string) =>
+      bytes.filter(([key, , d]) => key === "127.0.0.1" && d === direction).reduce((sum, [, n]) => sum + n, 0);
+    expect(total("up")).toBeGreaterThanOrEqual(4);
+    expect(total("down")).toBeGreaterThanOrEqual(4);
+  });
+
+  it("reports every refused or failed socket with its code", async () => {
+    const { observer, answers, socketsClosed } = listening();
+    const port = await echoUpstream();
+    const ask = async (url: string, frame: unknown) => {
+      const ws = connect(url, originOf(url));
+      await opened(ws);
+      ws.send(JSON.stringify(frame));
+      await closed(ws);
+    };
+
+    const plain = await relayServer(port, { observer, blocklist: new HostBlocklist(["blocked.test"], []) });
+    const foreign = connect(plain, "http://evil.test");
+    await new Promise<void>((resolve) => foreign.on("error", () => resolve()));
+    await ask(plain, { u: "ws://blocked.test/" });
+    await ask(plain, { u: "wss://10.0.0.1/" });
+    await ask(plain, { p: [] });
+
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    const gatedUrl = await relayServer(port, { observer, authStore: store });
+    const gated = connect(gatedUrl, originOf(gatedUrl));
+    await new Promise<void>((resolve) => gated.on("error", () => resolve()));
+
+    const limited = await relayServer(port, { observer, limiter: tokenBucket({ perMinute: 1 }) });
+    await opened(connect(limited, originOf(limited)));
+    expect(await refusal(connect(limited, originOf(limited)))).toBe(429);
+
+    const failing = await relayServer(port, {
+      observer,
+      dial: () => {
+        throw Object.assign(new Error("no such host"), { code: "ENOTFOUND" });
+      },
+    });
+    await ask(failing, { u: "ws://ws.test/" });
+
+    expect(answers.map(([, code]) => code)).toEqual([
+      "bad_request",
+      "blocked",
+      "ssrf_blocked",
+      "bad_request",
+      "auth",
+      "rate_limited",
+      "dns",
+    ]);
+    expect(answers.every(([kind]) => kind === "ws")).toBe(true);
+    expect(socketsClosed()).toBe(0);
+  });
+
+  it("refuses an upgrade over the quota with 429, and closes an open socket that goes over with 1008", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    store.setPublicAccess(true);
+    const meter = new ByteMeter({ perMinute: 64, perDay: 0 });
+    const url = await relayServer(await echoUpstream(), {
+      authStore: store,
+      upgradeGates: [bandwidthUpgradeGate({ meter, store })],
+      allowFrame: (key) => meter.check(key).ok,
+      observer: meterObserver(meter),
+    });
+    const ws = connect(url, originOf(url));
+    await opened(ws);
+    ws.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(ws)).t).toBe("open");
+    const late: string[] = [];
+    ws.on("message", (data: Buffer) => late.push(data.toString()));
+    const done = closed(ws);
+    ws.send("x".repeat(100));
+    expect(await done).toEqual({ code: 1008, reason: "quota" });
+    expect(late).toEqual([]);
+
+    const answer = await rawUpgrade(url);
+    expect(answer).toMatch(/^HTTP\/1\.1 429 Too Many Requests\r\n/);
+    expect(answer).toMatch(/\r\nRetry-After: [1-9]\d*\r\n/);
+
+    const own = connect(url, originOf(url), `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`);
+    await opened(own);
+    own.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(own)).t).toBe("open");
+    own.send("y".repeat(1000));
+    expect(await nextMessage(own)).toBe("y".repeat(1000));
   });
 });
 

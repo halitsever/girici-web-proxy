@@ -30,6 +30,13 @@ export const COOKIE_MESSAGE = "girici:cookies";
 // Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
 export const LOGIN_PATH = "/_g/login";
 export const SETUP_PATH = "/_g/setup";
+/** The browser check page; a UI route, so the worker lets its window call the check API. */
+export const CHALLENGE_PATH = "/_g/challenge";
+export const POW_PATH = "/_g/pow";
+/** The shared-link warning posts here; the service worker answers it and the server never sees it. */
+export const CONTINUE_PATH = "/_g/rpc/continue";
+/** Outside /_g/, so a proxied page's own /metrics stays the site's; the worker keeps browsers away from ours. */
+export const METRICS_PATH = "/metrics";
 
 /** A cookie as page scripts may see it; times are epoch milliseconds and a null expiry marks a session cookie. */
 export interface CookieSnapshot {
@@ -50,12 +57,15 @@ export interface EnginePrefs {
   sealAddresses: boolean;
   /** The admin's switch, which turns sealing on for every visitor. */
   instanceSeal: boolean;
+  /** Set once this browser has opened Girici itself, after which shared links skip the warning. */
+  seen: boolean;
 }
 
 export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
   blockThirdPartyCookies: true,
   sealAddresses: false,
   instanceSeal: false,
+  seen: false,
 };
 
 /** The UI asks the service worker for a page's sealed address; the UI never holds the key. */
@@ -115,7 +125,9 @@ export type RelayErrorCode =
   | "auth"
   | "rate_limited"
   | "blocked"
-  | "proxy";
+  | "proxy"
+  | "quota"
+  | "challenge";
 
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {

@@ -1,5 +1,5 @@
 import { WS_SEAL_PATH } from "@girici/engine/shared";
-import express, { type Express } from "express";
+import express, { type Express, type RequestHandler, type Router } from "express";
 import { authGate } from "./auth/gate.ts";
 import type { AuthStore } from "./auth/store.ts";
 import type { BrandStore } from "./brand/store.ts";
@@ -7,6 +7,7 @@ import { compileTrust, type TrustFn } from "./http/client-ip.ts";
 import { errorHandler } from "./http/error-handler.ts";
 import type { Limiter } from "./http/rate-limit.ts";
 import { relayLimit, warnUntrustedForwarding } from "./http/relay-limit.ts";
+import { NO_OBSERVER, relayAnswers, type RelayObserver } from "./http/relay-observer.ts";
 import { securityHeaders } from "./http/security-headers.ts";
 import { serviceWorkerScriptGuard } from "./http/sw-script-guard.ts";
 import type { Logger } from "./log.ts";
@@ -38,7 +39,15 @@ export interface AppOptions {
   relay: Omit<RelayOptions, "logger">;
   poToken?: PoTokenSource;
   setupToken?: string;
+  observer?: RelayObserver;
+  powGate?: RequestHandler;
+  bandwidthGate?: RequestHandler;
+  metricsRouter?: Router;
+  statusRouter?: Router;
+  powRouter?: Router;
 }
+
+const pass: RequestHandler = (_req, _res, next) => next();
 
 export function createApp({
   webDistDir,
@@ -53,6 +62,12 @@ export function createApp({
   relay,
   poToken,
   setupToken,
+  observer = NO_OBSERVER,
+  powGate = pass,
+  bandwidthGate = pass,
+  metricsRouter,
+  statusRouter,
+  powRouter,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -63,22 +78,29 @@ export function createApp({
   app.use(securityHeaders());
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter(authStore, logger));
+  if (metricsRouter) app.use(metricsRouter);
   app.use(robotsRouter());
   app.use(sourceRouter(sourceUrl));
   app.use(brandRouter(brand));
   app.use(authRouter(authStore, { setupToken }));
   app.use(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand));
+  if (statusRouter) app.use(statusRouter);
+  // Ungated: a visitor the browser check refuses must still reach the check.
+  if (powRouter) app.use(powRouter);
+  // First on the data path, so the observer hears every gate's refusal as well as the relay's own answers.
+  app.use("/_g/r", relayAnswers(observer));
   // Gate the proxy data path, the poToken minter and WebSocket seals; navigations reach the SW as an auth error
   // and redirect to login. Public access opens them; nothing else here is gated.
-  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], authGate(authStore));
+  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], authGate(authStore), powGate);
   app.use(
     "/_g/r",
     warnUntrustedForwarding(trustFn, logger),
     relayLimit({ limiter: limiter ?? null, store: authStore }),
+    bandwidthGate,
   );
   if (poToken) app.use(poRouter({ minter: poToken }));
   app.use(wsSealRouter(authStore));
-  app.use(relayRouter({ ...relay, logger }));
+  app.use(relayRouter({ ...relay, logger, observer }));
   app.use(uiRouter(webDistDir, authStore));
   app.use(engineRouter(engineBundlesDir));
   app.use(bootstrapRouter());

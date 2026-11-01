@@ -1,13 +1,15 @@
-import type { IncomingMessage, Server } from "node:http";
+import { STATUS_CODES, type IncomingMessage, type Server } from "node:http";
 import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { rootCertificates, connect as tlsConnect } from "node:tls";
+import type { RelayErrorCode } from "@girici/engine/shared";
 import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from "ws";
 import { isAdminCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientIp, clientKey, compileTrust, type TrustFn } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
 import type { Limiter } from "../http/rate-limit.ts";
+import { NO_OBSERVER, type Direction, type RelayObserver } from "../http/relay-observer.ts";
 import type { Logger } from "../log.ts";
 import type { TunnelDialer } from "../upstream/agent.ts";
 import type { HostBlocklist } from "../upstream/blocklist.ts";
@@ -44,6 +46,15 @@ export type Dial = (
   },
 ) => WebSocket;
 
+/** A gate's refusal, answered as plain HTTP before the upgrade. */
+export interface UpgradeRefusal {
+  code: RelayErrorCode;
+  status: 403 | 429;
+  retryAfter?: number;
+}
+
+export type UpgradeGate = (req: IncomingMessage, key: string) => UpgradeRefusal | null;
+
 export interface WsRelayOptions {
   allowedTestHosts: ReadonlySet<string>;
   lookup: LookupFunction;
@@ -58,6 +69,11 @@ export interface WsRelayOptions {
   blocklist?: HostBlocklist;
   /** Set when GIRICI_UPSTREAM_PROXY is: upstream sockets then open through the proxy instead of directly. */
   tunnel?: TunnelDialer;
+  observer?: RelayObserver;
+  /** Run in order after the auth check and before the rate limiter; the first refusal answers the upgrade. */
+  upgradeGates?: readonly UpgradeGate[];
+  /** Asked after each frame is counted; false closes the client with 1008 "quota". The admin is never cut. */
+  allowFrame?: (key: string) => boolean;
 }
 
 export interface WsRelayHandle {
@@ -71,6 +87,13 @@ interface BridgeOptions extends WsRelayOptions {
   maxPayload: number;
   live: Set<WebSocket>;
   onUpstreamError: (error: unknown) => void;
+  observer: RelayObserver;
+}
+
+/** One client socket: its rate-limit key, and whether allowFrame may cut it. */
+interface Connection {
+  key: string;
+  limited: boolean;
 }
 
 /** Open sockets per client; an entry leaves with its last socket, so the map holds only live clients. */
@@ -139,10 +162,11 @@ function wsAuthorized(store: AuthStore | undefined, cookie: string | undefined):
   return isAdminCookie(store, cookie);
 }
 
-/** A plain 429 lets the browser's WebSocket fail fast instead of waiting on a silently dropped socket. */
-function refuse(socket: Duplex, retryAfter: number): void {
+/** A plain HTTP answer lets the browser's WebSocket fail fast instead of waiting on a silently dropped socket. */
+function refuse(socket: Duplex, status: number, retryAfter?: number): void {
+  const wait = retryAfter === undefined ? "" : `Retry-After: ${retryAfter}\r\n`;
   socket.end(
-    `HTTP/1.1 429 Too Many Requests\r\nRetry-After: ${retryAfter}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+    `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\n${wait}Connection: close\r\nContent-Length: 0\r\n\r\n`,
     () => socket.destroy(),
   );
 }
@@ -231,6 +255,7 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
   // Client and upstream sockets, so shutdown can say goodbye to both ends.
   const live = new Set<WebSocket>();
   const onUpstreamError = proxyFailureLog(options.logger);
+  const observer = options.observer ?? NO_OBSERVER;
   let closing = false;
 
   server.on("upgrade", (req, socket, head) => {
@@ -244,32 +269,47 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
       return;
     }
     if (!isOwnHost(req.headers.origin, req.headers.host)) {
+      observer.answered("ws", "bad_request");
       socket.destroy();
       return;
     }
     if (!wsAuthorized(options.authStore, req.headers.cookie)) {
+      observer.answered("ws", "auth");
       socket.destroy();
       return;
     }
     const ip = clientKey(clientIp(req, trust));
+    for (const gate of options.upgradeGates ?? []) {
+      const refusal = gate(req, ip);
+      if (!refusal) continue;
+      observer.answered("ws", refusal.code);
+      refuse(socket, refusal.status, refusal.retryAfter);
+      return;
+    }
     const limit = options.limiter?.(ip);
     if (limit && !limit.ok && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie))) {
-      refuse(socket, limit.retryAfter);
+      observer.answered("ws", "rate_limited");
+      refuse(socket, 429, limit.retryAfter);
       return;
     }
     if (perClient.count(ip) >= maxPerIp) {
-      refuse(socket, 1);
+      observer.answered("ws", "rate_limited");
+      refuse(socket, 429, 1);
       return;
     }
+    // Checked once here, so an admin's socket is never cut mid-stream.
+    const limited =
+      options.allowFrame !== undefined && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie));
     wss.handleUpgrade(req, socket, head, (client) => {
       // Counted only once upgraded: a handshake ws rejects never reaches this callback to give its slot back.
       if (!perClient.take(ip, maxPerIp)) {
+        observer.answered("ws", "rate_limited");
         client.close(1013, "busy");
         return;
       }
       track(live, client);
       client.once("close", () => perClient.release(ip));
-      bridge(client, req, { ...options, maxPayload, dial, live, onUpstreamError });
+      bridge(client, req, { key: ip, limited }, { ...options, maxPayload, dial, live, onUpstreamError, observer });
     });
   });
 
@@ -302,8 +342,13 @@ function track(live: Set<WebSocket>, ws: WebSocket): void {
   ws.once("close", () => live.delete(ws));
 }
 
-function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions): void {
-  const firstFrameTimer = setTimeout(() => client.close(1008, "no control frame"), FIRST_FRAME_MS);
+function bridge(client: WebSocket, req: IncomingMessage, conn: Connection, options: BridgeOptions): void {
+  const firstFrameTimer = setTimeout(() => {
+    options.observer.answered("ws", "bad_request");
+    client.close(1008, "no control frame");
+  }, FIRST_FRAME_MS);
+  // A client that leaves before its control frame was neither served nor refused.
+  client.once("close", () => clearTimeout(firstFrameTimer));
   client.once("message", (data, isBinary) => {
     clearTimeout(firstFrameTimer);
     // Closing already, for example during shutdown: no new upstream.
@@ -311,11 +356,13 @@ function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions)
     const frame = parseControlFrame(data, isBinary);
     const target = frame ? URL.parse(frame.u) : null;
     if (!frame || !target) {
+      options.observer.answered("ws", "bad_request");
       client.close(1008, "bad control frame");
       return;
     }
     if (options.blocklist?.isBlocked(target.hostname)) {
       options.logger.debug(`ws blocked by list ${target.host}`);
+      options.observer.answered("ws", "blocked");
       client.close(1008, "blocked");
       return;
     }
@@ -323,7 +370,9 @@ function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions)
       validateWsTarget(target, { allowedTestHosts: options.allowedTestHosts, selfHost: req.headers.host });
     } catch (error) {
       options.logger.debug(`ws blocked ${target.host}`);
-      client.close(1011, error instanceof SsrfBlockedError ? "blocked" : "invalid");
+      const ssrf = error instanceof SsrfBlockedError;
+      options.observer.answered("ws", ssrf ? "ssrf_blocked" : "bad_request");
+      client.close(1011, ssrf ? "blocked" : "invalid");
       return;
     }
     const forward: Record<string, string> = {};
@@ -331,7 +380,7 @@ function bridge(client: WebSocket, req: IncomingMessage, options: BridgeOptions)
       const value = req.headers[name];
       if (typeof value === "string") forward[name] = value;
     }
-    connectUpstream(client, target, frame, forward, options);
+    connectUpstream(client, target, frame, forward, conn, options);
   });
 }
 
@@ -340,6 +389,7 @@ function connectUpstream(
   target: URL,
   frame: ControlFrame,
   forward: Record<string, string>,
+  conn: Connection,
   options: BridgeOptions,
 ): void {
   // Cookie and Origin come only from a seal the server made for this target; a page cannot read or forge one.
@@ -348,6 +398,12 @@ function connectUpstream(
   const headers: Record<string, string> = { ...forward, origin: sealed?.origin ?? httpOrigin(target) };
   if (sealed?.cookie) headers.cookie = sealed.cookie;
 
+  let answered = false;
+  const answer = (code: RelayErrorCode | null) => {
+    if (answered) return;
+    answered = true;
+    options.observer.answered("ws", code);
+  };
   let setCookies: string[] = [];
   let upstream: WebSocket;
   try {
@@ -360,6 +416,7 @@ function connectUpstream(
     });
   } catch (error) {
     reportUpstreamError(error, target, options);
+    answer(relayErrorFor(error).code);
     client.close(1011, "connect");
     return;
   }
@@ -368,10 +425,20 @@ function connectUpstream(
   upstream.once("upgrade", (res: IncomingMessage) => {
     setCookies = res.headers["set-cookie"] ?? [];
   });
+  const allowFrame = options.allowFrame;
+  /** Counts first, so the frame that crosses a budget still costs its bytes, and is then dropped, not relayed. */
+  const passes = (bytes: number, direction: Direction): boolean => {
+    options.observer.bytes(conn.key, bytes, direction);
+    if (!conn.limited || !allowFrame || allowFrame(conn.key)) return true;
+    client.close(1008, "quota");
+    return false;
+  };
   upstream.on("open", () => {
+    answer(null);
+    client.once("close", () => options.observer.socketClosed());
     client.send(JSON.stringify({ t: "open", p: upstream.protocol, sc: setCookies }));
-    pipe(client, upstream);
-    pipe(upstream, client);
+    pipe(client, upstream, (bytes) => passes(bytes, "up"));
+    pipe(upstream, client, (bytes) => passes(bytes, "down"));
   });
 
   const ping = setInterval(() => {
@@ -395,7 +462,10 @@ function connectUpstream(
   client.on("close", (code, reason) => closeBoth(upstream, code, reason));
   upstream.on("error", (error) => {
     reportUpstreamError(error, target, options);
-    if (upstream.readyState !== WebSocket.OPEN && client.readyState === WebSocket.OPEN) client.close(1011, "upstream");
+    if (upstream.readyState !== WebSocket.OPEN && client.readyState === WebSocket.OPEN) {
+      answer(relayErrorFor(error).code);
+      client.close(1011, "upstream");
+    }
   });
   client.on("error", () => upstream.terminate());
 }
@@ -410,15 +480,20 @@ function httpOrigin(target: URL): string {
   return `${target.protocol === "wss:" ? "https:" : "http:"}//${target.host}`;
 }
 
-function pipe(from: WebSocket, to: WebSocket): void {
+function pipe(from: WebSocket, to: WebSocket, passes: (bytes: number) => boolean): void {
   from.on("message", (data, isBinary) => {
-    if (to.readyState !== WebSocket.OPEN) return;
+    if (to.readyState !== WebSocket.OPEN || !passes(payloadLength(data))) return;
     to.send(data, { binary: isBinary });
     const source = socketOf(from);
     if (to.bufferedAmount > HIGH_WATER && source) source.pause();
   });
   const dest = socketOf(to);
   if (dest) dest.on("drain", () => socketOf(from)?.resume());
+}
+
+function payloadLength(data: RawData): number {
+  if (Array.isArray(data)) return data.reduce((sum, part) => sum + part.length, 0);
+  return data instanceof ArrayBuffer ? data.byteLength : data.length;
 }
 
 function socketOf(ws: WebSocket): Duplex | undefined {

@@ -8,6 +8,8 @@ export async function syncEnginePrefs(
   settings: Pick<Settings, "blockCookies" | "sealAddresses">,
   container: ServiceWorkerContainer | undefined = navigator.serviceWorker,
   instanceSeal?: boolean,
+  /** Only for a site opened from the UI: a page can load the UI in a popup, which proves nothing. */
+  seen = false,
 ): Promise<void> {
   if (!container) return;
   const registration = await container.getRegistration("/");
@@ -20,6 +22,7 @@ export async function syncEnginePrefs(
     sealAddresses: settings.sealAddresses,
   };
   if (instanceSeal !== undefined) message.instanceSeal = instanceSeal;
+  if (seen) message.seen = true;
   const channel = new MessageChannel();
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ANSWER_MS);
