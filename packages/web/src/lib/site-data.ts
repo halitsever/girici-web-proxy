@@ -92,7 +92,9 @@ export interface ClearSitesEnv {
 export async function clearSites(sites: string[] | "all", env: ClearSitesEnv = browserClearEnv()): Promise<void> {
   await clearLegacyRootData(env.siteData);
   const body: SitePlanRequest = { sites };
-  const res = await env.fetcher(SITES_PLAN_PATH, {
+  // Called as a method, the browser's fetch would take `env` as its window and throw.
+  const { fetcher } = env;
+  const res = await fetcher(SITES_PLAN_PATH, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),

@@ -91,6 +91,16 @@ describe("clearSites", () => {
     expect(log).toEqual(["delete database __girici", 'POST /_g/sites/plan {"sites":"all"}', `assign ${start}`]);
   });
 
+  it("calls fetch without a receiver, as the browser's own fetch needs", async () => {
+    const assigned: string[] = [];
+    const fetcher = function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(Response.json({ start: "//aaa.proxy.test/_g/sites/clear?p=x&s=y&i=0" }));
+    } as unknown as typeof fetch;
+    await clearSites("all", { siteData: fakeEnv({}).env, fetcher, assign: (url) => void assigned.push(url) });
+    expect(assigned).toEqual(["//aaa.proxy.test/_g/sites/clear?p=x&s=y&i=0"]);
+  });
+
   it("plans the chain for the sites asked for", async () => {
     const log: string[] = [];
     await clearSites(["https://site-a.test"], {
