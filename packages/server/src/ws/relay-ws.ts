@@ -364,8 +364,8 @@ function connectUpstream(
   }
   track(options.live, upstream);
 
-  upstream.on("open", () => {
-    // The handshake's Set-Cookie stays here: page code could read it from the frame, HttpOnly cookies included.
+    // The open frame carries the protocol only; cookies from the handshake stay on the server.
+    // Cookies from the handshake belong to the jar, never to the page's frames.
     client.send(JSON.stringify({ t: "open", p: upstream.protocol }));
     pipe(client, upstream);
     pipe(upstream, client);
