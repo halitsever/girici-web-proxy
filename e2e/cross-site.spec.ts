@@ -126,30 +126,54 @@ for (const [name, open] of [
   });
 }
 
+/** Whether the browser reuses the blank window it made for the victim, so the spying page's runtime serves it. */
+const REUSED = { popup: true, frame: true };
+
 // The page wraps its own built-ins, then opens or embeds the victim; "seed" writes from a second tab of the victim's
-// site. An embedded victim is third-party, so only its writes reach the cookie code.
-const COOKIE_PATHS = [
-  ["popup", "read"],
-  ["popup", "write"],
-  ["popup", "sync"],
-  ["popup", "listen"],
-  ["popup", "store"],
-  ["frame", "write"],
-  ["frame", "store"],
-] as const;
-for (const [via, scenario] of COOKIE_PATHS) {
+// site. `answers` are the victim's own results for its path; one of them is enough, and `webkit` replaces them there.
+// `cookie` paths leave a cookie the victim reads back last. An embedded victim is third-party, so its cookies stay
+// blocked.
+const VICTIM_PATHS: Array<{
+  via: "popup" | "frame";
+  path: string;
+  answers?: unknown[];
+  webkit?: unknown[];
+  cookie?: boolean;
+}> = [
+  { via: "popup", path: "read", cookie: true },
+  { via: "popup", path: "write", cookie: true },
+  { via: "popup", path: "sync", cookie: true },
+  { via: "popup", path: "listen", cookie: true },
+  { via: "popup", path: "store", answers: [[true, true, true, true], "absent"], cookie: true },
+  { via: "popup", path: "srcdoc", answers: [true], cookie: true },
+  { via: "popup", path: "storage", answers: [[true, true, true, true, true]] },
+  { via: "popup", path: "destructure", answers: [true] },
+  // WebKit's Cache API stays with the blank document of a reused window, which has stopped.
+  { via: "popup", path: "caches", answers: [[true, true, true]], webkit: ["unavailable: TypeError"] },
+  { via: "popup", path: "idb", answers: [true, "absent"] },
+  { via: "popup", path: "locks", answers: [true, "absent"] },
+  { via: "popup", path: "post", answers: [true] },
+  { via: "frame", path: "write" },
+  { via: "frame", path: "store", answers: [[false, false, false, false], "absent"] },
+  { via: "frame", path: "srcdoc", answers: [true] },
+  { via: "frame", path: "storage", answers: [[true, true, true, true, true]] },
+];
+for (const { via, path, answers, webkit, cookie } of VICTIM_PATHS) {
   const made = via === "popup" ? "opens" : "embeds";
-  test(`keeps the cookies of a site a page ${made} out of that page's own built-ins: ${scenario}`, async ({
+  test(`keeps the cookies and storage of a site a page ${made} out of that page's own built-ins: ${path}`, async ({
     page,
     context,
+    browserName,
   }) => {
-    await openThroughUi(page, `https://site-a.test/xs-cookie-spy?do=${scenario}`);
+    // MagicString, which srcdoc markup goes through, breaks once Object.prototype has descriptor fields.
+    const spyQuery = path === "srcdoc" ? `?do=${path}&descriptors=off` : `?do=${path}`;
+    await openThroughUi(page, `https://site-a.test/xs-cookie-spy${spyQuery}`);
     const seed = async () => {
       const other = await context.newPage();
       await other.goto("/~/https/site-b.test/xs-cookie-victim?do=seed");
       await expect(other.locator("#results")).not.toBeEmpty();
     };
-    if (scenario === "read") await seed();
+    if (path === "read") await seed();
     let victim: Page | FrameLocator;
     if (via === "popup") {
       const popupEvent = page.waitForEvent("popup");
@@ -162,18 +186,25 @@ for (const [via, scenario] of COOKIE_PATHS) {
       victim = page.frameLocator("#victim");
     }
     await expect(victim.locator("#results")).not.toBeEmpty();
-    if (scenario === "listen") {
+    const results = JSON.parse((await victim.locator("#results").textContent()) ?? "{}") as Record<string, unknown>;
+    // Without reuse the victim has a runtime of its own, and nothing here would be tested.
+    expect(results.reused).toBe(REUSED[via]);
+    const expected = browserName === "webkit" && webkit ? webkit : answers;
+    if (expected) expect(expected).toContainEqual(results[path]);
+    if (path === "listen") {
       await seed();
-      // The worker's message reaches the victim a moment after the other tab's write lands.
-      await page.waitForTimeout(500);
+      // The other tab's write reaches the victim as a worker message.
+      await expect
+        .poll(async () => {
+          await victim.locator("#read").click();
+          return victim.locator("#cookie").textContent();
+        })
+        .toContain("xsl_");
     }
-    const results = JSON.parse((await victim.locator("#results").textContent()) ?? "{}") as { store?: unknown };
-    const stored = via === "popup" ? [true, true, true, true] : [false, false, false, false];
-    if (scenario === "store") expect([stored, "absent"]).toContainEqual(results.store);
     await page.click("#check");
     await expect(page.locator("#results")).not.toBeEmpty();
     expect(JSON.parse((await page.locator("#results").textContent()) ?? "null")).toEqual([]);
-    if (via === "frame" || results.store === "absent") return;
+    if (via === "frame" || !cookie || results.store === "absent") return;
     await victim.locator("#read").click();
     await expect(victim.locator("#cookie")).toContainText("xsl_");
   });

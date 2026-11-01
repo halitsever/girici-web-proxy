@@ -71,6 +71,17 @@ describe("DocumentSteps", () => {
     expect(seen).toEqual(["https://a.test", "https://b.test"]);
   });
 
+  it("reports a failing step without a console.warn the page replaced", () => {
+    const steps = new DocumentSteps();
+    steps.add("broken", () => {
+      throw new Error("x");
+    });
+    const seen: unknown[] = [];
+    const page = { value: (...args: unknown[]) => seen.push(args) };
+    withReplaced(console, "warn", page, () => steps.run({ v: 2, cookies: [] }));
+    expect(seen).toEqual([]);
+  });
+
   it("keeps every step when the page replaced Array.prototype.push", () => {
     const seen: string[] = [];
     const steps = withReplaced(Array.prototype, "push", { value: () => 0 }, () => {

@@ -54,6 +54,9 @@ function fakeStorageWin(opened: string[], dbNames: string[], cacheNames: string[
     indexedDB: new IDBFactory(),
     caches: new CacheStorage(),
     locks: new LockManager(),
+    Promise,
+    Object,
+    Array,
   } as unknown as Realm & { locks: LockManager; LockManager: typeof LockManager };
 }
 
@@ -75,7 +78,7 @@ function fakeCachesWin(backing: Map<string, Map<string, string>>) {
       return Promise.resolve(undefined);
     }
   }
-  return { CacheStorage, caches: new CacheStorage() } as unknown as Realm;
+  return { CacheStorage, caches: new CacheStorage(), Promise, Object, Array } as unknown as Realm;
 }
 
 /** A window's own Promise, Object and Array, from another realm than the runtime's, as in a window the browser reused. */
@@ -122,17 +125,82 @@ describe("installStorageIsolation", () => {
     expect(await next.get("a")).toEqual({ name: "a", value: "1" });
   });
 
+  it("answers storage listings in the page's own realm, out of reach of the built-ins of the realm that made it", async () => {
+    const prefix = prefixFor("https://a.test");
+    // The window's own storage APIs, from another realm, answering with names that carry the marker.
+    const page = runInNewContext(`(prefix) => {
+      const response = { body: "s3cr3tr" };
+      class Cache {
+        match(request, options) {
+          void (options && options.ignoreSearch);
+          return Promise.resolve(response);
+        }
+      }
+      class IDBFactory {
+        open() { return {}; }
+        deleteDatabase() { return {}; }
+        databases() { return Promise.resolve([{ name: prefix + "s3cr3td", version: 1 }, { name: "other" }]); }
+      }
+      class CacheStorage {
+        open() { return Promise.resolve(new Cache()); }
+        has() { return Promise.resolve(true); }
+        delete() { return Promise.resolve(true); }
+        keys() { return Promise.resolve([prefix + "s3cr3tc", "other"]); }
+        match(request, options) {
+          void options.ignoreSearch;
+          return Promise.resolve({ body: options.cacheName });
+        }
+      }
+      class LockManager {
+        request() { return Promise.resolve(); }
+        query() {
+          const held = [{ name: prefix + "s3cr3tl", mode: "exclusive", clientId: "c" }, { name: "other" }];
+          return Promise.resolve({ held, pending: [] });
+        }
+      }
+      return {
+        Promise, Object, Array, IDBFactory, CacheStorage, LockManager, response,
+        indexedDB: new IDBFactory(), caches: new CacheStorage(), locks: new LockManager(),
+      };
+    }`)(prefix) as Realm & { locks: { query(): Promise<unknown> }; LockManager: unknown; response: unknown };
+    const win = page;
+    installStorageIsolation(win, ctxFor("https://a.test"), () => prefix);
+    const options = { cacheName: "s3cr3tc" };
+    const out: unknown[] = [0, 0, 0, 0, 0];
+    const seen = await spyBuiltins("s3cr3t", async () => {
+      out[0] = await win.indexedDB.databases();
+      out[1] = await win.caches.keys();
+      out[2] = await win.caches.match("/x");
+      out[3] = await win.caches.match("/x", options);
+      out[4] = await win.locks.query();
+    });
+    expect(seen).toEqual([]);
+    expect(out).toEqual([
+      [{ name: "s3cr3td", version: 1 }],
+      ["s3cr3tc"],
+      { body: "s3cr3tr" },
+      { body: `${prefix}s3cr3tc` },
+      { held: [{ name: "s3cr3tl", mode: "exclusive", clientId: "c" }], pending: [] },
+    ]);
+    expect(out[2]).toBe(page.response);
+    for (const index of [0, 1]) expect(Object.getPrototypeOf(out[index])).toBe(page.Array.prototype);
+    expect(Object.getPrototypeOf(out[4])).toBe(page.Object.prototype);
+    expect(Object.getPrototypeOf((out[0] as object[])[0])).toBe(page.Object.prototype);
+    expect(win.caches.match("/x")).toBeInstanceOf(page.Promise);
+  });
+
   it("answers cookieStore in the page's own realm, out of reach of the built-ins of the realm that made it", async () => {
     const secret = "s3cr3t";
-    const writes: string[] = [];
+    const writes = ["", "", ""];
+    let written = 0;
     let cookie = `${secret}a=1; ${secret}b=${secret}2; ${secret}c`;
     const { win, store } = cookieStoreWin({
       get cookie() {
         return cookie;
       },
       set cookie(value: string) {
-        // Not push, which the spies wrap.
-        writes[writes.length] = value;
+        // Into a slot that exists: push and new indices reach what the spies wrap.
+        writes[written++] = value;
       },
     });
     const url = new URL(`https://site.test/${secret}/page`);
@@ -140,7 +208,7 @@ describe("installStorageIsolation", () => {
     installStorageIsolation(win, ctx, () => prefixFor("https://site.test"));
     const named = { name: `${secret}a` };
     const item = { name: `${secret}d`, value: `${secret}4` };
-    const answers: unknown[] = [];
+    const answers: unknown[] = [0, 0, 0, 0, 0, 0, 0];
     const seen = await spyBuiltins(secret, async () => {
       answers[0] = await store.get(`${secret}b`);
       answers[1] = await store.get(named);

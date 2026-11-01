@@ -358,7 +358,7 @@ describe("installCookies", () => {
     const message = PAGE.parse(JSON.stringify({ type: COOKIE_MESSAGE, v: PROTOCOL_VERSION, changes }));
     const header = encodeHeaderValue(JSON.stringify([cookie(`${secret}s`, "1")]));
     const writes = [`${secret}w=${secret}1; path=/; max-age=60; expires=Thu, 01 Jan 2099 00:00:00 GMT`, `${secret}x=1`];
-    const reads: string[] = [];
+    const reads = ["", "", ""];
     const seen = await spyBuiltins(secret, async () => {
       document.cookie = writes[0] as string;
       document.cookie = writes[1] as string;

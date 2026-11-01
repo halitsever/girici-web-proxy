@@ -89,7 +89,7 @@ describe("cookie mirror on a page's built-ins", () => {
   });
 
   it("reads expiry and the default path without the page", async () => {
-    const parsed: Array<ReturnType<typeof parseScriptCookie>> = [];
+    const parsed: Array<ReturnType<typeof parseScriptCookie>> = [null, null, null, null];
     const url = new URL(`https://www.site.test/${secret}/page`);
     const inputs = [`a=${secret}; expires=Thu, 01 Jan 1970 00:00:00 GMT`, `b=${secret}; max-age=x`, secret];
     inputs.push(`c=${secret}; HttpOnly`);

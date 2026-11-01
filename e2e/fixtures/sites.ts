@@ -1295,13 +1295,15 @@ const XS_OPENED = page(
 );
 
 // Wraps its own built-ins, then opens or embeds the victim with this page's query. The browser reuses the blank window
-// it made, so this page's runtime serves the victim; "check" lists each value with the victim's marker that reached a
-// wrapper.
+// it made, so this page's runtime serves the victim; "check" lists each value with the victim's marker, and each
+// object of the victim's realm, that reached a wrapper. With "descriptors=off" Object.prototype gets no `value`, `get`
+// or `set`, which break descriptor literals such as MagicString's.
 const XS_COOKIE_SPY = page(
   "Cookie spy",
   `<button id="open">open</button><button id="frame">frame</button><button id="check">check</button>
 <pre id="results"></pre>
 <script>
+  const descriptorFields = new URLSearchParams(location.search).get("descriptors") !== "off";
   const spy = (() => {
     "use strict";
     const mark = "xs" + "l_";
@@ -1312,6 +1314,9 @@ const XS_COOKIE_SPY = page(
     const ownKeys = R.ownKeys;
     const getDesc = R.getOwnPropertyDescriptor;
     const define = R.defineProperty;
+    const getProto = R.getPrototypeOf;
+    const objectProto = Object.prototype;
+    const hasOwn = Object.prototype.hasOwnProperty;
     const includes = String.prototype.includes;
     const charAt = String.prototype.charAt;
     const toTag = Object.prototype.toString;
@@ -1322,6 +1327,9 @@ const XS_COOKIE_SPY = page(
     const decoder = new TextDecoder();
     const nativeThen = Promise.prototype.then;
     const NativePromise = Promise;
+    const NativeTypeError = TypeError;
+    const mapForEach = Map.prototype.forEach;
+    const setForEach = Set.prototype.forEach;
     const hrefOf = getDesc(URL.prototype, "href").get;
     const stringify = JSON.stringify;
     const base64 = /^[A-Za-z0-9+/_-]{12,}={0,2}$/;
@@ -1347,6 +1355,21 @@ const XS_COOKIE_SPY = page(
         if (apply(includes, plain, [mark])) note(where, "base64 of " + plain);
       } catch {}
     };
+    // An object whose prototype chain ends at another realm's Object.prototype; a null-prototype one belongs to none.
+    const foreign = (value) => {
+      let current = value;
+      for (let step = 0; step < 32; step++) {
+        let next;
+        try {
+          next = getProto(current);
+        } catch {
+          return false;
+        }
+        if (next === null) return current !== value && current !== objectProto;
+        current = next;
+      }
+      return false;
+    };
     const watch = (where, value) => {
       if (busy) return;
       busy = true;
@@ -1358,13 +1381,14 @@ const XS_COOKIE_SPY = page(
     };
     const scan = (where, value, depth) => {
       if (typeof value === "string") return scanText(where, value);
-      if (typeof value !== "object" || value === null || depth > 3) return;
+      if (typeof value !== "object" || value === null || value === found || depth > 3) return;
       let tag;
       try {
         tag = apply(toTag, value, []);
       } catch {
         return;
       }
+      if (foreign(value)) return note(where, "an object of another realm, " + tag);
       if (tag === "[object String]") return scanText(where, apply(stringValue, value, []));
       if (tag === "[object XMLHttpRequest]") return note(where, "an XMLHttpRequest");
       if (tag === "[object URL]") return scanText(where, apply(hrefOf, value, []));
@@ -1380,6 +1404,16 @@ const XS_COOKIE_SPY = page(
         } catch {}
         return;
       }
+      if (tag === "[object Map]" || tag === "[object Set]") {
+        const each = (item, key) => {
+          scan(where, key, depth + 1);
+          scan(where, item, depth + 1);
+        };
+        try {
+          apply(tag === "[object Map]" ? mapForEach : setForEach, value, [each]);
+        } catch {}
+        return;
+      }
       if (tag !== "[object Array]" && tag !== "[object Object]") return;
       let keys;
       try {
@@ -1390,7 +1424,7 @@ const XS_COOKIE_SPY = page(
       for (let i = 0; i < keys.length && i < 64; i++) {
         try {
           const d = getDesc(value, keys[i]);
-          if (d && "value" in d) scan(where, d.value, depth + 1);
+          if (d && apply(hasOwn, d, ["value"])) scan(where, d.value, depth + 1);
         } catch {}
       }
     };
@@ -1409,7 +1443,7 @@ const XS_COOKIE_SPY = page(
       if (!d || typeof d.value !== "function") return;
       const original = d.value;
       const wrapped = function (...args) {
-        watchCall(label, this, args);
+        watchCall(label, new.target ? undefined : this, args);
         return new.target ? construct(original, args, new.target) : apply(original, this, args);
       };
       define(owner, key, { __proto__: null, value: wrapped, writable: true, enumerable: d.enumerable, configurable: true });
@@ -1444,6 +1478,23 @@ const XS_COOKIE_SPY = page(
         method(owner, key, label + "." + (typeof key === "symbol" ? key.description : key));
       }
     };
+    // Notes who reads or writes the key through the prototype; a write lands as the own data property it would make.
+    const field = (owner, key, label) => {
+      define(owner, key, {
+        __proto__: null,
+        get() {
+          watchCall(label, this, []);
+          return undefined;
+        },
+        set(value) {
+          watchCall(label, this, [value]);
+          if ((typeof this === "object" && this !== null) || typeof this === "function") {
+            define(this, key, { __proto__: null, value, writable: true, enumerable: true, configurable: true });
+          }
+        },
+        configurable: true,
+      });
+    };
 
     methods(Array.prototype, "Array.prototype", ["filter", "map", "sort", "join", "push", "find", "findIndex", "forEach", "some", "every", "indexOf", "includes", "slice", "concat", "reduce", "splice", "values", "entries", "keys", "flat", "flatMap", "at", Symbol.iterator]);
     methods(Array, "Array", ["from", "of", "isArray"]);
@@ -1477,6 +1528,29 @@ const XS_COOKIE_SPY = page(
       configurable: true,
     });
     methods(Object, "Object", ["keys", "values", "entries", "assign", "fromEntries"]);
+    methods(Object.prototype, "Object.prototype", ["toString", "valueOf"]);
+    define(Object.prototype, Symbol.toPrimitive, {
+      __proto__: null,
+      value(hint) {
+        watchCall("Object.prototype[Symbol.toPrimitive]", this, []);
+        // OrdinaryToPrimitive, so conversions keep working.
+        const first = hint === "string" ? "toString" : "valueOf";
+        const second = hint === "string" ? "valueOf" : "toString";
+        const one = this[first];
+        if (typeof one === "function") {
+          const result = apply(one, this, []);
+          if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+        }
+        const two = this[second];
+        if (typeof two === "function") {
+          const result = apply(two, this, []);
+          if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+        }
+        throw new NativeTypeError("Cannot convert object to primitive value");
+      },
+      writable: true,
+      configurable: true,
+    });
     methods(Uint8Array, "Uint8Array", ["from", "of"]);
     methods(TextDecoder.prototype, "TextDecoder.prototype", ["decode"]);
     methods(TextEncoder.prototype, "TextEncoder.prototype", ["encode"]);
@@ -1485,8 +1559,15 @@ const XS_COOKIE_SPY = page(
     methods(Set.prototype, "Set.prototype", ["has", "add"]);
     methods(Map.prototype, "Map.prototype", ["get", "set", "has"]);
     methods(Function.prototype, "Function.prototype", ["call", "apply", "bind"]);
-    const globals = ["atob", "btoa", "String", "Number", "URL", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "isNaN"];
+    methods(Reflect, "Reflect", ["apply", "construct", "defineProperty", "deleteProperty", "get", "getOwnPropertyDescriptor", "getPrototypeOf", "has", "isExtensible", "ownKeys", "preventExtensions", "set", "setPrototypeOf"]);
+    const globals = ["atob", "btoa", "String", "Number", "URL", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "isNaN", "Proxy"];
     for (let i = 0; i < globals.length; i++) global(globals[i]);
+    const fields = ["cookies", "changes", "name", "domain", "path", "expires", "creation", "cookiesBlocked", "transfer", "ignoreSearch"];
+    for (let i = 0; i < fields.length; i++) field(Object.prototype, fields[i], "Object.prototype." + fields[i]);
+    for (let i = 0; i < 4; i++) field(Array.prototype, "" + i, "Array.prototype[" + i + "]");
+    // Last: from here on a descriptor literal without own get and set is invalid in this realm.
+    const descriptors = ["value", "get", "set"];
+    for (let i = 0; descriptorFields && i < descriptors.length; i++) field(Object.prototype, descriptors[i], "Object.prototype." + descriptors[i]);
 
     return () => {
       busy = true;
@@ -1509,8 +1590,9 @@ const XS_COOKIE_SPY = page(
 </script>`,
 );
 
-// Gives its address, and each cookie it sets or reads, a fresh value that starts with the spy's marker. "do" picks
-// one cookie path; "seed" is a second tab whose writes reach the others as worker messages.
+// Gives its address, and each cookie or storage name it sets or reads, a fresh value that starts with the spy's
+// marker. "do" picks one path; "seed" is a second tab whose writes reach the others as worker messages. "reused" tells
+// whether this window kept the runtime of the page that made it: its cookie getter then belongs to another realm.
 const XS_COOKIE_VICTIM = page(
   "Cookie victim",
   `<button id="read">read</button><pre id="cookie"></pre><pre id="results"></pre>
@@ -1518,9 +1600,11 @@ const XS_COOKIE_VICTIM = page(
   const mark = "xs" + "l" + "_";
   const fresh = (kind) => mark + kind + Math.random().toString(36).slice(2, 10);
   const scenario = new URLSearchParams(location.search).get("do");
+  const cookieGetter = Object.getOwnPropertyDescriptor(Document.prototype, "cookie").get;
+  const reused = Object.getPrototypeOf(cookieGetter) !== Function.prototype;
   const secrets = [];
   const report = (extra) => {
-    document.getElementById("results").textContent = JSON.stringify(Object.assign({ scenario, secrets }, extra));
+    document.getElementById("results").textContent = JSON.stringify(Object.assign({ scenario, reused, secrets }, extra));
   };
   document.getElementById("read").onclick = () => {
     document.getElementById("cookie").textContent = document.cookie;
@@ -1540,20 +1624,18 @@ const XS_COOKIE_VICTIM = page(
     // Echo waits for the write to reach the worker's jar.
     await fetch("/cookie/echo");
   };
-  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
-  (async () => {
-    if (scenario === "seed" || scenario === "write") {
-      await write();
-      report({});
-    } else if (scenario === "read") {
-      report({ cookie: document.cookie });
-    } else if (scenario === "sync") {
+  const paths = {
+    seed: write,
+    write,
+    read: () => ({ cookie: document.cookie }),
+    listen: () => ({}),
+    async sync() {
       const one = await (await fetch("/cookie/xs-sync")).text();
       const two = await xhr("/cookie/xs-sync");
       secrets.push(one, two);
-      report({});
-    } else if (scenario === "store") {
-      if (!window.cookieStore) return report({ store: "absent" });
+    },
+    async store() {
+      if (!window.cookieStore) return { store: "absent" };
       const name = fresh("n");
       const value = fresh("v");
       secrets.push(name, value);
@@ -1563,10 +1645,91 @@ const XS_COOKIE_VICTIM = page(
       const all = await cookieStore.getAll();
       // document.cookie shows the cookie only when it went through the runtime, not the browser's own store.
       const mirrored = document.cookie.includes(name);
-      report({ store: [one?.value === value, named?.value === value, all.some((c) => c.name === name), mirrored] });
-    } else {
-      report({});
-    }
+      return { store: [one?.value === value, named?.value === value, all.some((c) => c.name === name), mirrored] };
+    },
+    async srcdoc() {
+      // The runtime tag a srcdoc gets carries the cookie snapshot.
+      await write();
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<p>srcdoc</p>";
+      return { srcdoc: frame.srcdoc === "<p>srcdoc</p>" };
+    },
+    storage() {
+      const key = fresh("k");
+      const value = fresh("v");
+      secrets.push(key, value);
+      localStorage.setItem(key, value);
+      const described = Object.getOwnPropertyDescriptor(localStorage, key);
+      const storage = [
+        localStorage[key] === value,
+        described.value === value,
+        localStorage.key(3) === null,
+        Object.keys(localStorage).includes(key),
+        localStorage.constructor === Storage,
+      ];
+      localStorage.removeItem(key);
+      return { storage };
+    },
+    destructure() {
+      const { location: here, document: doc } = window;
+      return { destructure: typeof here.href === "string" && doc === document };
+    },
+    async caches() {
+      const name = fresh("c");
+      secrets.push(name);
+      let cache;
+      try {
+        cache = await caches.open(name);
+      } catch (error) {
+        // WebKit's Cache API stays with the blank document of a reused window, which has stopped.
+        return { caches: "unavailable: " + error.name };
+      }
+      await cache.put("/xs-probe", new Response(fresh("r")));
+      const names = await caches.keys();
+      const hit = await caches.match("/xs-probe");
+      const named = await caches.match("/xs-probe", { cacheName: name, note: fresh("o") });
+      return { caches: [names.includes(name), !!hit, !!named] };
+    },
+    async idb() {
+      if (!indexedDB.databases) return { idb: "absent" };
+      const name = fresh("d");
+      secrets.push(name);
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+      const listed = await indexedDB.databases();
+      return { idb: listed.some((entry) => entry.name === name) };
+    },
+    async locks() {
+      if (!navigator.locks) return { locks: "absent" };
+      const name = fresh("l");
+      secrets.push(name);
+      const held = await navigator.locks.request(name, async () => {
+        const state = await navigator.locks.query();
+        return state.held.some((lock) => lock.name === name);
+      });
+      return { locks: held };
+    },
+    post() {
+      const note = fresh("o");
+      secrets.push(note);
+      return new Promise((resolve) => {
+        addEventListener("message", (event) => {
+          if (event.data === "xs-post") resolve({ post: true });
+        });
+        postMessage("xs-post", { targetOrigin: "/", note });
+      });
+    },
+  };
+  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
+  (async () => {
+    const run = paths[scenario] ?? paths.listen;
+    report((await run()) ?? {});
   })();
 </script>`,
 );
