@@ -35,6 +35,8 @@ describe("site config", () => {
   it("answers the site config without a key until a private instance's visitor signs in", async () => {
     store.setPublicAccess(false);
     const res = await send("/_g/sites/config", { host: siteA });
+    // A worker install fails on anything but 200 or 404, so a signed-out visitor still gets the config.
+    expect(res.status).toBe(200);
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.headers.vary).toMatch(/Cookie/i);
     expect(await res.json()).toEqual({

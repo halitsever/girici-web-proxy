@@ -168,6 +168,8 @@ describe("isGuardedPath", () => {
       "/_g/ui/app.js",
       "/_g/r/https/x.test/",
       "/_g/rpc/cookie",
+      "/_g/sites/config",
+      "/_g/sites/clear",
       "/",
       "/robots.txt",
     ];
