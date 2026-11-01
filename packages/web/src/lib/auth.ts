@@ -9,6 +9,8 @@ export interface AuthState {
   authed: boolean;
   public: boolean;
   sealAddresses: boolean;
+  /** The site domain, port included, in subdomain mode; null on a single origin. */
+  siteDomain: string | null;
   admin?: AdminInfo;
 }
 

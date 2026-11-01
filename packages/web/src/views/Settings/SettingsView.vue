@@ -5,17 +5,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { brand, DEFAULT_BRAND_NAME, readLogoFile, saveBrand } from "@/lib/brand";
-import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess, setSealAddresses } from "@/lib/auth";
+import {
+  getAdminSettings,
+  getAuthState,
+  saveBlockedHosts,
+  setPublicAccess,
+  setSealAddresses,
+  type AuthState,
+} from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import { clearSiteData, listSiteData } from "@/lib/site-data";
 import { loadSettings, saveSettings } from "@/lib/settings";
+import { isSiteMode, syncSettings } from "@/lib/sites";
 import { SEARCH_ENGINES, toProxyPath, type SearchEngine } from "@/lib/target";
 
 const engines = Object.keys(SEARCH_ENGINES) as SearchEngine[];
 const settings = ref(loadSettings());
 const history = ref<HistoryEntry[]>([]);
+const authState = ref<AuthState | null>(null);
+const siteMode = computed(() => isSiteMode(authState.value));
 const authed = ref(false);
 const publicAccess = ref(false);
 const publicError = ref("");
@@ -52,9 +62,13 @@ const siteNote = computed(() => {
 });
 
 watch(settings, (value) => saveSettings(value), { deep: true });
+// Site hosts also read the toolbar and search engine, from the cookie the root keeps for them.
 watch(
-  () => [settings.value.blockCookies, settings.value.sealAddresses],
-  () => void syncEnginePrefs(settings.value),
+  () =>
+    siteMode.value
+      ? [settings.value.blockCookies, settings.value.sealAddresses, settings.value.toolbar, settings.value.engine]
+      : [settings.value.blockCookies, settings.value.sealAddresses],
+  () => void syncSettings(settings.value, authState.value),
 );
 
 async function onToggleInstanceSeal(on: boolean) {
@@ -211,6 +225,7 @@ onMounted(async () => {
   history.value = loadHistory();
   void loadSites();
   const state = await getAuthState(true);
+  authState.value = state;
   authed.value = state.authed;
   publicAccess.value = state.public;
   instanceSeal.value = state.sealAddresses;
