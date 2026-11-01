@@ -86,6 +86,12 @@ function readMetricsToken(raw: string | undefined): string | undefined {
   if (value.length < 16) {
     throw new Error("GIRICI_METRICS_TOKEN must be at least 16 characters; openssl rand -hex 32 makes one");
   }
+  // The token68 form of RFC 7235: anything else could never arrive in an Authorization: Bearer header.
+  if (!/^[A-Za-z0-9\-._~+/]+=*$/.test(value)) {
+    throw new Error(
+      "GIRICI_METRICS_TOKEN may contain only letters, digits, - . _ ~ + / and trailing =; openssl rand -hex 32 makes one",
+    );
+  }
   return value;
 }
 

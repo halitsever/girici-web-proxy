@@ -56,6 +56,20 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ GIRICI_METRICS_TOKEN: "short-token" })).not.toThrow(/short-token/);
   });
 
+  it("refuses a metrics token that a Bearer header cannot carry, without echoing it", () => {
+    for (const token of [
+      "abcdefgh ijklmnop",
+      "abcdefgh\tijklmnop",
+      'abcdefghijklmnop"',
+      "abcdefgh,ijklmnop",
+      "abc=defghijklmnop",
+    ]) {
+      expect(() => loadConfig({ GIRICI_METRICS_TOKEN: token }), token).toThrow(/GIRICI_METRICS_TOKEN may contain only/);
+      expect(() => loadConfig({ GIRICI_METRICS_TOKEN: token }), token).not.toThrow(token);
+    }
+    expect(loadConfig({ GIRICI_METRICS_TOKEN: "A-Za.z_0~9+/abcdef==" }).metricsToken).toBe("A-Za.z_0~9+/abcdef==");
+  });
+
   it("reads the data dir, trust proxy, and session secret override", () => {
     expect(loadConfig({ GIRICI_DATA_DIR: "/srv/girici" }).dataDir).toBe("/srv/girici");
     expect(loadConfig({ GIRICI_TRUST_PROXY: "true" }).trustProxy).toBe(true);

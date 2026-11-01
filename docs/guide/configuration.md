@@ -21,7 +21,7 @@ stops the server with a message naming the variable.
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
 | `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may start moving per minute, such as `50MB`. A response that starts under the limit finishes, so a visitor can go over it (see [Bandwidth limits](#bandwidth-limits)). The signed-in admin is never limited. |
 | `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may start moving per day, such as `2GB`, checked the same way. Counts reset at midnight UTC and when Girici restarts. |
-| `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more characters. |
+| `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more letters, digits or `-._~+/`, with optional `=` at the end. |
 | `GIRICI_POW_DIFFICULTY` | `16` | How hard the browser check is, 1 to 24; each step doubles the work. The check itself is switched on in Settings. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
