@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientTag, stripClientTag } from "../src/shared/client-tag.ts";
+import { clientTag, escapeAttribute, stripClientTag } from "../src/shared/client-tag.ts";
 
 describe("clientTag", () => {
   it("embeds the config as an escaped attribute", () => {
@@ -73,5 +73,12 @@ describe("stripClientTag", () => {
     expect(stripClientTag('<script src="/other.js"></script><p>x</p>', url)).toBe(
       '<script src="/other.js"></script><p>x</p>',
     );
+  });
+});
+
+describe("escapeAttribute", () => {
+  it("escapes text for a quoted HTML attribute, such as a replayed form field", () => {
+    expect(escapeAttribute(`"><script>&'x`)).toBe("&quot;&gt;&lt;script&gt;&amp;&#39;x");
+    expect(escapeAttribute("ü plain")).toBe("ü plain");
   });
 });

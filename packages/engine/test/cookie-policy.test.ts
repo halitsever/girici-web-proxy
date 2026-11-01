@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { allowsCredentials, sameSiteContext } from "../src/sw/cookies/policy.ts";
+import { CROSS_SITE } from "../src/sw/initiator.ts";
 
 const u = (href: string) => new URL(href);
 
@@ -21,8 +22,29 @@ describe("sameSiteContext", () => {
     );
   });
 
+  it("counts names in the private part of the public suffix list as sites of their own in subdomain mode", () => {
+    const alice = u("https://alice.github.io/");
+    const bob = u("https://bob.github.io/");
+    expect(sameSiteContext(alice, bob, { topLevel: false, method: "GET" })).toBe("strict");
+    expect(sameSiteContext(alice, bob, { topLevel: false, method: "GET", privateDomains: true })).toBe("none");
+    expect(
+      sameSiteContext(u("https://www.a.test/"), u("https://a.test/"), {
+        topLevel: false,
+        method: "GET",
+        privateDomains: true,
+      }),
+    ).toBe("strict");
+  });
+
   it("compares sites by scheme too", () => {
     expect(sameSiteContext(u("http://a.test/"), u("https://a.test/"), { topLevel: false, method: "GET" })).toBe("none");
+  });
+
+  it("gives a cross-site navigation lax cookies at top level and none in frames", () => {
+    const target = u("https://a.test/");
+    expect(sameSiteContext(CROSS_SITE, target, { topLevel: true, method: "GET" })).toBe("lax");
+    expect(sameSiteContext(CROSS_SITE, target, { topLevel: false, method: "GET" })).toBe("none");
+    expect(sameSiteContext(CROSS_SITE, target, { topLevel: true, method: "POST" })).toBe("none");
   });
 });
 

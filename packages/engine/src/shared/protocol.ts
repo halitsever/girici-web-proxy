@@ -1,3 +1,5 @@
+import type { SearchEngine } from "./target.ts";
+
 export const HEADER = {
   relay: "x-girici-relay",
   method: "x-girici-method",
@@ -30,6 +32,116 @@ export const COOKIE_MESSAGE = "girici:cookies";
 // Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
 export const LOGIN_PATH = "/_g/login";
 export const SETUP_PATH = "/_g/setup";
+
+// Subdomain mode. The root takes the UI's settings and runs the site list and the clearing chain.
+export const PREFS_PATH = "/_g/prefs";
+export const SITES_LIST_PATH = "/_g/sites/list";
+export const SITES_PLAN_PATH = "/_g/sites/plan";
+export const SITES_DONE_PATH = "/_g/sites/done";
+/** The root sends the clearing chain back to `/settings?cleared=<n>`. */
+export const SITES_CLEARED_PARAM = "cleared";
+// Each site host answers its own config and clears its own data; no route is shared through CORS.
+export const SITES_CONFIG_PATH = "/_g/sites/config";
+export const SITES_CLEAR_PATH = "/_g/sites/clear";
+/** A page asks its own service worker which host serves a real origin; `LABEL_RPC_LIMIT` origins per call at most. */
+export const LABEL_RPC_PATH = "/_g/rpc/label";
+export const LABEL_RPC_LIMIT = 16;
+
+/** Marks a message that crossed site hosts; the NUL keeps it from clashing with a page's own field names. */
+export const MESSAGE_ENVELOPE = "\u0000girici" as const;
+
+/** What `postMessage` sends to a window on another site host, so the receiver can see the real origins. */
+export interface MessageEnvelope {
+  [MESSAGE_ENVELOPE]: 1;
+  /** The sender's real origin. */
+  o: string;
+  /** The sender's schemeful site, which the receiver checks against the sender's host label. */
+  s: string;
+  /** The real target origin the page asked for, or "*". */
+  t: string;
+  d: unknown;
+}
+
+/** The UI's engine settings as the root keeps them in a signed cookie for every site host. */
+export interface SitePrefs {
+  blockThirdPartyCookies: boolean;
+  sealAddresses: boolean;
+  toolbar: boolean;
+  engine: SearchEngine;
+}
+
+export const DEFAULT_SITE_PREFS: SitePrefs = {
+  blockThirdPartyCookies: true,
+  sealAddresses: false,
+  toolbar: true,
+  engine: "DuckDuckGo",
+};
+
+/** The answer to `GET` and `POST` on `SITES_CONFIG_PATH`. */
+export interface SiteConfigAnswer {
+  v: 1;
+  /** The site domain's `value`, port included. */
+  domain: string;
+  /** This host's own label. */
+  label: string;
+  /** base64url of the label key; null until the gate would let the caller browse. */
+  key: string | null;
+  prefs: SitePrefs;
+  instanceSeal: boolean;
+}
+
+/** `POST` body on `SITES_CONFIG_PATH`, as JSON: the worker names the site it serves so the root can list it. */
+export interface SiteReport {
+  site: string;
+}
+
+/** A site-host document's view of subdomain mode, written by its service worker. */
+export interface SiteContext {
+  /** The site domain's `value`. */
+  domain: string;
+  /** The root's origin, such as `https://proxy.example`. */
+  root: string;
+  label: string;
+  /** base64url of the label key. */
+  key: string;
+  /** The schemeful site this host serves. */
+  site: string;
+  toolbar: boolean;
+  engine: SearchEngine;
+}
+
+/** `POST` body on `LABEL_RPC_PATH`, as JSON; `v` is `PROTOCOL_VERSION`. */
+export interface LabelRequest {
+  v: number;
+  origins: string[];
+}
+
+/** One `[origin, host origin]` pair per asked origin, in order; null where no host can be named. */
+export interface LabelAnswer {
+  hosts: Array<[string, string | null]>;
+}
+
+/** `GET` on `SITES_LIST_PATH`: the sites this browser visited, newest first. */
+export interface SiteListAnswer {
+  sites: Array<{ site: string; host: string }>;
+}
+
+/** `POST` body on `SITES_PLAN_PATH`, as JSON. */
+export interface SitePlanRequest {
+  sites: string[] | "all";
+}
+
+/** `start` is the first hop of the clearing chain, a scheme-relative URL the UI assigns. */
+export interface SitePlanAnswer {
+  start: string;
+}
+
+/** The service worker's answer to a page's `clear`; `all` means it cleared the whole host, not only `site`. */
+export interface SiteDataClearAnswer {
+  site: string;
+  cookies: number;
+  all?: true;
+}
 
 /** A cookie as page scripts may see it; times are epoch milliseconds and a null expiry marks a session cookie. */
 export interface CookieSnapshot {
@@ -101,6 +213,8 @@ export interface ClientConfig {
   cookiesBlocked?: boolean;
   /** Set for a top-level document on a sealed address. */
   seal?: OriginSeal;
+  /** Set for every document on a site host in subdomain mode. */
+  sites?: SiteContext;
 }
 
 export type RelayErrorCode =

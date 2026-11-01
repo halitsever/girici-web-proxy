@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import { AuthStore } from "../../packages/server/src/auth/store.ts";
 import { BrandStore } from "../../packages/server/src/brand/store.ts";
 import { openDb } from "../../packages/server/src/db/open.ts";
+import { PRIVATE_SITES, SITE_SECRET, SITES } from "../support/site-mode.ts";
 import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
 import { handleFixture } from "./sites.ts";
@@ -21,13 +22,13 @@ const SEEDED_LOGO = Buffer.from(
     '<script>document.title="ran"</script></svg>',
 );
 
-/** An admin and public access, so the auth gate does not block the proxy tests. */
-function seedDataDir(withBrand = false): string {
+/** An admin, and public access so the gate does not block the proxy tests, unless the server exists to test the gate. */
+function seedDataDir(options: { brand?: boolean; publicAccess?: boolean } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
   const seed = new AuthStore(openDb(join(dir, "girici.db")));
   seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
-  seed.setPublicAccess(true);
-  if (withBrand) {
+  seed.setPublicAccess(options.publicAccess ?? true);
+  if (options.brand) {
     new BrandStore(join(dir, "brand"), seed).update({
       name: SEEDED_BRAND_NAME,
       logo: { bytes: SEEDED_LOGO, type: "image/svg+xml" },
@@ -60,8 +61,9 @@ const upstreams = Object.fromEntries([
   ...HTTPS_HOSTS.map((host) => [host, "127.0.0.1:41443"]),
   ["site-c.test", "127.0.0.1:41080"],
 ]);
-function spawnGirici(port: number, dataDir: string): ChildProcess {
-  return spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
+const children: ChildProcess[] = [];
+function spawnGirici(port: number, dataDir: string, env: Record<string, string> = {}): ChildProcess {
+  const child = spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -72,12 +74,18 @@ function spawnGirici(port: number, dataDir: string): ChildProcess {
       GIRICI_TEST_CA: CERT_PATH,
       GIRICI_TEST_UPSTREAMS: JSON.stringify(upstreams),
       GIRICI_DATA_DIR: dataDir,
+      ...env,
     },
   });
+  // Any server that stops takes the harness down, so Playwright reports it instead of timing out.
+  child.on("exit", (code) => process.exit(code ?? 1));
+  children.push(child);
+  return child;
 }
 
 async function waitHealthy(port: number): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  // Three servers start together, which a busy CI machine can take a while over.
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`)).status === 200) return;
@@ -89,16 +97,20 @@ async function waitHealthy(port: number): Promise<void> {
   throw new Error(`Server on port ${port} did not become healthy`);
 }
 
-// Instance-wide writes (brand, sealing) go to this one, so the main server keeps its settings.
-const instance = spawnGirici(41002, seedDataDir(true));
-await waitHealthy(41002);
-const girici = spawnGirici(41000, seedDataDir());
-for (const child of [instance, girici]) {
-  child.on("exit", (code) => process.exit(code ?? 1));
+/** Subdomain mode, where each site runs on its own host under the root. */
+function siteMode(base: string): Record<string, string> {
+  return { GIRICI_SITE_DOMAIN: new URL(base).host, GIRICI_SITE_SECRET: SITE_SECRET };
 }
+
+// Instance-wide writes (brand, sealing) go to 41002, so the main server keeps its settings. Playwright waits for
+// 41000 only, so it starts last.
+spawnGirici(41002, seedDataDir({ brand: true }));
+spawnGirici(41005, seedDataDir(), siteMode(SITES));
+spawnGirici(41006, seedDataDir({ publicAccess: false }), siteMode(PRIVATE_SITES));
+await Promise.all([waitHealthy(41002), waitHealthy(41005), waitHealthy(41006)]);
+spawnGirici(41000, seedDataDir());
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
-    instance.kill(signal);
-    girici.kill(signal);
+    for (const child of children) child.kill(signal);
   });
 }

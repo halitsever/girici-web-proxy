@@ -8,6 +8,10 @@
     "./shared": {
       "types": "./dist/lib/index.d.ts",
       "default": "./dist/lib/index.js"
+    },
+    "./label-site": {
+      "types": "./dist/lib/label-site.d.ts",
+      "default": "./dist/lib/label-site.js"
     }
   },
   "scripts": {

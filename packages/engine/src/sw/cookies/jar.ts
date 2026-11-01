@@ -8,6 +8,8 @@ export interface CookieRequestContext {
   credentials: RequestCredentials;
   topLevel: boolean;
   method: string;
+  /** Subdomain mode: names in the private part of the public suffix list are sites of their own. */
+  privateDomains?: boolean;
 }
 
 export interface CookieRecordStore {
@@ -33,6 +35,8 @@ export class CookieService {
   #loaded: Promise<void> | null = null;
   #timer: ReturnType<typeof setTimeout> | null = null;
   #writing: Promise<void> = Promise.resolve();
+  #saved: Promise<void> = Promise.resolve();
+  #settleSaved: (() => void) | null = null;
 
   constructor(records: CookieRecordStore, options: { flushDelay?: number } = {}) {
     this.#records = records;
@@ -112,9 +116,16 @@ export class CookieService {
     return () => this.#listeners.delete(listener);
   }
 
+  /** Settles once the cookies stored so far reach the store, so a fetch event can keep the worker alive until then. */
+  saved(): Promise<void> {
+    return this.#saved;
+  }
+
   async flush(): Promise<void> {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
+    const settleSaved = this.#settleSaved;
+    this.#settleSaved = null;
     const pending = [...this.#dirty];
     this.#dirty.clear();
     const puts: Array<{ key: string; value: unknown }> = [];
@@ -134,6 +145,7 @@ export class CookieService {
     });
     this.#writing = write;
     await write;
+    settleSaved?.();
   }
 
   async #load(): Promise<void> {
@@ -179,7 +191,9 @@ export class CookieService {
 
   #markDirty(key: string, cookie: Cookie | null): void {
     this.#dirty.set(key, cookie);
-    this.#timer ??= setTimeout(() => void this.flush(), this.#flushDelay);
+    if (this.#timer) return;
+    this.#saved = new Promise((resolve) => (this.#settleSaved = resolve));
+    this.#timer = setTimeout(() => void this.flush(), this.#flushDelay);
   }
 
   #emit(changes: CookieSnapshot[]): void {

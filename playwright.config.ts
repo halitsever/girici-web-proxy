@@ -1,4 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
+import { SITES } from "./e2e/support/site-mode.ts";
+
+/** Specs for subdomain mode run only in the `-sites` projects, against the site-mode server. */
+const SITE_SPECS = /sites[\w-]*\.spec\.ts$/;
+/** Single-origin specs whose behaviour must hold in subdomain mode too. */
+const BORROWED_SPECS =
+  /(?:^|\/)(?:proxy|navigation|cross-site|isolation|cookies|third-party-cookies|toolbar|runtime)\.spec\.ts$/;
+const singleOrigin = { testIgnore: [SITE_SPECS, ...(process.env.SMOKE ? [] : [/smoke\//])] };
+const siteMode = { testMatch: [SITE_SPECS, BORROWED_SPECS] };
 
 export default defineConfig({
   testDir: "e2e",
@@ -27,8 +36,11 @@ export default defineConfig({
     },
   ],
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    { name: "chromium", ...singleOrigin, use: { ...devices["Desktop Chrome"] } },
+    { name: "firefox", ...singleOrigin, use: { ...devices["Desktop Firefox"] } },
+    { name: "webkit", ...singleOrigin, use: { ...devices["Desktop Safari"] } },
+    { name: "chromium-sites", ...siteMode, use: { ...devices["Desktop Chrome"], baseURL: SITES } },
+    { name: "firefox-sites", ...siteMode, use: { ...devices["Desktop Firefox"], baseURL: SITES } },
+    { name: "webkit-sites", ...siteMode, use: { ...devices["Desktop Safari"], baseURL: SITES } },
   ],
 });

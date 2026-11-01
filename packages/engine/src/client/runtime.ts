@@ -1,8 +1,8 @@
 import { clientTag } from "../shared/client-tag.ts";
-import { append, define, hrefOf, isWebUrl, NativeWeakMap, newUrl, originOf, parseUrl } from "../shared/primordials.ts";
+import { append, define, hrefOf, isWebUrl, NativeWeakMap, newUrl, originOf } from "../shared/primordials.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import type { OpenSealed } from "../shared/sealed-address.ts";
-import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
+import { readToolbarPrefs, UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
 import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
@@ -21,13 +21,14 @@ import { installNavigation } from "./navigation.ts";
 import { installNetwork } from "./network.ts";
 import { installRealtimeBlock } from "./realtime.ts";
 import { installWebSocket } from "./websocket.ts";
-import { installStorage, partitionFor } from "./storage.ts";
+import { captureTopAncestor, framePartitionTop, installStorage, partitionFor } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import { createMessageSender, installMessaging } from "./messaging.ts";
+import { createSiteMessaging, type LabelLookup } from "./site-messages.ts";
 import { installPermissions } from "./permissions.ts";
 import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
-import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar } from "./toolbar.ts";
+import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar, toolbarHome } from "./toolbar.ts";
 import { installTopSiteResponder } from "./top-site.ts";
 import { createUrlContext, engineSiteOf, realOriginOf, realUrlOf, type Realm } from "./url-context.ts";
 import { createWindowGuard, installWindowLinks } from "./windows.ts";
@@ -43,7 +44,8 @@ const mapSet = WeakMap.prototype.set;
 
 /**
  * `announce` is the worker announcer of the window this one inherits from: a blank window's own client has no page
- * address for the service worker to bind its workers to. `navigating` marks a blank popup already headed elsewhere.
+ * address for the service worker to bind its workers to. `lookup`, that window's site host lookup, stands in for the
+ * same reason. `navigating` marks a blank popup already headed elsewhere.
  */
 export function install(
   win: Realm,
@@ -51,6 +53,7 @@ export function install(
   clientUrl: string,
   announce?: Announce,
   navigating = false,
+  lookup?: LabelLookup,
 ): void {
   const existing = ownDescriptor(win, "__g$");
   if (existing) {
@@ -73,10 +76,15 @@ export function install(
     (inherit) => clientTag(clientUrl, { __proto__: null, ...childConfig(), inherit } as ClientConfig),
     invoke,
   );
+  // A window keeps its host, so the first document's site context holds for every document it renews to.
+  const sites = config.sites;
+  // Takes the window's own fetch, postMessage and setTimeout, before any hook replaces them.
+  const siteMessaging = createSiteMessaging(win, ctx, invoke, sites, () => (current.inherit ? lookup : undefined));
   // Before the messaging and window hooks, whose natives it takes.
-  const guard = createWindowGuard(win, ctx, invoke, blobs.swap);
+  const guard = createWindowGuard(win, ctx, invoke, blobs.swap, siteMessaging?.post);
   const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
+  const topAncestor = captureTopAncestor(win);
   const readContainer = serviceWorkerContainer(win);
   // Chromium gives the page that reuses a blank window the container the blank document read, without a controller,
   // so a window already headed for another page waits for that page before reading it.
@@ -171,7 +179,8 @@ export function install(
       __proto__: null,
       origin: originOf(ctx.realUrl()),
       isTop: top === win,
-      topUrl: topOrigin ? parseUrl(topOrigin) : null,
+      // A top window has no ancestors, and a readable top's own origin wins.
+      topUrl: framePartitionTop(topOrigin, sites ? topAncestor() : null),
       site: current.site,
       topSite: top === win ? undefined : engineSiteOf(top),
     } as Parameters<typeof partitionFor>[0]);
@@ -192,7 +201,7 @@ export function install(
     navigationUrl: (raw) => blobs.swap(ctx.toProxy(raw)),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
-    messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper),
+    messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper, siteMessaging?.post),
     wrapWindow: guard.wrap,
     realOrigin: () => originOf(ctx.realUrl()),
     site: () => current.site,
@@ -204,7 +213,7 @@ export function install(
   const childConfig = createChildConfig(ctx, () => cookies.snapshot(), steps, config);
 
   const installSteps: Array<[string, () => void]> = [
-    ["document", () => (resetDomain = installDocument(win, ctx))],
+    ["document", () => (resetDomain = installDocument(win, ctx, sites))],
     // Early, so the window.open it wraps is still the browser's and the HTML sinks below can reach it.
     [
       "frames",
@@ -213,7 +222,7 @@ export function install(
           win,
           ctx,
           childConfig,
-          (child, next, url, navigating) => install(child, next, url, ownAnnounce, navigating),
+          (child, next, url, navigating) => install(child, next, url, ownAnnounce, navigating, siteMessaging?.lookup),
           clientUrl,
           steps,
           guard,
@@ -255,7 +264,13 @@ export function install(
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => append(listeners, installStorage(win, partition))],
     ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
-    ["messaging", () => installMessaging(win, ctx, invoke, guard)],
+    [
+      "messaging",
+      () => {
+        const screen = installMessaging(win, ctx, invoke, guard, siteMessaging?.labels);
+        if (screen) append(listeners, screen);
+      },
+    ],
     ["windows", () => installWindowLinks(win, ctx, guard)],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
@@ -291,8 +306,15 @@ export function install(
   });
   steps.add("toolbar", (next) => {
     toolbarKeys.use(null);
-    const prefs = toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null;
-    const show = { __proto__: null, isTop: toolbarNatives.isTop, inherited: next.inherit !== undefined, prefs };
+    // A site host's storage is the site's own, so its settings come from the worker instead.
+    const prefs = sites ? null : (toolbarNatives.storage?.getItem(UI_SETTINGS_KEY) ?? null);
+    const show = {
+      __proto__: null,
+      isTop: toolbarNatives.isTop,
+      inherited: next.inherit !== undefined,
+      prefs,
+      site: sites,
+    };
     if (!shouldShowToolbar(show as Parameters<typeof shouldShowToolbar>[0])) return;
     installToolbar(
       win,
@@ -304,6 +326,11 @@ export function install(
         reload: ownLocation.reload,
       } as Parameters<typeof installToolbar>[3],
       toolbarKeys,
+      {
+        __proto__: null,
+        home: toolbarHome(ctx.origin, sites),
+        engine: sites ? sites.engine : readToolbarPrefs(prefs).engine,
+      } as Parameters<typeof installToolbar>[5],
     );
   });
   steps.add("blob document", (next) => {

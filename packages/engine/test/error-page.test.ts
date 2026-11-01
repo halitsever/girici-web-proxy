@@ -21,6 +21,14 @@ describe("errorPage", () => {
   it("explains a sealed address this browser cannot open", () => {
     expect(errorPage("sealed", null)).toContain("sealed in another browser");
   });
+
+  it("links home to the root on a site host", () => {
+    expect(errorPage("connect", null, "https://proxy.test/")).toContain('href="https://proxy.test/"');
+    expect(errorPage("connect", null)).toContain('href="/"');
+    expect(errorPage("connect", null, 'https://proxy.test/"><b>')).toContain(
+      'href="https://proxy.test/&#34;&#62;&#60;b&#62;"',
+    );
+  });
 });
 
 describe("errorResponse", () => {
@@ -31,6 +39,11 @@ describe("errorResponse", () => {
     expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
     expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(await res.text()).toContain("This address cannot be opened through Girici.");
+  });
+
+  it("takes the home link it is given", async () => {
+    const res = errorResponse("connect", 502, null, "https://proxy.test/");
+    expect(await res.text()).toContain('href="https://proxy.test/"');
   });
 });
 

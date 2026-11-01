@@ -1,6 +1,7 @@
+import type { SiteDomain } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { clearSession, issueSession } from "../auth/cookie.ts";
-import { sessionAdmin } from "../auth/gate.ts";
+import { addSiteSession, sessionAdmin } from "../auth/gate.ts";
 import { generateSetupCode, setupCodeMatches } from "../auth/setup-code.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
@@ -11,6 +12,8 @@ export interface AuthRouterOptions {
   loginMax?: number;
   /** The code the server printed at startup; without one, setup takes a code nobody has. */
   setupToken?: string;
+  /** Subdomain mode: sign-in also issues the site session for every site host. */
+  siteDomain?: SiteDomain;
 }
 
 interface Credentials {
@@ -33,7 +36,9 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
 
   router.get("/_g/auth/state", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
-    res.json(state(store, isAuthed(store, req)));
+    // The UI reads this on every load, so an admin cookie from before subdomain mode gains its site session here.
+    if (options.siteDomain) addSiteSession(req, res, store, options.siteDomain);
+    res.json(state(store, isAuthed(store, req), options.siteDomain));
   });
 
   router.post("/_g/setup", json, (req, res) => {
@@ -53,8 +58,8 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       return;
     }
     const admin = store.createAdmin(creds);
-    issueSession(req, res, admin.id, store.sessionSecret());
-    res.json(state(store, true));
+    issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
+    res.json(state(store, true, options.siteDomain));
   });
 
   router.post("/_g/login", json, (req, res) => {
@@ -69,8 +74,8 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
       res.status(401).end();
       return;
     }
-    issueSession(req, res, admin.id, store.sessionSecret());
-    res.json(state(store, true));
+    issueSession(req, res, admin.id, store.sessionSecret(), options.siteDomain);
+    res.json(state(store, true, options.siteDomain));
   });
 
   const ownOrigin = (req: Request, res: Response, next: NextFunction) => {
@@ -81,7 +86,7 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
     // Revoking needs a live session, so a stray request cannot sign the admin out of every device.
     const everywhere = (req.body as { everywhere?: unknown } | undefined)?.everywhere === true;
     if (everywhere && sessionAdmin(store, req.headers.cookie)) store.revokeSessions();
-    clearSession(res);
+    clearSession(res, options.siteDomain);
     res.status(204).end();
   });
 
@@ -93,6 +98,8 @@ interface AuthState {
   authed: boolean;
   public: boolean;
   sealAddresses: boolean;
+  /** The site domain's `value` in subdomain mode, so the UI knows which mode it runs in. */
+  siteDomain: string | null;
   admin?: { username: string; name: string; email: string };
 }
 
@@ -100,13 +107,14 @@ function isAuthed(store: AuthStore, req: Request): boolean {
   return sessionAdmin(store, req.headers.cookie) !== null;
 }
 
-function state(store: AuthStore, authed: boolean): AuthState {
+function state(store: AuthStore, authed: boolean, siteDomain: SiteDomain | undefined): AuthState {
   const admin = store.admin();
   return {
     setup: admin === null,
     authed,
     public: store.publicAccess(),
     sealAddresses: store.sealAddresses(),
+    siteDomain: siteDomain?.value ?? null,
     admin: authed && admin ? { username: admin.username, name: admin.name, email: admin.email } : undefined,
   };
 }

@@ -4,6 +4,8 @@ export interface SessionPayload {
   sub: number;
   iat: number;
   exp: number;
+  /** "site" marks the session that reaches site hosts; only the admin's own token has none. */
+  aud?: "site";
 }
 
 function sign(body: string, secret: string): string {

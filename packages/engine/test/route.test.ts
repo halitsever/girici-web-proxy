@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { MasterSealer } from "../src/shared/sealed-address.ts";
+import { parseSiteDomain } from "../src/shared/site-label.ts";
 import {
+  type SiteRouting,
   classifyRequest,
   isGuardedPath,
+  isHostReservedPath,
+  isNetworkInEitherMode,
   isUiWindow,
   realUrlOf,
   requestClientUrl,
@@ -123,6 +127,39 @@ describe("reservedAccess", () => {
     expect(reservedAccess("/_g/pot", call, ui, origin, known)).toBe("deny");
     expect(reservedAccess("/_g/ws-seal", call, ui, origin, known)).toBe("deny");
   });
+
+  it("refuses admin paths to every client on a site host", () => {
+    const nav = { mode: "navigate" as RequestMode, destination: "document" as RequestDestination, method: "GET" };
+    expect(reservedAccess("/_g/admin/settings", call, ui, origin, known, true)).toBe("deny");
+    expect(reservedAccess("/_g/login", nav, undefined, origin, known, true)).toBe("deny");
+  });
+});
+
+describe("isNetworkInEitherMode", () => {
+  it("lets the site data routes of this host reach the network before the worker knows its mode", () => {
+    const own = "https://aaa.proxy.test";
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sites/clear?p=x&s=y&i=0`), own)).toBe(true);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sites/config`), own)).toBe(true);
+    expect(isNetworkInEitherMode(new URL("https://bbb.proxy.test/_g/sites/clear"), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/sitesx`), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/~/https/a.test/_g/sites/clear`), own)).toBe(false);
+    expect(isNetworkInEitherMode(new URL(`${own}/_g/admin/settings`), own)).toBe(false);
+  });
+});
+
+describe("isHostReservedPath", () => {
+  it("leaves the root and robots.txt to the page on a site host", () => {
+    expect(isHostReservedPath("/", true)).toBe(false);
+    expect(isHostReservedPath("/robots.txt", true)).toBe(false);
+    expect(isHostReservedPath("/_g/sw.js", true)).toBe(true);
+    expect(isHostReservedPath("/_g/sites/config", true)).toBe(true);
+    expect(isHostReservedPath("/~/https/a.test/", true)).toBe(false);
+  });
+
+  it("reserves what single-origin mode reserves without a site", () => {
+    for (const path of ["/", "/robots.txt", "/_g/sw.js"]) expect(isHostReservedPath(path, false)).toBe(true);
+    expect(isHostReservedPath("/~/https/a.test/", false)).toBe(false);
+  });
 });
 
 describe("isGuardedPath", () => {
@@ -144,6 +181,8 @@ describe("isGuardedPath", () => {
       "/_g/ui/app.js",
       "/_g/r/https/x.test/",
       "/_g/rpc/cookie",
+      "/_g/sites/config",
+      "/_g/sites/clear",
       "/",
       "/robots.txt",
     ];
@@ -379,5 +418,87 @@ describe("sealed addresses", () => {
     expect(realUrlOf(origin + sealed, origin, master.open)?.href).toBe(page.href);
     expect(realUrlOf(`${origin + sealed}#h`, origin, master.open)?.href).toBe(page.href);
     expect(realUrlOf(origin + sealed, origin)).toBeNull();
+  });
+});
+
+describe("site hosts", () => {
+  const own = "https://own.proxy.test";
+  const site: SiteRouting = {
+    origin: own,
+    domain: parseSiteDomain("proxy.test")!,
+    hostOf: (url) => (url.hostname.endsWith("site-a.test") ? own : "https://other.proxy.test"),
+  };
+  const nav = { origin: own, navigation: true, clientUrl: null, referrer: null, site };
+
+  it("moves a navigation for another site to that site's host", () => {
+    expect(classifyRequest({ ...nav, url: `${own}/~/https/site-b.test/x?y=1` })).toEqual({
+      kind: "move",
+      location: "https://other.proxy.test/~/https/site-b.test/x?y=1",
+    });
+  });
+
+  it("keeps subresources for another site on this host", () => {
+    expect(
+      summary(
+        classifyRequest({
+          ...nav,
+          navigation: false,
+          clientUrl: `${own}/~/https/site-a.test/`,
+          url: `${own}/~/https/site-b.test/api`,
+        }),
+      ),
+    ).toMatchObject({ kind: "proxy", target: "https://site-b.test/api" });
+  });
+
+  it("serves navigations for any origin of its own site", () => {
+    expect(summary(classifyRequest({ ...nav, url: `${own}/~/https/www.site-a.test/` }))).toMatchObject({
+      kind: "proxy",
+    });
+  });
+
+  it("asks for sign-in when it cannot place a navigation", () => {
+    const blind = { ...site, hostOf: () => null };
+    const route = classifyRequest({ ...nav, site: blind, url: `${own}/~/https/site-b.test/` });
+    expect(route).toMatchObject({ kind: "signin" });
+    expect(route.kind === "signin" && route.target.href).toBe("https://site-b.test/");
+  });
+
+  it("treats / as the page's own path on a site host", () => {
+    expect(classifyRequest({ ...nav, referrer: `${own}/~/https/site-a.test/deep/page`, url: `${own}/` })).toEqual({
+      kind: "redirect",
+      location: "/~/https/site-a.test/",
+    });
+    expect(classifyRequest({ ...nav, referrer: `${own}/~/https/site-a.test/`, url: `${own}/robots.txt` })).toEqual({
+      kind: "redirect",
+      location: "/~/https/site-a.test/robots.txt",
+    });
+  });
+
+  it("moves a root-relative navigation that lands on another site", () => {
+    expect(classifyRequest({ ...nav, referrer: `${own}/~/https/site-b.test/p`, url: `${own}/next?q=1` })).toEqual({
+      kind: "move",
+      location: "https://other.proxy.test/~/https/site-b.test/next?q=1",
+    });
+  });
+
+  it("moves a plain address before sealing it, so the site's own host seals it", () => {
+    const master = new MasterSealer(new Uint8Array(32).fill(3));
+    const sealing = { ...nav, topLevelGet: true, open: master.open, seal: (url: URL) => master.seal(url) };
+    expect(classifyRequest({ ...sealing, url: `${own}/~/https/site-b.test/x` })).toEqual({
+      kind: "move",
+      location: "https://other.proxy.test/~/https/site-b.test/x",
+    });
+    const sealed = master.seal(new URL("https://site-b.test/dir/page"));
+    expect(classifyRequest({ ...sealing, referrer: own + sealed, url: `${own}/~/x/next` })).toEqual({
+      kind: "move",
+      location: "https://other.proxy.test/~/https/site-b.test/dir/next",
+    });
+  });
+
+  it("keeps today's routes without a site", () => {
+    expect(classifyRequest({ ...nav, site: undefined, url: `${own}/~/https/site-b.test/x` })).toMatchObject({
+      kind: "proxy",
+    });
+    expect(classifyRequest({ ...nav, site: undefined, url: `${own}/` })).toEqual({ kind: "passthrough" });
   });
 });

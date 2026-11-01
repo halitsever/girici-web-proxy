@@ -43,6 +43,35 @@ export function partitionFor(input: {
   return firstParty ? prefixFor(origin) : prefixFor(origin, topUrl ? originOf(topUrl) : "null");
 }
 
+/**
+ * The top a frame's partition is keyed by. A top on another site host cannot be read, so in subdomain mode the
+ * browser's `ancestorOrigins` names its host instead; Firefox has none, and the top stays unknown there.
+ */
+export function framePartitionTop(topOrigin: string | null, topAncestor: string | null): URL | null {
+  return parseUrl(topOrigin ?? topAncestor ?? "");
+}
+
+/**
+ * The last of `ancestorOrigins`, the top's origin. The getters are taken at install, before page code can replace the
+ * list's `length`; entries are the list's own indexed values.
+ */
+export function captureTopAncestor(win: Realm): () => string | null {
+  const location = win.location;
+  const get = describe(location, "ancestorOrigins")?.get;
+  const lists = (win as unknown as { DOMStringList?: { prototype: object } }).DOMStringList;
+  const lengthOf = lists ? describe(lists.prototype, "length")?.get : undefined;
+  return () => {
+    if (!get || !lengthOf) return null;
+    try {
+      const list = apply(get, location, []) as Record<number, unknown>;
+      const length = apply(lengthOf, list, []) as number;
+      return length ? toText(list[length - 1]) : null;
+    } catch {
+      return null;
+    }
+  };
+}
+
 export interface StorageMethods {
   length: (this: Storage) => number;
   key: Storage["key"];

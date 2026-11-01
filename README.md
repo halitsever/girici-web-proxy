@@ -109,6 +109,7 @@ Girici reads environment variables and stops at startup with the variable's name
 | `GIRICI_RATE_LIMIT` | `3000` | Relay requests per visitor per minute. `0` turns it off. |
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, with their subdomains. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all outgoing traffic through an `http://`, `https://`, `socks5://` or `socks5h://` proxy. |
+| `GIRICI_SITE_DOMAIN` | unset | Run each proxied site on its own host under this domain ([subdomain mode](https://halitsever.github.io/girici-web-proxy/guide/subdomain-mode)). |
 | `SOURCE_URL` | this repository | The source code link in the UI. Point it at your fork if you change the code. |
 
 The full list is in [Configuration](https://halitsever.github.io/girici-web-proxy/guide/configuration).
@@ -117,8 +118,10 @@ The full list is in [Configuration](https://halitsever.github.io/girici-web-prox
 
 - **The operator sees everything.** TLS to the real site ends at the Girici server, which can read all proxied
   traffic, passwords included. Only use instances you trust.
-- **All sites share one origin.** Girici keeps sites apart in JavaScript, which has known gaps; a hostile site may
-  reach data other sites left in the same browser. Per-site subdomain isolation is planned.
+- **By default, all sites share one origin.** Girici keeps sites apart in JavaScript, which has known gaps; a hostile
+  site may reach data other sites left in the same browser.
+  [Subdomain mode](https://halitsever.github.io/girici-web-proxy/guide/subdomain-mode) gives each site its own host,
+  so the browser keeps them apart. It needs wildcard DNS and a wildcard certificate.
 - **Sites can still refuse you.** Many sites block or challenge datacenter IPs, whatever the proxy does. YouTube
   playback is partial. Voice and video calls do not work, because WebRTC is turned off.
 

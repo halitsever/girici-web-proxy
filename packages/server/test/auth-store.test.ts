@@ -103,6 +103,29 @@ describe("AuthStore sessions", () => {
     expect(s.verifyLogin("halit", "another-pw-1")).not.toBeNull();
   });
 
+  it("keeps the site secret across password changes and lets the environment fix it", () => {
+    const db = openDb(":memory:");
+    const s = new AuthStore(db);
+    const info = s.createAdmin(admin);
+    const first = s.siteSecret();
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    s.changePassword(info.id, "pw-654321");
+    s.rotateSessionSecret();
+    expect(s.siteSecret()).toBe(first);
+    expect(new AuthStore(db).siteSecret()).toBe(first);
+    const fixed = new AuthStore(openDb(":memory:"), undefined, { siteSecret: "e".repeat(32) });
+    expect(fixed.siteSecret()).toBe("e".repeat(32));
+  });
+
+  it("tells when the environment's site secret differs from the one the database kept", () => {
+    const db = openDb(":memory:");
+    expect(new AuthStore(db, undefined, { siteSecret: "e".repeat(32) }).siteSecretDiffers()).toBe(false);
+    const stored = new AuthStore(db).siteSecret();
+    expect(new AuthStore(db).siteSecretDiffers()).toBe(false);
+    expect(new AuthStore(db, undefined, { siteSecret: stored }).siteSecretDiffers()).toBe(false);
+    expect(new AuthStore(db, undefined, { siteSecret: "e".repeat(32) }).siteSecretDiffers()).toBe(true);
+  });
+
   it("checks an admin's current password", () => {
     const s = store();
     const info = s.createAdmin(admin);

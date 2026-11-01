@@ -2,8 +2,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
-import { authGate, isAdminCookie, sessionAdmin } from "../src/auth/gate.ts";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { authGate, isAdminCookie, isSessionCookie, sessionAdmin, siteSessionAdmin } from "../src/auth/gate.ts";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 
@@ -48,6 +48,17 @@ describe("authGate", () => {
     expect(res.status).toBe(401);
   });
 
+  it("lets a site session through the gate until sessions are revoked", async () => {
+    const store = freshStore();
+    const cookie = `girici-site=${createSiteSessionToken(store.admin()!.id, store.sessionSecret())}`;
+    const url = await listen(store);
+    expect((await fetch(url, { headers: { cookie } })).status).toBe(200);
+    store.revokeSessions(Date.now() + 1);
+    const res = await fetch(url, { headers: { cookie } });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("x-girici-error")).toBe("auth");
+  });
+
   it("passes any request when public access is on", async () => {
     const store = freshStore();
     store.setPublicAccess(true);
@@ -74,5 +85,29 @@ describe("sessionAdmin", () => {
     const admin = store.admin()!;
     const old = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret(), Date.now() - 86_400_000)}`;
     expect(sessionAdmin(store, old)?.id).toBe(admin.id);
+  });
+
+  it("never takes a site session for the admin", () => {
+    const store = freshStore();
+    const admin = store.admin()!;
+    const site = createSiteSessionToken(admin.id, store.sessionSecret());
+    expect(sessionAdmin(store, `__Host-girici=${site}`)).toBeNull();
+    expect(sessionAdmin(store, `girici-site=${site}`)).toBeNull();
+    expect(siteSessionAdmin(store, `girici-site=${site}`)?.id).toBe(admin.id);
+    expect(siteSessionAdmin(store, `girici-site=${createSessionToken(admin.id, store.sessionSecret())}`)).toBeNull();
+    expect(isSessionCookie(store, `__Secure-girici-site=${site}`)).toBe(true);
+    expect(isSessionCookie(store, `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`)).toBe(
+      true,
+    );
+    expect(isSessionCookie(store, "girici-site=junk")).toBe(false);
+  });
+
+  it("refuses a site session issued before the last revocation", () => {
+    const store = freshStore();
+    const admin = store.admin()!;
+    const now = Date.now();
+    const site = `girici-site=${createSiteSessionToken(admin.id, store.sessionSecret(), now - 10_000)}`;
+    store.revokeSessions(now - 5_000);
+    expect(siteSessionAdmin(store, site)).toBeNull();
   });
 });

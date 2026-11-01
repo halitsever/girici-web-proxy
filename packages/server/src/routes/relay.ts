@@ -19,6 +19,8 @@ export interface RelayOptions {
   maxRequestBody: number;
   logger: Logger;
   blocklist?: HostBlocklist;
+  /** Subdomain mode's domain without port, which the relay never opens. */
+  siteDomain?: string;
 }
 
 const TUNNELED_METHOD = /^[A-Z]+$/;
@@ -69,7 +71,11 @@ async function relay(
 
   try {
     if (options.blocklist?.isBlocked(target.hostname)) throw new RelayRequestError("blocked", 403);
-    validateTarget(target, { allowedTestHosts: options.allowedTestHosts, selfHost: req.get("host") });
+    validateTarget(target, {
+      allowedTestHosts: options.allowedTestHosts,
+      selfHost: req.get("host"),
+      siteDomain: options.siteDomain,
+    });
     const method = upstreamMethod(req);
     if (Number(req.get("content-length") ?? 0) > options.maxRequestBody) throw new RelayRequestError("too_large", 413);
     const body = method === "GET" || method === "HEAD" ? undefined : req.pipe(new ByteLimit(options.maxRequestBody));

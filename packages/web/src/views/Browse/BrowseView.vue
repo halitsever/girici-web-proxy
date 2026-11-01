@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ArrowRight, Clock, Search } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
+import { getAuthState } from "@/lib/auth";
 import { openProxied, serviceWorkerSupport, startEngine } from "@/lib/proxy";
 import { loadHistory, rememberVisit, relativeTime, type HistoryEntry } from "@/lib/history";
 import { loadSettings } from "@/lib/settings";
+import { isSiteMode } from "@/lib/sites";
 import { classifyInput, toProxyPath } from "@/lib/target";
 import { getRandomTagline } from "@/data/taglines";
 
@@ -32,6 +34,8 @@ const query = ref("");
 const selectedIndex = ref(0);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
+// Null until the sign-in state is read, so the single-origin note does not flash in subdomain mode.
+const siteMode = ref<boolean | null>(null);
 
 const resolution = computed(() => classifyInput(query.value, settings.value.engine));
 
@@ -133,7 +137,8 @@ async function openRow(row: Row | undefined) {
   success.value = `Opening ${name}${settings.value.newTab ? " in a new tab" : ""}…`;
   try {
     if (settings.value.newTab) {
-      await startEngine();
+      // In subdomain mode the root sends the new tab on to the site's host, whose own worker starts there.
+      if (!isSiteMode(await getAuthState().catch(() => null))) await startEngine();
       window.open(row.path, "_blank", "noopener");
     } else {
       await openProxied(row.path);
@@ -160,9 +165,10 @@ function onEscape() {
   success.value = null;
 }
 
-onMounted(() => {
+onMounted(async () => {
   settings.value = loadSettings();
   history.value = loadHistory();
+  siteMode.value = isSiteMode(await getAuthState().catch(() => null));
 });
 </script>
 
@@ -265,7 +271,7 @@ onMounted(() => {
         <span class="text-gi-subtle">↑↓ navigate · ↵ open · esc clear</span>
       </div>
     </form>
-    <p class="mt-4 max-w-[620px] text-center text-[12px] text-gi-subtle">
+    <p v-if="siteMode === false" class="mt-4 max-w-[620px] text-center text-[12px] text-gi-subtle">
       Every site you open through Girici shares one browser origin. Don't sign in to important accounts while using
       sites you don't trust.
     </p>

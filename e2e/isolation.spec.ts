@@ -1,4 +1,4 @@
-import { expect, openThroughUi, test } from "./support/test.ts";
+import { expect, isSiteProject, openThroughUi, test } from "./support/test.ts";
 
 test("installs the runtime into blank and srcdoc frames", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/frames");
@@ -35,6 +35,10 @@ test("names the real sender and origin of cross-site messages", async ({ page })
 });
 
 test("renews a frame window the page touched before setting its src", async ({ page }) => {
+  test.skip(
+    isSiteProject(test.info()),
+    "Another site's frame loads on its own host, where the browser gives it a new window as for any cross-origin frame",
+  );
   await openThroughUi(page, "https://site-a.test/reuse");
   await expect(page.locator("#results")).not.toBeEmpty();
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({

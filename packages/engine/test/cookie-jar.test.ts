@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   COOKIE_LIMITS,
   CookieService,
@@ -152,6 +152,31 @@ describe("CookieService", () => {
     expect(await jar.clearSite("a.test")).toBe(2);
     expect(await jar.siteCookieCounts()).toEqual(new Map([["b.test", 1]]));
     expect(changes.flat().map((cookie) => [cookie.name, cookie.expires])).toEqual([["x", 0]]);
+  });
+
+  it("tells when the cookies stored so far have reached the store", async () => {
+    vi.useFakeTimers();
+    try {
+      const { store, records } = memoryStore();
+      const jar = new CookieService(store, { flushDelay: 50 });
+      await jar.ready();
+      await jar.saved();
+      await jar.store(new URL("https://a.test/"), ["x=1"], nav());
+      let saved = false;
+      void jar.saved().then(() => (saved = true));
+      await vi.advanceTimersByTimeAsync(49);
+      expect([saved, records.size]).toEqual([false, 0]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect([saved, records.size]).toEqual([true, 1]);
+
+      await jar.store(new URL("https://a.test/"), ["y=1"], nav());
+      const early = jar.saved();
+      await jar.flush();
+      await early;
+      expect(records.size).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("persists a full clear", async () => {
