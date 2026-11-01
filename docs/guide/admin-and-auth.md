@@ -63,6 +63,9 @@ The browser remembers the notice in the service worker's own storage. Clearing s
 bring it back; wiping the browser's data for Girici does. A `#fragment` at the end of a shared link may be lost
 after **Continue**, depending on the browser.
 
+In [subdomain mode](./subdomain-mode.md) each site's host has its own service worker, which remembers the notice for
+that site only. A visitor then sees it once for each site, sites opened from Girici's home page included.
+
 ## Resetting the admin password
 
 If you are locked out, reset the password from the command line. It generates a fresh random password,

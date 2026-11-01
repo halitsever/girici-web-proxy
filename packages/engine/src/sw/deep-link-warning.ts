@@ -54,10 +54,11 @@ export class DeepLinkWarning {
     return this.#instance.deepLinkWarning();
   }
 
-  async page(to: string, target: URL): Promise<Response> {
+  /** `home` is the root's address on a site host, where `/` belongs to the page's own site. */
+  async page(to: string, target: URL, home = "/"): Promise<Response> {
     const signature = await crypto.subtle.sign("HMAC", await this.#cryptoKey(), utf8(to));
     const t = toBase64Url(new Uint8Array(signature));
-    return new Response(warningPage(to, t, target), {
+    return new Response(warningPage(to, t, target, home), {
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
@@ -126,7 +127,7 @@ function utf8(text: string): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(text);
 }
 
-function warningPage(to: string, t: string, target: URL): string {
+function warningPage(to: string, t: string, target: URL, home: string): string {
   const host = escapeHtml(target.host);
   return `<!doctype html>
 <html lang="en">
@@ -150,7 +151,7 @@ function warningPage(to: string, t: string, target: URL): string {
       <input type="hidden" name="t" value="${escapeHtml(t)}" />
       <button type="submit">Continue to ${host}</button>
     </form>
-    <p><a href="/">Go to Girici&#39;s home page</a></p>
+    <p><a href="${escapeHtml(home)}">Go to Girici&#39;s home page</a></p>
   </body>
 </html>
 `;

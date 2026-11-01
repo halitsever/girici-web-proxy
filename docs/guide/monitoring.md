@@ -72,6 +72,10 @@ scrape_configs:
 
 `credentials_file` reads the token from a file instead. With several replicas, scrape each one: they count apart.
 
+In [subdomain mode](./subdomain-mode.md), `/metrics` and the Status section's data answer only on the root host, so
+the scrape must reach Girici under that name (`proxy.example` above). An internal name such as `girici:3000` gets
+`404`.
+
 Proxied pages cannot reach `/metrics`. A page's own `/metrics` links, once Girici rewrites them, go to the site the
 page came from, and one that escaped rewriting gets `403` from the service worker. The endpoint shares the proxy's
 port, so you can also keep it off the internet with a rule in your reverse proxy.

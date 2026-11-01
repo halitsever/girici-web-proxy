@@ -18,6 +18,7 @@ const answer: SiteConfigAnswer = {
   key: toBase64Url(new Uint8Array(32).fill(7)),
   prefs: DEFAULT_SITE_PREFS,
   instanceSeal: false,
+  deepLinkWarning: true,
 };
 
 function memoryStore(initial?: unknown): SiteStore & { value: unknown } {
@@ -98,10 +99,13 @@ describe("SiteModeService", () => {
   it("hands each fresh config to the engine's settings", async () => {
     const applied: SiteState[] = [];
     const prefs = { ...DEFAULT_SITE_PREFS, blockThirdPartyCookies: false, sealAddresses: true };
-    const service = make({ respond: () => Response.json({ ...answer, prefs, instanceSeal: true }), applied });
+    const service = make({
+      respond: () => Response.json({ ...answer, prefs, instanceSeal: true, deepLinkWarning: false }),
+      applied,
+    });
     await service.ready();
     expect(applied).toHaveLength(1);
-    expect(applied[0]).toMatchObject({ prefs, instanceSeal: true, root: "https://proxy.test" });
+    expect(applied[0]).toMatchObject({ prefs, instanceSeal: true, deepLinkWarning: false, root: "https://proxy.test" });
   });
 
   it("keeps the stored config when a refresh fails, and fails an install that has none", async () => {

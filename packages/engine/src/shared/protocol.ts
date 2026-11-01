@@ -96,6 +96,8 @@ export interface SiteConfigAnswer {
   key: string | null;
   prefs: SitePrefs;
   instanceSeal: boolean;
+  /** The shared-link warning switch; false on a private instance, which lets no visitor in. */
+  deepLinkWarning: boolean;
 }
 
 /** `POST` body on `SITES_CONFIG_PATH`, as JSON: the worker names the site it serves so the root can list it. */

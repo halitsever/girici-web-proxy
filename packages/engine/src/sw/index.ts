@@ -84,7 +84,15 @@ const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
 const sealing = new Sealing(createIdbKeyStore(), prefs);
 const instance = new InstanceState(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" }), prefs);
-const warning = new DeepLinkWarning({ prefs, instance, keys: createIdbKeyStore("warning") });
+const warning = new DeepLinkWarning({
+  prefs,
+  // Only the root answers /_g/auth/state, so a site host hears the switch with its config.
+  instance: {
+    deepLinkWarning: async () =>
+      siteMode.settled() === "site" ? (siteMode.state()?.deepLinkWarning ?? true) : instance.deepLinkWarning(),
+  },
+  keys: createIdbKeyStore("warning"),
+});
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
@@ -322,7 +330,8 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
       // Checked before any relay request, so a shared link's first load shows the warning and nothing else.
       if (navigation && request.destination === "document" && (await warning.needed())) {
         const { pathname, search, hash } = new URL(request.url);
-        return warning.page(pathname + search + hash, route.target);
+        const root = site ? siteMode.state()?.root : undefined;
+        return warning.page(pathname + search + hash, route.target, root === undefined ? undefined : `${root}/`);
       }
       // A navigation that arrives from another site host is cross-site, not a direct one.
       const initiator =

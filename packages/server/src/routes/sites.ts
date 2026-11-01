@@ -150,6 +150,7 @@ export function siteHostRouter(setup: SiteSetup, store: AuthStore): Router {
       key: browse ? Buffer.from(keys.label).toString("base64url") : null,
       prefs: { ...readPrefsCookie(req.headers.cookie, keys) },
       instanceSeal: store.sealAddresses(),
+      deepLinkWarning: store.publicAccess() && store.deepLinkWarning(),
     };
   };
   const answer = (res: Response, body: SiteConfigAnswer) => {

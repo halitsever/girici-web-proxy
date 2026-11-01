@@ -171,6 +171,11 @@ back to the site afterwards.
   jar and caches for each site that embeds it, and each copy pays the first-visit download.
 - **Settings reach open sites on their next load.** The UI sends its settings to the server, which keeps them in a
   signed cookie that every site host reads. A site that is already open picks up a change on its next page load.
+- **The shared-link warning shows once per site.** Each site host remembers it on its own, so with
+  [the warning](./admin-and-auth.md#shared-link-warning) on, a visitor sees it the first time they open each site,
+  from a link or from the UI.
+- **The browser check runs on the root.** A site host sends a visitor who needs
+  [the check](./admin-and-auth.md#browser-check) to `proxy.example`, whose pass works on every site host.
 - **Clearing data walks through each site.** **Settings → Site data** lists the sites opened in this browser. Clearing
   one or all of them takes the tab through each site's host in turn, where a `Clear-Site-Data` response empties it,
   and then back to Settings. The list keeps the most recent sites that fit in about 3 KB; a site that falls off it

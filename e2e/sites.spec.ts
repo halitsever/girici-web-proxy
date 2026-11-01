@@ -1,5 +1,6 @@
 import { request } from "node:http";
-import { expect, openThroughUi, siteHost, SITES, test } from "./support/test.ts";
+import type { Page } from "@playwright/test";
+import { expect, openThroughUi, signIn, siteHost, SITES, test } from "./support/test.ts";
 
 const SITE_A = siteHost("https://site-a.test/");
 const SITE_B = siteHost("https://site-b.test/");
@@ -151,6 +152,62 @@ test("settings reach an open site on its next load", async ({ page, context }) =
   await page.reload();
   await expect(page.locator("#keys")).toBeVisible();
   await expect(page.locator("girici-bar")).toHaveCount(0);
+});
+
+// Sign-in allows five attempts a minute per address, so the open-instance checks share one sign-in.
+test("the shared-link warning and the browser check reach site hosts", async ({ page, browser }) => {
+  await signIn(page, SITES);
+  const set = async (data: Record<string, boolean>) => {
+    const res = await page.request.post(`${SITES}/_g/admin/settings`, {
+      data: { ...data, currentPassword: "e2e-password" },
+      headers: { origin: SITES },
+    });
+    expect(res.ok()).toBe(true);
+  };
+  const visit = async (check: (visitor: Page) => Promise<void>) => {
+    const context = await browser.newContext();
+    try {
+      await check(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  };
+  try {
+    await set({ deepLinkWarning: true });
+    await visit(async (visitor) => {
+      await visitor.goto(`${SITE_A}/~/https/site-a.test/`);
+      await expect(visitor.getByRole("heading", { name: "This page opens through Girici" })).toBeVisible();
+      await expect(visitor.getByRole("link", { name: "Go to Girici's home page" })).toHaveAttribute(
+        "href",
+        `${SITES}/`,
+      );
+      await visitor.getByRole("button", { name: "Continue to site-a.test" }).click();
+      await expect(visitor.locator("#title")).toHaveText("Site A");
+    });
+
+    await set({ deepLinkWarning: false });
+    await set({ proofOfWork: true });
+    await visit(async (visitor) => {
+      const loads: string[] = [];
+      visitor.on("framenavigated", (frame) => {
+        if (frame === visitor.mainFrame()) loads.push(frame.url());
+      });
+      await visitor.goto(`${SITE_A}/~/https/site-a.test/`);
+      // The check runs on the root, and its cookie must then reach the site host's relay.
+      await expect(visitor.locator("#title")).toHaveText("Site A", { timeout: 20_000 });
+      expect(loads.some((url) => url.startsWith(`${SITES}/_g/challenge?next=`))).toBe(true);
+    });
+    // The admin carries only the site session there, and is never checked.
+    const adminLoads: string[] = [];
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) adminLoads.push(frame.url());
+    });
+    await page.goto(`${SITE_B}/~/https/site-b.test/`);
+    await expect(page.locator("h1")).toHaveText("Site B");
+    expect(adminLoads.filter((url) => url.includes("/_g/challenge"))).toEqual([]);
+  } finally {
+    await set({ deepLinkWarning: false, proofOfWork: false });
+  }
 });
 
 test("clear all empties every visited host", async ({ page }) => {

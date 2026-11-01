@@ -46,6 +46,8 @@ describe("site config", () => {
       key: null,
       prefs: DEFAULT_SITE_PREFS,
       instanceSeal: false,
+      // A private instance lets no visitor in, so it never warns.
+      deepLinkWarning: false,
     });
     const siteToken = createSiteSessionToken(store.admin()!.id, store.sessionSecret());
     const signedIn = await send("/_g/sites/config", { host: siteA, headers: { cookie: `girici-site=${siteToken}` } });
@@ -60,6 +62,15 @@ describe("site config", () => {
     };
     expect(body.key).toBe(Buffer.from(setup.keys.label).toString("base64url"));
     expect(body.instanceSeal).toBe(true);
+  });
+
+  it("tells site hosts the shared-link warning switch, which only the root's sign-in state names otherwise", async () => {
+    const warning = async () =>
+      ((await (await send("/_g/sites/config", { host: siteA })).json()) as { deepLinkWarning: unknown })
+        .deepLinkWarning;
+    expect(await warning()).toBe(true);
+    store.setDeepLinkWarning(false);
+    expect(await warning()).toBe(false);
   });
 
   it("reads the settings the root wrote", async () => {

@@ -37,10 +37,12 @@ export function readSiteConfigAnswer(value: unknown): SiteConfigAnswer | null {
   const label = ownValue(value, "label");
   const key = ownValue(value, "key");
   const instanceSeal = ownValue(value, "instanceSeal");
+  const deepLinkWarning = ownValue(value, "deepLinkWarning");
   if (ownValue(value, "v") !== 1 || typeof domain !== "string" || typeof label !== "string") return null;
   if (parseSiteDomain(domain)?.value !== domain || !isSiteLabel(label) || typeof instanceSeal !== "boolean") {
     return null;
   }
+  if (typeof deepLinkWarning !== "boolean") return null;
   if (key !== null && !isLabelKey(key)) return null;
   return {
     __proto__: null,
@@ -50,6 +52,7 @@ export function readSiteConfigAnswer(value: unknown): SiteConfigAnswer | null {
     key,
     prefs: readSitePrefs(ownValue(value, "prefs")),
     instanceSeal,
+    deepLinkWarning,
   } as SiteConfigAnswer;
 }
 

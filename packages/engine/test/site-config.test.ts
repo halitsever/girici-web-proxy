@@ -11,6 +11,7 @@ const answer: SiteConfigAnswer = {
   key: toBase64Url(new Uint8Array(32).fill(7)),
   prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" },
   instanceSeal: true,
+  deepLinkWarning: false,
 };
 
 const envelope = { [MESSAGE_ENVELOPE]: 1, o: "a", s: "b", t: "*", d: 1 };
@@ -44,6 +45,8 @@ describe("site config readers", () => {
       { ...answer, domain: "localhost" },
       { ...answer, domain: "Proxy.test" },
       { ...answer, instanceSeal: "yes" },
+      { ...answer, deepLinkWarning: undefined },
+      { ...answer, deepLinkWarning: 1 },
       null,
       "answer",
     ]) {
