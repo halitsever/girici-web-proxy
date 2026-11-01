@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { hookWorkers, type WorkerGlobals } from "../src/client/worker-bootstrap.ts";
-import { workerBootstrapCode } from "../src/shared/worker-boot.ts";
+import { SHARED_PATH_LIMIT, workerBootstrapCode } from "../src/shared/worker-boot.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const boot = {
@@ -235,6 +235,15 @@ describe("hookWorkers for shared workers", () => {
     new realm.globals.SharedWorker!("blob:http://proxy.test/inner");
     expect(realm.started[0]![0]).toBe("blob:http://proxy.test/1");
     expect(realm.blobs[0]!.text).toContain('"blob:http://proxy.test/inner"');
+    expect(JSON.parse(realm.announced[0]!)).not.toHaveProperty("w");
+  });
+
+  it("keeps a shared worker on its own bootstrap blob when its address would be too long to announce", () => {
+    const realm = sharedRealm(SITE_A);
+    const name = "/" + "a".repeat(SHARED_PATH_LIMIT) + ".js";
+    new realm.globals.SharedWorker!(name);
+    expect(realm.started[0]![0]).toBe("blob:http://proxy.test/1");
+    expect(realm.blobs[0]!.text).toContain(`http://proxy.test/~/https/site-a.test${name}`);
     expect(JSON.parse(realm.announced[0]!)).not.toHaveProperty("w");
   });
 

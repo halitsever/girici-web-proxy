@@ -28,6 +28,9 @@ export function workerBootstrapCode(boot: WorkerBoot): string {
     : `${globals}importScripts(${runtime},${script});`;
 }
 
+/** The longest shared address a page announces; a longer one starts its worker from a blob of its own. */
+export const SHARED_PATH_LIMIT = 4096;
+
 /** Built the same in every tab, so tabs of one site name one address and the browser joins them to one worker. */
 export function sharedWorkerPath(scriptUrl: string, partition: string, module: boolean): string {
   return `${SHARED_WORKER_PATH}?s=${encode(scriptUrl)}&p=${encode(partition)}&t=${module ? "module" : "classic"}`;

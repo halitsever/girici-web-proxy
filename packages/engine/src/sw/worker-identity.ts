@@ -1,9 +1,9 @@
 import { PROTOCOL_VERSION, SHARED_WORKER_PATH, WORKER_NONCE_PARAM } from "../shared/protocol.ts";
+import { SHARED_PATH_LIMIT } from "../shared/worker-boot.ts";
 import type { ClientRecordStore } from "./client-records.ts";
 
 const STORE = "workers";
 const NONCE = /^[A-Za-z0-9_-]{22,64}$/;
-const MAX_SHARED_PATH = 4096;
 
 /** The page that started a worker: its real URL and the schemeful site of its top-level page. */
 export interface WorkerIdentity {
@@ -34,8 +34,9 @@ export function readNonce(url: URL): string | null {
 export function readAnnouncement(body: unknown): { nonce: string; shared: string | null } | null {
   const { v, n, w } = (body ?? {}) as { v?: unknown; n?: unknown; w?: unknown };
   if (v !== PROTOCOL_VERSION || typeof n !== "string" || !NONCE.test(n)) return null;
+  if (typeof w === "string" && w.length > SHARED_PATH_LIMIT) return { nonce: n, shared: null };
   if (w === undefined) return { nonce: n, shared: null };
-  if (typeof w !== "string" || w.length > MAX_SHARED_PATH || !w.startsWith(`${SHARED_WORKER_PATH}?`)) return null;
+  if (typeof w !== "string" || !w.startsWith(`${SHARED_WORKER_PATH}?`)) return null;
   const address = new URL(w, "https://shared.invalid");
   return { nonce: n, shared: address.pathname + address.search };
 }

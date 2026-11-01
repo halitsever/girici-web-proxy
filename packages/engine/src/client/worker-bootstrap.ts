@@ -1,6 +1,6 @@
 import { joined, startsWith } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, WORKER_RPC_PATH } from "../shared/protocol.ts";
-import { quote, sharedWorkerPath, workerBootstrapCode } from "../shared/worker-boot.ts";
+import { quote, SHARED_PATH_LIMIT, sharedWorkerPath, workerBootstrapCode } from "../shared/worker-boot.ts";
 import { hookConstructor } from "./constructors.ts";
 
 export { workerBootstrapCode, type WorkerBoot } from "../shared/worker-boot.ts";
@@ -76,8 +76,9 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
     const blob = isBlob(raw);
     const source = blob ? { scriptUrl: raw, base: start.blobBase() } : start.resolve(raw);
     const module = (options as { type?: unknown } | null | undefined)?.type === "module";
-    if (shared && !blob && startsWith(source.scriptUrl, start.origin + "/")) {
-      const path = sharedWorkerPath(source.scriptUrl, start.partition(), module);
+    const path = shared && !blob ? sharedWorkerPath(source.scriptUrl, start.partition(), module) : "";
+    // An address too long to announce gets a blob of its own, as a worker that is not proxied does.
+    if (path !== "" && path.length <= SHARED_PATH_LIMIT && startsWith(source.scriptUrl, start.origin + "/")) {
       announce(start.fetch, path);
       return start.origin + path;
     }

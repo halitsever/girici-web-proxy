@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecordStore } from "../src/sw/client-records.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
+import { SHARED_PATH_LIMIT } from "../src/shared/worker-boot.ts";
 import { answerAnnouncement, readAnnouncement, readNonce, WorkerRegistry } from "../src/sw/worker-identity.ts";
 
 function memoryRecords(): ClientRecordStore & { stores: Record<"ui" | "workers", Map<string, unknown>> } {
@@ -229,8 +230,13 @@ describe("readAnnouncement", () => {
     const longest = prefix + "a".repeat(4096 - prefix.length);
     expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: SHARED })).toEqual({ nonce, shared: SHARED });
     expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: longest })?.shared).toBe(longest);
-    for (const w of ["/_g/admin/x", 1, null, `${longest}a`, "/_g/rpc/shared-worker", "/_g/rpc/shared-workers?s=x"])
+    for (const w of ["/_g/admin/x", 1, null, "/_g/rpc/shared-worker", "/_g/rpc/shared-workers?s=x"])
       expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w }), String(w)).toBeNull();
+  });
+
+  it("keeps the nonce of an announcement whose shared address is too long, as a worker of its own", () => {
+    const tooLong = "/_g/rpc/shared-worker?" + "a".repeat(SHARED_PATH_LIMIT);
+    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: tooLong })).toEqual({ nonce, shared: null });
   });
 
   it("keys a shared start by the address as the browser requests it", () => {
