@@ -27,6 +27,14 @@ interface ScriptRecord {
   kind: ScriptKind;
 }
 
+/** Stands in when the hooks could not be installed, so the sinks treat every target as markup. */
+export const NO_SCRIPT_TEXT: ScriptText = Object.freeze({
+  isScript: () => false,
+  write: (_target: unknown, text: string) => text,
+  read: (_target: unknown, text: string) => text,
+  check: () => {},
+});
+
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const ELEMENT_NODE = 1;
