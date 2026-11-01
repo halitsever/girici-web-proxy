@@ -47,6 +47,12 @@ export default defineConfig({
     },
     { name: "chromium-sites", ...siteMode, use: { ...devices["Desktop Chrome"], baseURL: SITES } },
     { name: "firefox-sites", ...siteMode, use: { ...devices["Desktop Firefox"], baseURL: SITES } },
-    { name: "webkit-sites", ...siteMode, use: { ...devices["Desktop Safari"], baseURL: SITES } },
+    {
+      name: "webkit-sites",
+      ...siteMode,
+      use: { ...devices["Desktop Safari"], baseURL: SITES },
+      /** WebKit bug 327297, as in the `webkit` project. */
+      retries: process.env.CI ? 1 : 0,
+    },
   ],
 });
