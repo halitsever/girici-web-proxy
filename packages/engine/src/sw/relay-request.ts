@@ -2,6 +2,7 @@ import { relayPathFor } from "../shared/codec.ts";
 import { encodeHeaderList, encodeHeaderValue, HEADER } from "../shared/protocol.ts";
 import { refererFor } from "../shared/referrer.ts";
 import { secFetchSite } from "./fetch-meta.ts";
+import { isCrossSite } from "./initiator.ts";
 
 export interface RelayContext {
   target: URL;
@@ -30,7 +31,9 @@ export async function buildRelayRequest(
   });
   if (envelope.length > 0) headers.set(HEADER.headers, encodeHeaderList(envelope));
 
-  const site = secFetchSite(ctx.clientUrl, ctx.target);
+  // An initiator known only as another site is what a browser sends under no-referrer: no Referer, Origin null.
+  const crossSite = isCrossSite(ctx.clientUrl);
+  const site = crossSite ? "cross-site" : secFetchSite(ctx.clientUrl, ctx.target);
   const fetchMeta = ctx.isNavigation
     ? `document;navigate;${site};?1`
     : `${request.destination || "empty"};${request.mode};${site};`;
@@ -39,8 +42,8 @@ export async function buildRelayRequest(
   // Browsers send Origin on unsafe methods and on cross-origin CORS requests, not on same-origin reads.
   const crossOriginCors = request.mode === "cors" && ctx.clientUrl?.origin !== ctx.target.origin;
   if (ctx.clientUrl && (tunneled || crossOriginCors))
-    headers.set(HEADER.origin, encodeHeaderValue(ctx.clientUrl.origin));
-  const referer = refererFor(ctx.clientUrl, ctx.target, request.referrerPolicy);
+    headers.set(HEADER.origin, encodeHeaderValue(crossSite ? "null" : ctx.clientUrl.origin));
+  const referer = crossSite ? null : refererFor(ctx.clientUrl, ctx.target, request.referrerPolicy);
   if (referer) headers.set(HEADER.referer, encodeHeaderValue(referer));
 
   const init: RequestInit = {

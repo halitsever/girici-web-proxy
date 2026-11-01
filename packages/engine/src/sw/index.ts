@@ -2,6 +2,7 @@ import {
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
+  LABEL_RPC_PATH,
   LOGIN_PATH,
   POT_PATH,
   PROTOCOL_VERSION,
@@ -23,6 +24,8 @@ import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts"
 import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
 import { labelSiteOf } from "../shared/label-site.ts";
+import { navigationInitiator } from "./initiator.ts";
+import { handleLabelRpc } from "./label-rpc.ts";
 import { resubmitResponse } from "./resubmit.ts";
 import {
   classifyRequest,
@@ -236,7 +239,10 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
   if (own && url.pathname === WORKER_RPC_PATH && post) return handleWorkerRpc(event);
   if (own && url.pathname === COOKIE_RPC_PATH && post) return handleCookieRpc(event);
   if (own && url.pathname === WS_PREP_PATH && post) return handleWsPrep(event);
-  if (own && url.pathname === SITE_DATA_RPC_PATH && post) return handleSiteDataRpc(event);
+  if (own && url.pathname === SITE_DATA_RPC_PATH && post) return handleSiteDataRpc(event, site);
+  if (site && own && url.pathname === LABEL_RPC_PATH && post) {
+    return handleLabelRpc(event.request, (target) => siteMode.hostOf(target));
+  }
   if (own && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
       // A navigation has no client yet, so only its shape is judged.
@@ -316,7 +322,11 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
     case "signin":
       return signIn(route.target);
     case "proxy": {
-      const initiator = realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
+      // A navigation that arrives from another site host is cross-site, not a direct one.
+      const initiator =
+        navigation && site
+          ? navigationInitiator(referrer, origin, sealing.open, siteRouting() ?? null)
+          : realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
       const seal = route.sealed && master ? master.originSeal(route.target.origin) : undefined;
       const sealsLoad = navigation && request.destination === "document" && master && sealing.enabled();
       const address = sealsLoad ? (url: URL) => master.seal(url) : undefined;
@@ -490,9 +500,9 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   return new Response(JSON.stringify({ seal }), { headers: { "content-type": "application/json" } });
 }
 
-async function handleSiteDataRpc(event: FetchEvent): Promise<Response> {
+async function handleSiteDataRpc(event: FetchEvent, site: boolean): Promise<Response> {
   const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady(), sealing.ready()]);
-  return handleSiteData(event.request, callerOf(client, self.location.origin, ui, sealing.open), cookies);
+  return handleSiteData(event.request, callerOf(client, self.location.origin, ui, sealing.open), cookies, site);
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
