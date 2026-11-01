@@ -1,6 +1,6 @@
 # Monitoring
 
-Girici has a health endpoint and plain-text logs. A metrics endpoint is planned for a later release.
+Girici has a health endpoint, a Status section for the admin, an optional Prometheus endpoint and plain-text logs.
 
 ## Health check
 
@@ -13,6 +13,66 @@ balancer, uptime service or orchestrator at the same path:
 ```bash
 curl -fsS https://proxy.example/healthz
 ```
+
+## Status in Settings
+
+Signed in as the admin, open **Settings**. The **Status** section shows:
+
+- when the server started and how many relayed WebSockets are open now;
+- the last hour, minute by minute: data sent to browsers, requests, and refused requests;
+- the last 30 days: requests, data sent and received, refused and failed requests per day;
+- the bandwidth limit, the daily quota and whether the metrics endpoint is on.
+
+**Refused** means Girici turned the request away: sign-in needed, rate limit, quota, browser check, a blocked site, a
+body that was too large, a malformed request or a private address. **Failed** means the site could not be reached:
+DNS, connection, TLS, timeout, oversized headers or the upstream proxy. Days and times are in UTC.
+
+Counting is always on and keeps numbers only. No site, page or visitor address is stored. The last hour lives in
+memory and starts empty after a restart. Daily totals go to `girici.db` once a minute when the minute had traffic,
+and once more when Girici stops, so a normal stop or restart keeps them. Days older than 90 are deleted. With several
+replicas, each one counts its own traffic.
+
+## Metrics
+
+Set `GIRICI_METRICS_TOKEN` to turn on `GET /metrics` in the Prometheus text format. The token needs 16 or more
+characters; `openssl rand -hex 32` makes one. Without the variable, `/metrics` does not exist.
+
+Every request must carry the token as `Authorization: Bearer <token>`. A missing or wrong token gets `401`.
+
+```bash
+curl -fsS -H "Authorization: Bearer $GIRICI_METRICS_TOKEN" https://proxy.example/metrics
+```
+
+| Metric | Type | Labels | What it counts |
+|--------|------|--------|----------------|
+| `girici_relay_requests_total` | counter | `kind`, `code` | Relay requests (`kind="http"`) and WebSocket opens (`kind="ws"`) by how they ended. `code="ok"` reached the site; any other code names the refusal or failure. |
+| `girici_relay_bytes_total` | counter | `direction` | Body and WebSocket bytes relayed: `down` to browsers, `up` to sites. |
+| `girici_websockets_open` | gauge | | Relayed WebSockets open now. |
+| `process_start_time_seconds` | gauge | | When the process started, in seconds since the Unix epoch. |
+
+The codes are `auth`, `rate_limited`, `quota`, `challenge`, `blocked`, `too_large`, `bad_request` and `ssrf_blocked`
+(refused), and `dns`, `connect`, `tls`, `timeout`, `header_overflow` and `proxy` (failed). Every code is listed from the
+start at `0`. Labels never carry a site, a path or an address. The counters start from zero when Girici starts;
+`rate()` and `increase()` handle that.
+
+A Prometheus job for it:
+
+```yaml
+scrape_configs:
+  - job_name: girici
+    scheme: https
+    metrics_path: /metrics
+    authorization:
+      credentials: "<your token>"
+    static_configs:
+      - targets: ["proxy.example"]
+```
+
+`credentials_file` reads the token from a file instead. With several replicas, scrape each one: they count apart.
+
+Proxied pages cannot reach `/metrics`: the service worker refuses it to every page it serves, and a page's own
+`/metrics` goes to the site it came from. The endpoint shares the proxy's port, so you can also keep it off the internet with a
+rule in your reverse proxy.
 
 ## Logs
 

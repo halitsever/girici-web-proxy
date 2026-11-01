@@ -1997,6 +1997,20 @@ const ROUTES: Record<string, Record<string, Route>> = {
 </script>`,
       ),
     ),
+    "/metrics-probe": html(
+      page(
+        "Metrics probe",
+        `<pre id="result"></pre><script>
+  const query = new URLSearchParams(location.search);
+  (async () => {
+    const res = await fetch(query.get("proxy") + "/metrics", {
+      headers: { authorization: "Bearer " + query.get("token") },
+    });
+    document.getElementById("result").textContent = res.status + " " + (await res.text()).slice(0, 40);
+  })();
+</script>`,
+      ),
+    ),
     "/native-tostring": html(
       page(
         "Native toString",

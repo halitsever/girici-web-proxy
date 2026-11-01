@@ -20,6 +20,7 @@ import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import { clearSiteData, listSiteData } from "@/lib/site-data";
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { SEARCH_ENGINES, toProxyPath, type SearchEngine } from "@/lib/target";
+import StatusPanel from "./StatusPanel.vue";
 
 const engines = Object.keys(SEARCH_ENGINES) as SearchEngine[];
 const settings = ref(loadSettings());
@@ -468,6 +469,8 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <StatusPanel v-if="authed" />
 
     <section class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">

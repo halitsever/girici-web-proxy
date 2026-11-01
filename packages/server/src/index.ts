@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { createApp } from "./app.ts";
 import { generateSetupCode, setupBanner } from "./auth/setup-code.ts";
 import { AuthStore } from "./auth/store.ts";
@@ -14,6 +15,10 @@ import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { metricsRouter } from "./routes/metrics.ts";
+import { statusRouter } from "./routes/status.ts";
+import { DailyTraffic, startStatsFlush } from "./stats/daily.ts";
+import { TrafficStats } from "./stats/traffic.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
@@ -34,10 +39,12 @@ const trustWarning = trustProxyWarning(config.trustProxy);
 // Its own warn-level logger, so LOG_LEVEL=error cannot hide a setting that lets clients forge their address.
 if (trustWarning) createLogger("warn").warn(trustWarning);
 
+let db: DatabaseSync;
 let authStore: AuthStore;
 try {
   mkdirSync(config.dataDir, { recursive: true });
-  authStore = new AuthStore(openDb(join(config.dataDir, "girici.db")), config.sessionSecret);
+  db = openDb(join(config.dataDir, "girici.db"));
+  authStore = new AuthStore(db, config.sessionSecret);
 } catch (error) {
   logger.error(
     `Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`,
@@ -68,6 +75,29 @@ const setupCode = config.setupToken ?? generateSetupCode();
 const relayObservers: RelayObserver[] = [];
 const upgradeGates: UpgradeGate[] = [];
 
+// Traffic counts for the admin's Status section and, with a token, for /metrics.
+const stats = new TrafficStats();
+relayObservers.push(stats);
+const daily = new DailyTraffic(db);
+const statsFlush = startStatsFlush(stats, daily, {
+  onError: (error) =>
+    logger.error(`Cannot save traffic statistics: ${error instanceof Error ? error.message : String(error)}`),
+});
+const statsRouters = {
+  metricsRouter: config.metricsToken ? metricsRouter({ token: config.metricsToken, stats }) : undefined,
+  statusRouter: statusRouter({
+    store: authStore,
+    stats,
+    daily,
+    flush: statsFlush.flush,
+    limits: {
+      bandwidthPerMinute: config.bandwidthLimit,
+      dailyQuota: config.dailyQuota,
+      metrics: config.metricsToken !== undefined,
+    },
+  }),
+};
+
 // Bandwidth limit and daily quota: off until one is set. One meter serves both relays, as the rate limit does.
 const meter =
   config.bandwidthLimit > 0 || config.dailyQuota > 0
@@ -84,6 +114,7 @@ const agent = createUpstreamAgent({
   testUpstreams: config.testUpstreams,
   testCa: config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined,
 });
+
 const server = createHttpServer(
   createApp({
     webDistDir,
@@ -112,6 +143,7 @@ const server = createHttpServer(
           logger,
         )
       : undefined,
+    ...statsRouters,
   }),
 );
 const wsLookup = createGuardedLookup();
@@ -150,6 +182,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     logger.info(`${signal} received, shutting down`);
     server.close(() => {
+      // The statistics share the database, so they are written before it closes.
+      statsFlush.stop();
       authStore.close();
       process.exit(0);
     });
