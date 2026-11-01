@@ -19,6 +19,8 @@ export interface HtmlRewriteOptions {
   owner?: string;
   /** The document has a sealed address, so relative URLs are written absolute; a srcdoc inside inherits it. */
   opaque?: boolean;
+  /** Has the last word on each attribute value, after the rewriter's own change. */
+  attribute?: (tag: string, attribs: Record<string, string>, name: string, value: string) => string;
 }
 
 interface Attribute {
@@ -178,7 +180,8 @@ class HtmlRewriter {
       this.#removeAttribute(attribute);
       return;
     }
-    const rewritten = this.#rewriteValue(tag, attribs, name, value);
+    let rewritten = this.#rewriteValue(tag, attribs, name, value);
+    rewritten = this.#options.attribute?.(tag, attribs, name, rewritten) ?? rewritten;
     if (rewritten !== value) {
       // Only a srcdoc that gets the runtime tag is written with `<` escaped.
       const text = escapeAttribute(rewritten);

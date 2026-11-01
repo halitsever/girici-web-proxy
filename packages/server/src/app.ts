@@ -8,7 +8,7 @@ import { errorHandler } from "./http/error-handler.ts";
 import type { Limiter } from "./http/rate-limit.ts";
 import { relayLimit, warnUntrustedForwarding } from "./http/relay-limit.ts";
 import { NO_OBSERVER, relayAnswers, type RelayObserver } from "./http/relay-observer.ts";
-import { securityHeaders } from "./http/security-headers.ts";
+import { securityHeaders, siteHeaders } from "./http/security-headers.ts";
 import { serviceWorkerScriptGuard } from "./http/sw-script-guard.ts";
 import type { Logger } from "./log.ts";
 import { adminRouter } from "./routes/admin.ts";
@@ -21,9 +21,12 @@ import { legacyRouter } from "./routes/legacy.ts";
 import { poRouter, type PoTokenSource } from "./routes/pot.ts";
 import { relayRouter, type RelayOptions } from "./routes/relay.ts";
 import { robotsRouter } from "./routes/robots.ts";
+import { siteHostRouter, siteRootRouter } from "./routes/sites.ts";
 import { sourceRouter } from "./routes/source.ts";
 import { uiRouter } from "./routes/ui.ts";
 import { wsSealRouter } from "./routes/ws-seal.ts";
+import { hostKinds, onHosts } from "./sites/hosts.ts";
+import type { SiteSetup } from "./sites/keys.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 
 export interface AppOptions {
@@ -45,6 +48,8 @@ export interface AppOptions {
   metricsRouter?: Router;
   statusRouter?: Router;
   powRouter?: Router;
+  /** Subdomain mode; without it every host gets every route. */
+  sites?: SiteSetup;
 }
 
 const pass: RequestHandler = (_req, _res, next) => next();
@@ -68,6 +73,7 @@ export function createApp({
   metricsRouter,
   statusRouter,
   powRouter,
+  sites,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -76,35 +82,44 @@ export function createApp({
   const trustFn = trust ?? compileTrust(false);
   app.set("trust proxy", trustFn);
   app.use(securityHeaders());
+  app.use(hostKinds(sites?.domain));
+  app.use(siteHeaders());
+  // In subdomain mode the root serves people and site hosts serve proxied sites; other hosts get nothing more.
+  const root = (handler: RequestHandler) => onHosts(["single", "root"], handler);
+  const site = (handler: RequestHandler) => onHosts(["single", "site"], handler);
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter(authStore, logger));
-  if (metricsRouter) app.use(metricsRouter);
+  if (metricsRouter) app.use(root(metricsRouter));
   app.use(robotsRouter());
-  app.use(sourceRouter(sourceUrl));
-  app.use(brandRouter(brand));
-  app.use(authRouter(authStore, { setupToken }));
-  app.use(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand));
-  if (statusRouter) app.use(statusRouter);
+  if (sites) app.use(onHosts(["root"], siteRootRouter(sites, authStore)));
+  app.use(root(sourceRouter(sourceUrl)));
+  app.use(root(brandRouter(brand)));
+  app.use(root(authRouter(authStore, { setupToken, siteDomain: sites?.domain })));
+  app.use(
+    root(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand, sites?.domain)),
+  );
+  if (statusRouter) app.use(root(statusRouter));
   // Ungated: a visitor the browser check refuses must still reach the check.
-  if (powRouter) app.use(powRouter);
+  if (powRouter) app.use(root(powRouter));
   // First on the data path, so the observer hears every gate's refusal as well as the relay's own answers.
-  app.use("/_g/r", relayAnswers(observer));
+  app.use("/_g/r", site(relayAnswers(observer)));
   // Gate the proxy data path, the poToken minter and WebSocket seals; navigations reach the SW as an auth error
   // and redirect to login. Public access opens them; nothing else here is gated.
-  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], authGate(authStore), powGate);
+  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], site(authGate(authStore)), site(powGate));
   app.use(
     "/_g/r",
-    warnUntrustedForwarding(trustFn, logger),
-    relayLimit({ limiter: limiter ?? null, store: authStore }),
-    bandwidthGate,
+    site(warnUntrustedForwarding(trustFn, logger)),
+    site(relayLimit({ limiter: limiter ?? null, store: authStore })),
+    site(bandwidthGate),
   );
-  if (poToken) app.use(poRouter({ minter: poToken }));
-  app.use(wsSealRouter(authStore));
-  app.use(relayRouter({ ...relay, logger, observer }));
-  app.use(uiRouter(webDistDir, authStore));
-  app.use(engineRouter(engineBundlesDir));
-  app.use(bootstrapRouter());
-  app.use(legacyRouter());
+  if (poToken) app.use(site(poRouter({ minter: poToken })));
+  app.use(site(wsSealRouter(authStore)));
+  app.use(site(relayRouter({ ...relay, logger, observer })));
+  app.use(root(uiRouter(webDistDir, authStore)));
+  if (sites) app.use(onHosts(["site"], siteHostRouter(sites, authStore)));
+  app.use(site(engineRouter(engineBundlesDir)));
+  app.use(site(bootstrapRouter(sites, authStore)));
+  app.use(root(legacyRouter()));
   // Express's own 404 page swaps in a CSP without frame-ancestors.
   app.use((_req, res) => {
     res.status(404).type("text/plain").send("Not Found");

@@ -14,6 +14,7 @@ import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { openInstanceTools } from "./open-instance.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { deriveSiteKeys, type SiteSetup } from "./sites/keys.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
@@ -39,7 +40,7 @@ let authStore: AuthStore;
 try {
   mkdirSync(config.dataDir, { recursive: true });
   db = openDb(join(config.dataDir, "girici.db"));
-  authStore = new AuthStore(db, config.sessionSecret);
+  authStore = new AuthStore(db, config.sessionSecret, { siteSecret: config.siteSecret });
 } catch (error) {
   logger.error(
     `Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`,
@@ -57,6 +58,19 @@ if (config.upstreamProxy) {
 }
 if (config.testUpstreams.size > 0) {
   logger.warn(`Test mode: upstream mapping active for ${[...config.testUpstreams.keys()].join(", ")}`);
+}
+
+const sites: SiteSetup | undefined = config.siteDomain
+  ? { domain: config.siteDomain, keys: deriveSiteKeys(authStore.siteSecret()) }
+  : undefined;
+if (sites) logger.info(`Subdomain mode: sites open on *.${sites.domain.value}`);
+if (sites && authStore.siteSecretDiffers()) {
+  // Its own warn-level logger, as above: the change strands every visitor's site data.
+  createLogger("warn").warn(
+    "GIRICI_SITE_SECRET differs from the site secret in the database, so every site opens on a new host and data " +
+      "visitors' browsers kept for the old hosts stays behind. To keep the old hosts, set GIRICI_SITE_SECRET to the " +
+      "stored value (see the subdomain mode guide).",
+  );
 }
 
 // One trust function and one bucket serve both relays, so a client cannot double its budget over WebSockets.
@@ -88,11 +102,13 @@ const server = createHttpServer(
     blocklist,
     setupToken: setupCode,
     ...tools.app,
+    sites,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
       maxRequestBody: 50 * 1024 * 1024,
       blocklist,
+      siteDomain: sites?.domain.host,
     },
     // Minting leaves through the relay's agent so tokens and media share one egress IP, with or without a proxy.
     poToken: config.youtubePoToken
@@ -124,6 +140,7 @@ const wsRelay = attachWsRelay(server, {
   limiter,
   blocklist,
   ...tools.ws,
+  siteDomain: sites?.domain,
 });
 server.on("error", (error) => {
   logger.error(error.message);

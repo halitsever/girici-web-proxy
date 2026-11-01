@@ -533,4 +533,23 @@ describe("createChildConfig", () => {
       inherit: { origin: "http://proxy.test", base: "https://b.test/x" },
     });
   });
+
+  it("hands frames the site context of the host they share", () => {
+    const steps = new DocumentSteps();
+    const ctx = { origin: "https://k6wjalxihe6pja6woodbryo47k.proxy.test", realUrl: () => new URL("https://a.test/") };
+    const sites = {
+      domain: "proxy.test",
+      root: "https://proxy.test",
+      label: "k6wjalxihe6pja6woodbryo47k",
+      key: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+      site: "https://a.test",
+      toolbar: true,
+      engine: "DuckDuckGo" as const,
+    };
+    const childConfig = createChildConfig(ctx, () => [], steps, { v: PROTOCOL_VERSION, cookies: [], sites });
+    // The host never changes under a window, so a renewed document's claim does not move its frames.
+    steps.run({ v: PROTOCOL_VERSION, cookies: [], sites: { ...sites, label: "g4fjzasx42nioynauh4u6ncvdg" } });
+    expect(childConfig().sites).toEqual(sites);
+    expect(createChildConfig(ctx, () => [], steps, { v: PROTOCOL_VERSION, cookies: [] })()).not.toHaveProperty("sites");
+  });
 });

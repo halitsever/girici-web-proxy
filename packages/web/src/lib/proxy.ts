@@ -2,6 +2,7 @@ import { getAuthState } from "./auth";
 import { syncEnginePrefs } from "./engine-prefs";
 import { sealPath } from "./seal";
 import { loadSettings } from "./settings";
+import { isSiteMode } from "./sites";
 
 export type ServiceWorkerSupport = "ok" | "insecure" | "unsupported";
 
@@ -25,19 +26,32 @@ export async function startEngine(): Promise<void> {
 }
 
 export interface OpenEnv {
+  /** The root then redirects to the site's host, whose own worker seals the address. */
+  siteMode: boolean;
   start(): Promise<void>;
   seal(path: string): Promise<string>;
   assign(url: string): void;
 }
 
 /** The worker answers with the sealed address while sealing is on, so the plain one never reaches history. */
-export async function openProxied(path: string, env: OpenEnv = browserOpenEnv()): Promise<void> {
-  await env.start();
-  env.assign(await env.seal(path));
+export async function openProxied(path: string, env?: OpenEnv): Promise<void> {
+  const open = env ?? (await browserOpenEnv());
+  if (open.siteMode) {
+    open.assign(path);
+    return;
+  }
+  await open.start();
+  open.assign(await open.seal(path));
 }
 
-function browserOpenEnv(): OpenEnv {
-  return { start: startEngine, seal: (path) => sealPath(path), assign: (url) => window.location.assign(url) };
+async function browserOpenEnv(): Promise<OpenEnv> {
+  const state = await getAuthState().catch(() => null);
+  return {
+    siteMode: isSiteMode(state),
+    start: startEngine,
+    seal: (path) => sealPath(path),
+    assign: (url) => window.location.assign(url),
+  };
 }
 
 const RELOAD_KEY = "girici:engine-reload";

@@ -1,21 +1,28 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { authRouter } from "../src/routes/auth.ts";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE, SESSION_TTL_MS } from "../src/auth/cookie.ts";
+import { siteSessionAdmin } from "../src/auth/gate.ts";
+import { verifySession } from "../src/auth/session.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
+import { hostRequest } from "./helpers/host-request.ts";
 
 let server: Server;
 afterEach(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
 const SETUP_CODE = "TEST-CODE-0001";
 
-async function listen(store: AuthStore, options: { trustProxy?: boolean } = {}): Promise<string> {
+async function listen(
+  store: AuthStore,
+  options: { trustProxy?: boolean; siteDomain?: SiteDomain } = {},
+): Promise<string> {
   const app = express();
   if (options.trustProxy) app.set("trust proxy", true);
-  app.use(authRouter(store, { loginMax: 5, setupToken: SETUP_CODE }));
+  app.use(authRouter(store, { loginMax: 5, setupToken: SETUP_CODE, siteDomain: options.siteDomain }));
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -39,6 +46,57 @@ describe("authRouter state", () => {
   it("reports setup needed when no admin exists", async () => {
     const res = await fetch(`${await listen(new AuthStore(openDb(":memory:")))}/_g/auth/state`);
     expect(await res.json()).toMatchObject({ setup: true, authed: false, public: false });
+  });
+
+  it("gives a signed-in admin the site session from the sign-in state, ending with the admin's", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const base = await listen(store, { siteDomain: parseSiteDomain("proxy.test:8443")! });
+    const stateWith = (cookie?: string) =>
+      fetch(`${base}/_g/auth/state`, { headers: cookie ? { cookie } : {} }).then((res) => res.headers.getSetCookie());
+    const issuedAt = Date.now() - 86_400_000;
+    const token = createSessionToken(admin.id, store.sessionSecret(), issuedAt);
+
+    const [secure, ...rest] = await stateWith(`${SESSION_COOKIE}=${token}`);
+    expect(rest).toEqual([]);
+    expect(secure).toMatch(
+      /^__Secure-girici-site=[^;]+; Max-Age=\d+; Domain=proxy\.test; Path=\/_g\/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    const site = secure!.split(";")[0]!.split("=")[1]!;
+    expect(verifySession(site, store.sessionSecret())).toMatchObject({ aud: "site", exp: issuedAt + SESSION_TTL_MS });
+    expect(siteSessionAdmin(store, `girici-site=${site}`)?.id).toBe(admin.id);
+    expect(Number(/Max-Age=(\d+)/.exec(secure!)![1])).toBeLessThanOrEqual((SESSION_TTL_MS - 86_400_000) / 1000);
+
+    const [plain] = await stateWith(`girici-session=${token}`);
+    expect(plain).toMatch(/^girici-site=[^;]+;/);
+    expect(plain).not.toMatch(/Secure/);
+
+    const fresh = createSiteSessionToken(admin.id, store.sessionSecret());
+    expect(await stateWith(`${SESSION_COOKIE}=${token}; girici-site=${fresh}`)).toEqual([]);
+    expect(await stateWith()).toEqual([]);
+    expect(await stateWith(`${SESSION_COOKIE}=${fresh}`)).toEqual([]);
+    expect(await stateWith(`girici-session=junk`)).toEqual([]);
+    store.revokeSessions();
+    expect(await stateWith(`${SESSION_COOKIE}=${token}`)).toEqual([]);
+  });
+
+  it("issues no site session from the sign-in state in single-origin mode", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const base = await listen(store);
+    const res = await fetch(`${base}/_g/auth/state`, {
+      headers: { cookie: `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}` },
+    });
+    expect(res.headers.getSetCookie()).toEqual([]);
+  });
+
+  it("names the site domain in the sign-in state", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const sites = await listen(store, { siteDomain: parseSiteDomain("proxy.test:8443")! });
+    expect(await (await fetch(`${sites}/_g/auth/state`)).json()).toMatchObject({ siteDomain: "proxy.test:8443" });
+    server.close();
+    const single = await listen(store);
+    expect(await (await fetch(`${single}/_g/auth/state`)).json()).toMatchObject({ siteDomain: null });
   });
 
   it("tells every visitor whether addresses are encrypted", async () => {
@@ -132,6 +190,62 @@ describe("authRouter login and logout", () => {
     const cookie = set?.split(";")[0] ?? "";
     const state = (await (await fetch(`${base}/_g/auth/state`, { headers: { cookie } })).json()) as { authed: boolean };
     expect(state.authed).toBe(true);
+  });
+
+  it("issues a site session with Domain beside the admin session", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin(setup);
+    const base = await listen(store, { siteDomain: parseSiteDomain("proxy.test:8443")! });
+    const signIn = (origin: string) =>
+      hostRequest(base, "/_g/login", {
+        host: new URL(origin).host,
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ username: "halit", password: "pw-123456" }),
+      });
+    const secure = await signIn("https://proxy.test:8443");
+    expect(secure.status).toBe(200);
+    expect(secure.cookies).toHaveLength(2);
+    expect(secure.cookies[0]).toMatch(/^__Host-girici=/);
+    expect(secure.cookies[1]).toMatch(
+      /^__Secure-girici-site=[^;]+; Max-Age=2592000; Domain=proxy\.test; Path=\/_g\/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    const plain = await signIn("http://proxy.test:8443");
+    expect(plain.cookies[1]).toMatch(/^girici-site=[^;]+; Max-Age=2592000; Domain=proxy\.test; Path=\/_g\/;/);
+    expect(plain.cookies[1]).not.toMatch(/Secure/);
+    const single = await post(await listen(store), "/_g/login", { username: "halit", password: "pw-123456" });
+    expect(single.headers.getSetCookie()).toHaveLength(1);
+  });
+
+  it("issues the site session on setup too", async () => {
+    const base = await listen(new AuthStore(openDb(":memory:")), { siteDomain: parseSiteDomain("proxy.test")! });
+    const res = await hostRequest(base, "/_g/setup", {
+      host: "proxy.test",
+      method: "POST",
+      headers: { origin: "http://proxy.test", "content-type": "application/json" },
+      body: JSON.stringify(setupWithCode),
+    });
+    expect(res.status).toBe(200);
+    expect(res.cookies.some((cookie) => cookie.startsWith("girici-site="))).toBe(true);
+  });
+
+  it("clears both sessions on sign-out", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    store.createAdmin(setup);
+    const base = await listen(store, { siteDomain: parseSiteDomain("proxy.test")! });
+    const res = await hostRequest(base, "/_g/logout", {
+      host: "proxy.test",
+      method: "POST",
+      headers: { origin: "https://proxy.test", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(res.status).toBe(204);
+    for (const name of ["girici-site", "__Secure-girici-site"]) {
+      const cleared = res.cookies.find((cookie) => cookie.startsWith(`${name}=;`));
+      expect(cleared, name).toContain("Domain=proxy.test; Path=/_g/");
+      expect(cleared, name).toContain("Expires=Thu, 01 Jan 1970");
+    }
+    expect(res.cookies.some((cookie) => cookie.startsWith("__Host-girici=;"))).toBe(true);
   });
 
   it("rate-limits repeated login attempts", async () => {

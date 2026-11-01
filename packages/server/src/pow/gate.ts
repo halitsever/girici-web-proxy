@@ -1,8 +1,8 @@
 import type { RequestHandler, Response } from "express";
-import { parseCookies } from "../auth/cookie.ts";
 import { isAdminCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
+import { cookieValues } from "../http/cookie-values.ts";
 import { sendRelayError } from "../http/relay-error.ts";
 import type { UpgradeGate } from "../ws/relay-ws.ts";
 import { issueVisitor, powKey, readVisitor, VISITOR_RENEW_MS, VISITOR_TTL_MS } from "./tokens.ts";
@@ -33,11 +33,11 @@ function visitorOf(
   client: string,
   now: number,
 ): { name: string; iat: number } | null {
-  const cookies = parseCookies(cookieHeader);
   for (const name of [VISITOR_COOKIE, PLAIN_VISITOR_COOKIE]) {
-    const token = cookies[name];
-    const visitor = token ? readVisitor(key, token, client, now) : null;
-    if (visitor) return { name, iat: visitor.iat };
+    for (const token of cookieValues(cookieHeader, [name])) {
+      const visitor = readVisitor(key, token, client, now);
+      if (visitor) return { name, iat: visitor.iat };
+    }
   }
   return null;
 }

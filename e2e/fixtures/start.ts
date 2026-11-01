@@ -8,6 +8,7 @@ import { WebSocketServer } from "ws";
 import { AuthStore } from "../../packages/server/src/auth/store.ts";
 import { BrandStore } from "../../packages/server/src/brand/store.ts";
 import { openDb } from "../../packages/server/src/db/open.ts";
+import { PRIVATE_SITES, SITE_SECRET, SITES } from "../support/site-mode.ts";
 import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
 import { handleFixture } from "./sites.ts";
@@ -26,14 +27,15 @@ interface SeedOptions {
   brand?: boolean;
   deepLinkWarning?: boolean;
   proofOfWork?: boolean;
+  publicAccess?: boolean;
 }
 
-/** An admin and public access, so the auth gate does not block the proxy tests. */
+/** An admin, and public access so the gate does not block the proxy tests, unless the server exists to test the gate. */
 function seedDataDir(options: SeedOptions = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
   const seed = new AuthStore(openDb(join(dir, "girici.db")));
   seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
-  seed.setPublicAccess(true);
+  seed.setPublicAccess(options.publicAccess ?? true);
   if (options.deepLinkWarning !== undefined) seed.setDeepLinkWarning(options.deepLinkWarning);
   if (options.proofOfWork !== undefined) seed.setProofOfWork(options.proofOfWork);
   if (options.brand) {
@@ -69,8 +71,9 @@ const upstreams = Object.fromEntries([
   ...HTTPS_HOSTS.map((host) => [host, "127.0.0.1:41443"]),
   ["site-c.test", "127.0.0.1:41080"],
 ]);
+const children: ChildProcess[] = [];
 function spawnGirici(port: number, dataDir: string, env: Record<string, string> = {}): ChildProcess {
-  return spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
+  const child = spawn(process.execPath, [join(ROOT, "packages/server/src/index.ts")], {
     stdio: "inherit",
     env: {
       ...process.env,
@@ -85,10 +88,15 @@ function spawnGirici(port: number, dataDir: string, env: Record<string, string> 
       ...env,
     },
   });
+  // Any server that stops takes the harness down, so Playwright reports it instead of timing out.
+  child.on("exit", (code) => process.exit(code ?? 1));
+  children.push(child);
+  return child;
 }
 
 async function waitHealthy(port: number): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  // Five servers start together, which a busy CI machine can take a while over.
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`)).status === 200) return;
@@ -100,13 +108,13 @@ async function waitHealthy(port: number): Promise<void> {
   throw new Error(`Server on port ${port} did not become healthy`);
 }
 
-const children: ChildProcess[] = [];
-
 function start(port: number, seed: SeedOptions, env?: Record<string, string>): void {
-  const child = spawnGirici(port, seedDataDir(seed), env);
-  children.push(child);
-  // One server down fails the run instead of leaving the others to answer for it.
-  child.on("exit", (code) => process.exit(code ?? 1));
+  spawnGirici(port, seedDataDir(seed), env);
+}
+
+/** Subdomain mode, where each site runs on its own host under the root. */
+function siteMode(base: string): Record<string, string> {
+  return { GIRICI_SITE_DOMAIN: new URL(base).host, GIRICI_SITE_SECRET: SITE_SECRET };
 }
 
 process.on("exit", () => {
@@ -122,6 +130,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 start(41002, { brand: true });
 start(GATES_PORT, { deepLinkWarning: false, proofOfWork: true }, { GIRICI_POW_DIFFICULTY: "4" });
 start(QUOTA_PORT, { deepLinkWarning: false }, { GIRICI_BANDWIDTH_LIMIT: "1MB" });
-await Promise.all([41002, GATES_PORT, QUOTA_PORT].map(waitHealthy));
+start(41005, { deepLinkWarning: false }, siteMode(SITES));
+start(41006, { publicAccess: false }, siteMode(PRIVATE_SITES));
+await Promise.all([41002, GATES_PORT, QUOTA_PORT, 41005, 41006].map(waitHealthy));
 // Playwright waits on this one, so it starts last. Direct /~/ loads in the specs need the warning off.
 start(41000, { deepLinkWarning: false });

@@ -115,6 +115,7 @@ describe("openProxied", () => {
   it("opens the address the engine seals", async () => {
     const steps: string[] = [];
     await openProxied("/~/https/a.test/", {
+      siteMode: false,
       start: async () => void steps.push("start"),
       seal: async (path) => {
         steps.push(`seal ${path}`);
@@ -123,6 +124,20 @@ describe("openProxied", () => {
       assign: (url) => void steps.push(`assign ${url}`),
     });
     expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
+  });
+
+  it("opens a site through the root address without the service worker", async () => {
+    const steps: string[] = [];
+    await openProxied("/~/https/site-a.test/", {
+      siteMode: true,
+      start: async () => void steps.push("start"),
+      seal: async (path) => {
+        steps.push(`seal ${path}`);
+        return "/~/x/L.B";
+      },
+      assign: (url) => void steps.push(`assign ${url}`),
+    });
+    expect(steps).toEqual(["assign /~/https/site-a.test/"]);
   });
 });
 

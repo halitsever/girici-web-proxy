@@ -139,6 +139,31 @@ describe("createWindowGuard", () => {
     expect(calls).toEqual([["hi", proxy]]);
   });
 
+  it("sends through the site poster from a wrapper whose window it cannot read", () => {
+    const calls: unknown[][] = [];
+    const posted: unknown[][] = [];
+    const win = { DOMException, postMessage: () => {} } as unknown as Realm;
+    const ctx = { origin: proxy, realUrl: () => new URL("https://a.test/page") } as unknown as UrlContext;
+    const guard = createWindowGuard(
+      win,
+      ctx,
+      (_fn, _self, args) => calls.push([...args]),
+      undefined,
+      undefined,
+      (...args) => posted.push(args),
+    );
+    const otherHost = fakeWindow("about:blank");
+    Object.defineProperty(otherHost, "location", {
+      get() {
+        throw new DOMException("Blocked", "SecurityError");
+      },
+    });
+    (guard.wrap(otherHost) as Window).postMessage("hi", "https://b.test", []);
+    (guard.wrap(fakeWindow(`${proxy}/~/https/b.test/`)) as Window).postMessage("same host", "https://b.test");
+    expect(posted).toEqual([[otherHost, "hi", "https://b.test", [[]]]]);
+    expect(calls).toEqual([["same host", proxy]]);
+  });
+
   it("returns non-windows as they are", () => {
     const guard = guardFor("https://a.test");
     const port = { postMessage() {} };

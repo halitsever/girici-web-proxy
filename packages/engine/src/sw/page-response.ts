@@ -14,6 +14,7 @@ import {
   type CookieSnapshot,
   type OriginSeal,
   type RelayErrorCode,
+  type SiteContext,
 } from "../shared/protocol.ts";
 import {
   contentTypeOf,
@@ -29,6 +30,7 @@ import {
 import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
+import { keepSameHostReferrer, sameHostPolicy } from "./referrer-policy.ts";
 import type { TransportResult } from "./transport.ts";
 
 export interface PageContext {
@@ -46,6 +48,10 @@ export interface PageContext {
   seal?: OriginSeal;
   /** Set for a top-level load while sealing is on: the address its redirects and sign-in `next` point to. */
   address?: (url: URL) => string;
+  /** The root's origin on a site host, where sign-in and the UI live. */
+  uiOrigin?: string;
+  /** Set on a site host: every document there gets it. */
+  sites?: SiteContext;
 }
 
 const rewrites = new RewriteMemo();
@@ -109,7 +115,8 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      const next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin, !!ctx.seal) : value;
+      let next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin, !!ctx.seal) : value;
+      if (ctx.sites && name === "referrer-policy") next = sameHostPolicy(next);
       // An empty refresh is one that would have loaded a blob document.
       if (next !== "" || value === "") headers.append(name, next);
     } catch {
@@ -118,6 +125,8 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   }
   // The runtime applies these before the page sees the response, as browsers update document.cookie.
   if (ctx.syncCookies?.length) headers.set(HEADER.cookieSync, encodeHeaderValue(JSON.stringify(ctx.syncCookies)));
+  // Asks for an origin-keyed agent cluster, so the document.domain setter cannot join two site hosts.
+  if (ctx.sites) headers.set("origin-agent-cluster", "?1");
   if (NULL_BODY_STATUSES.has(status) || !body) return new Response(null, { status, headers });
 
   let contentType = headers.get("content-type");
@@ -153,7 +162,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
   };
   if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
-    return errorResponse("runtime", 503, ctx.target);
+    return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx));
   }
   const text = decodeText(await new Response(body).arrayBuffer(), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
@@ -169,12 +178,20 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
         site: schemefulSite(ctx.target),
       };
       if (ctx.cookiesBlocked) config.cookiesBlocked = true;
+      if (ctx.sites) config.sites = ctx.sites;
       const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
       const inject = clientTag(clientUrl, ctx.seal ? { ...config, seal: ctx.seal } : config);
       // A srcdoc frame has no sealed address of its own, so it never gets the key.
       const frameInject = (base: URL) =>
         clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
-      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject, frameInject, opaque: !!ctx.seal });
+      return rewriteHtml(text, {
+        url: ctx.target,
+        origin: ctx.origin,
+        inject,
+        frameInject,
+        opaque: !!ctx.seal,
+        ...(ctx.sites ? { attribute: keepSameHostReferrer } : undefined),
+      });
     }
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
@@ -221,12 +238,19 @@ function failure(code: RelayErrorCode, status: number, ctx: PageContext, retryAf
   if (code === "challenge" && ctx.destination === "document")
     return Response.redirect(uiPageFor(CHALLENGE_PATH, ctx), 303);
   const wait = WAITS.has(code) ? retryAfter : undefined;
-  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, wait);
+  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, wait, homeOf(ctx));
 }
 
 /** A UI page that sends the visitor back afterwards, to the sealed address when the load was sealed. */
 function uiPageFor(path: string, ctx: PageContext): string {
-  const page = new URL(path, ctx.origin);
-  page.searchParams.set("next", ctx.address ? ctx.address(ctx.target) : ctx.target.href);
+  // The UI lives on the root, so a sealed address there must name this host to come back.
+  const page = new URL(path, ctx.uiOrigin ?? ctx.origin);
+  const sealed = ctx.address?.(ctx.target);
+  const back = sealed !== undefined && ctx.uiOrigin ? new URL(sealed, ctx.origin).href : sealed;
+  page.searchParams.set("next", back ?? ctx.target.href);
   return page.href;
+}
+
+function homeOf(ctx: PageContext): string | undefined {
+  return ctx.uiOrigin === undefined ? undefined : `${ctx.uiOrigin}/`;
 }

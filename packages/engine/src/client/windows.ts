@@ -1,6 +1,7 @@
 import type { AssignHref, Invoke } from "./invoke.ts";
 import { post } from "./messaging.ts";
 import { maskNative } from "./native-mask.ts";
+import type { CrossSitePost } from "./site-messages.ts";
 import { encodeUrl } from "../shared/codec.ts";
 import {
   apply,
@@ -185,6 +186,7 @@ export function createWindowGuard(
   invoke: Invoke,
   swapBlob: (url: string) => string = (url) => url,
   assignHref?: AssignHref,
+  crossSite?: CrossSitePost,
 ): WindowGuard {
   // Taken before the messaging and window hooks replace them; window members are own properties of each window.
   const DOMException = win.DOMException;
@@ -332,16 +334,20 @@ export function createWindowGuard(
     const bound = new NativeWeakMap<object, unknown>();
     const members: Record<string, unknown> = {
       __proto__: null,
-      postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
+      postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) => {
+        const realOrigin = realOriginOf(target, ctx.origin);
+        // A window this realm cannot read is on another site host in subdomain mode.
+        if (realOrigin === null && crossSite) return crossSite(target, message, targetOrigin, rest);
         post(
           (...args) => invoke(nativePost, target, args),
-          realOriginOf(target, ctx.origin) ?? "null",
+          realOrigin ?? "null",
           ctx.origin,
           message,
           targetOrigin,
           rest,
           selfOrigin(),
-        ),
+        );
+      },
       close: () => methods.close && invoke(methods.close, target, []),
       focus: () => methods.focus && invoke(methods.focus, target, []),
       blur: () => methods.blur && invoke(methods.blur, target, []),

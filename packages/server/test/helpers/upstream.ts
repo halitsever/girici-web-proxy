@@ -51,6 +51,7 @@ export async function startRelay(options: {
   maxRequestBody?: number;
   headersTimeout?: number;
   blocklist?: HostBlocklist;
+  siteDomain?: string;
   proxy?: UpstreamProxy;
   lookup?: LookupFunction;
   /** When given, collects warn-level log lines. */
@@ -78,6 +79,7 @@ export async function startRelay(options: {
       logger,
       blocklist: options.blocklist,
       observer: options.observer,
+      siteDomain: options.siteDomain,
     }),
   );
   app.use(errorHandler(logger));

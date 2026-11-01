@@ -1,9 +1,14 @@
+import { hkdfSync } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { sep } from "node:path";
-import { test as base, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
+import { labelSiteOf } from "../../packages/engine/src/shared/label-site.ts";
+import { siteLabel } from "../../packages/engine/src/shared/site-label.ts";
 import { GATES_PORT, QUOTA_PORT } from "../fixtures/servers.ts";
+import { SITES, SITE_SECRET } from "./site-mode.ts";
 
 export { METRICS_TOKEN } from "../fixtures/servers.ts";
+export { PRIVATE_SITES, SITES, SITE_SECRET } from "./site-mode.ts";
 
 const TRAP_LOG = "http://127.0.0.1:41999/log";
 
@@ -50,6 +55,8 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
   // A typed URL is the first row; Enter submits the command palette and opens it.
   await input.press("Enter");
   await page.waitForURL(/\/~\//);
+  // A site host's first visit shows the bootstrap page at the same address before the page itself loads.
+  await expect(page.locator("#girici-boot")).toHaveCount(0);
 }
 
 export const INSTANCE = "http://127.0.0.1:41002";
@@ -57,6 +64,18 @@ export const INSTANCE = "http://127.0.0.1:41002";
 export const GATES = `http://127.0.0.1:${GATES_PORT}`;
 /** Public, warning off, 1 MB a minute per visitor. */
 export const QUOTA = `http://127.0.0.1:${QUOTA_PORT}`;
+
+const LABEL_KEY = new Uint8Array(hkdfSync("sha256", SITE_SECRET, "girici", "girici/v1 label", 32));
+
+/** The origin of the host that serves `url`'s site on the subdomain-mode server at `base`. */
+export function siteHost(url: string, base: string = SITES): string {
+  const root = new URL(base);
+  return `${root.protocol}//${siteLabel(LABEL_KEY, labelSiteOf(new URL(url)))}.${root.host}`;
+}
+
+export function isSiteProject(info: TestInfo): boolean {
+  return info.project.name.endsWith("-sites");
+}
 
 export async function signIn(page: Page, base: string): Promise<void> {
   await page.goto(`${base}/_g/login`);

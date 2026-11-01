@@ -39,7 +39,8 @@ export function waitText(seconds: number | undefined): string {
   return `in ${Math.ceil(seconds / 3600)} hours`;
 }
 
-export function errorPage(code: ErrorPageCode, target: URL | null, retryAfter?: number): string {
+/** `home` is the root's address on a site host, where `/` belongs to the page's own site. */
+export function errorPage(code: ErrorPageCode, target: URL | null, retryAfter?: number, home = "/"): string {
   const message = (MESSAGES[code] ?? MESSAGES.connect)
     .replace("{host}", () => escapeHtml(target?.host ?? "the site"))
     .replace("{wait}", () => waitText(retryAfter));
@@ -53,21 +54,27 @@ export function errorPage(code: ErrorPageCode, target: URL | null, retryAfter?: 
   <body>
     <h1>Girici</h1>
     <p>${message}</p>
-    <p><a href="/">Back to Girici</a></p>
+    <p><a href="${escapeHtml(home)}">Back to Girici</a></p>
   </body>
 </html>
 `;
 }
 
 /** Error pages run no script and keep no opener, so a proxied page cannot borrow their realm on our origin. */
-export function errorResponse(code: ErrorPageCode, status: number, target: URL | null, retryAfter?: number): Response {
+export function errorResponse(
+  code: ErrorPageCode,
+  status: number,
+  target: URL | null,
+  retryAfter?: number,
+  home?: string,
+): Response {
   const headers: Record<string, string> = {
     "content-type": "text/html; charset=utf-8",
     ...inertHeaders(),
     "cross-origin-opener-policy": "same-origin",
   };
   if (retryAfter !== undefined) headers["retry-after"] = String(retryAfter);
-  return new Response(errorPage(code, target, retryAfter), { status, headers });
+  return new Response(errorPage(code, target, retryAfter, home), { status, headers });
 }
 
 /** Every service-worker refusal is an inert document, so a navigation to it cannot run script on our origin. */

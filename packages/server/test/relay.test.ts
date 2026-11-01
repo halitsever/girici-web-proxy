@@ -316,6 +316,23 @@ describe("relay", () => {
     expect(upstream.requestCount()).toBe(0);
   });
 
+  it("refuses the site domain and its hosts in subdomain mode", async () => {
+    const { upstream, base } = await setup((_req, res) => res.end("ok"));
+    const relay = await startRelay({
+      testUpstreams: new Map([["site-a.test", { host: "127.0.0.1", port: upstream.port }]]),
+      testCa: cert.cert,
+      siteDomain: "site-a.test",
+    });
+    cleanups.push(relay.close);
+    for (const tail of ["https/site-a.test/", "https/k6wjalxihe6pja6woodbryo47k.site-a.test/"]) {
+      const res = await relayFetch(relay.base, tail);
+      expect(res.status, tail).toBe(403);
+      expect(res.headers.get("x-girici-error")).toBe("ssrf_blocked");
+    }
+    expect((await relayFetch(base, "https/site-a.test/")).status).toBe(200);
+    expect(upstream.requestCount()).toBe(1);
+  });
+
   it("verifies upstream TLS", async () => {
     const { base } = await setup((_req, res) => res.end("ok"), { trustCa: false });
     const res = await relayFetch(base, "https/site-a.test/");

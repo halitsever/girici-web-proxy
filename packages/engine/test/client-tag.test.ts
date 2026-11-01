@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clientTag, stripClientTag } from "../src/shared/client-tag.ts";
+import { clientTag, escapeAttribute, stripClientTag } from "../src/shared/client-tag.ts";
 import { spyBuiltins } from "./spied-builtins.ts";
 
 describe("clientTag", () => {
@@ -87,5 +87,12 @@ describe("stripClientTag", () => {
     });
     expect(seen).toEqual([]);
     expect(stripped).toBe("<p>s3cr3t</p>");
+  });
+});
+
+describe("escapeAttribute", () => {
+  it("escapes text for a quoted HTML attribute, such as a replayed form field", () => {
+    expect(escapeAttribute(`"><script>&'x`)).toBe("&quot;&gt;&lt;script&gt;&amp;&#39;x");
+    expect(escapeAttribute("ü plain")).toBe("ü plain");
   });
 });

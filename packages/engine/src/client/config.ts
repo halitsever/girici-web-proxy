@@ -5,7 +5,9 @@ import {
   type CookieSnapshot,
   type InheritedContext,
   type OriginSeal,
+  type SiteContext,
 } from "../shared/protocol.ts";
+import { SEARCH_ENGINES, type SearchEngine } from "../shared/target.ts";
 
 export function readConfig(raw: string | null): ClientConfig {
   // A missing or broken config leaves the page with an empty cookie mirror.
@@ -36,6 +38,8 @@ export function parseConfig(raw: string | null): ClientConfig | null {
   if (typeof blocked === "boolean") config.cookiesBlocked = blocked;
   const seal = readSeal(ownValue(parsed, "seal"));
   if (seal) config.seal = seal;
+  const sites = readSites(ownValue(parsed, "sites"));
+  if (sites) config.sites = sites;
   return config;
 }
 
@@ -75,6 +79,30 @@ function readInherited(value: unknown): InheritedContext | undefined {
   const blob = ownValue(value, "blob");
   if (typeof blob === "string") inherit.blob = blob;
   return inherit;
+}
+
+const SITE_TEXTS = ["domain", "root", "label", "key", "site"];
+
+/**
+ * All or nothing: a half-read context would leave a page on a site host neither in site mode nor out of it. Values that
+ * fit their types but name no host of this instance only make every label check fail.
+ */
+function readSites(value: unknown): SiteContext | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const sites = { __proto__: null } as Record<string, unknown>;
+  for (let index = 0; index < SITE_TEXTS.length; index++) {
+    const name = SITE_TEXTS[index] as string;
+    const text = ownValue(value, name);
+    if (typeof text !== "string") return undefined;
+    sites[name] = text;
+  }
+  const toolbar = ownValue(value, "toolbar");
+  const engine = ownValue(value, "engine");
+  if (typeof toolbar !== "boolean" || typeof engine !== "string") return undefined;
+  if (ownValue(SEARCH_ENGINES, engine) === undefined) return undefined;
+  sites.toolbar = toolbar;
+  sites.engine = engine as SearchEngine;
+  return sites as unknown as SiteContext;
 }
 
 function readSeal(value: unknown): OriginSeal | undefined {

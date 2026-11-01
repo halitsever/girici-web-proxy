@@ -3,20 +3,27 @@ import "./assets/main.css";
 
 import { createApp, watch } from "vue";
 import App from "./App.vue";
+import { getAuthState } from "./lib/auth";
 import { applyBrandToDocument, brand, loadBrand, type BrandDocument } from "./lib/brand";
-import { syncEnginePrefs } from "./lib/engine-prefs";
 import { reloadThroughEngine } from "./lib/proxy";
 import { loadSettings } from "./lib/settings";
+import { isSiteMode, retireRootEngine, syncSettings } from "./lib/sites";
 import router from "./router";
 
-void reloadThroughEngine()
-  .catch(() => false)
-  .then(async (reloading) => {
-    if (reloading) return;
-    await loadBrand();
-    // BrandDocument is the narrow structural view the unit test fakes; the real Document satisfies it at run time.
-    watch(brand, (next) => applyBrandToDocument(next, document as unknown as BrandDocument), { immediate: true });
-    createApp(App).use(router).mount("#app");
-    // A worker installed before the last settings change still holds the old choice until it hears this.
-    void syncEnginePrefs(loadSettings());
-  });
+async function start(): Promise<void> {
+  // Started before the mode is known, so a single-origin tab reloads as early as it always did; a root with no worker
+  // in subdomain mode never reloads here.
+  const engine = reloadThroughEngine().catch(() => false);
+  // The router guard reuses this cached read.
+  const state = await getAuthState().catch(() => null);
+  const reloading = await (isSiteMode(state) ? retireRootEngine().catch(() => false) : engine);
+  if (reloading) return;
+  await loadBrand();
+  // BrandDocument is the narrow structural view the unit test fakes; the real Document satisfies it at run time.
+  watch(brand, (next) => applyBrandToDocument(next, document as unknown as BrandDocument), { immediate: true });
+  createApp(App).use(router).mount("#app");
+  // The engine may still hold settings from before the last change, in a root worker or the site hosts' cookie.
+  void syncSettings(loadSettings(), state);
+}
+
+void start();

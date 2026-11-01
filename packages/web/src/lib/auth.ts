@@ -11,6 +11,8 @@ export interface AuthState {
   sealAddresses: boolean;
   /** True only while the instance is public and the admin left the warning on. */
   deepLinkWarning: boolean;
+  /** The site domain, port included, in subdomain mode; null on a single origin. */
+  siteDomain: string | null;
   admin?: AdminInfo;
 }
 

@@ -2,9 +2,9 @@ import { STATUS_CODES, type IncomingMessage, type Server } from "node:http";
 import { isIP, type LookupFunction } from "node:net";
 import type { Duplex } from "node:stream";
 import { rootCertificates, connect as tlsConnect } from "node:tls";
-import type { RelayErrorCode } from "@girici/engine/shared";
+import { classifySiteHost, type RelayErrorCode, type SiteDomain } from "@girici/engine/shared";
 import { WebSocket, WebSocketServer, type ClientOptions, type RawData } from "ws";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientIp, clientKey, compileTrust, type TrustFn } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
@@ -74,6 +74,8 @@ export interface WsRelayOptions {
   upgradeGates?: readonly UpgradeGate[];
   /** Asked after each frame is counted; false closes the client with 1008 "quota". The admin is never cut. */
   allowFrame?: (key: string) => boolean;
+  /** Subdomain mode: upgrades are taken on site hosts only, and the relay never opens a host under the domain. */
+  siteDomain?: SiteDomain;
 }
 
 export interface WsRelayHandle {
@@ -159,7 +161,7 @@ function parseControlFrame(data: RawData, isBinary: boolean): ControlFrame | nul
 /** Same rule as the HTTP gate: open when public, else a valid session for the current admin. */
 function wsAuthorized(store: AuthStore | undefined, cookie: string | undefined): boolean {
   if (!store || store.publicAccess()) return true;
-  return isAdminCookie(store, cookie);
+  return isSessionCookie(store, cookie);
 }
 
 /** A plain HTTP answer lets the browser's WebSocket fail fast instead of waiting on a silently dropped socket. */
@@ -273,6 +275,10 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
       socket.destroy();
       return;
     }
+    if (options.siteDomain && classifySiteHost(req.headers.host, options.siteDomain).kind !== "site") {
+      socket.destroy();
+      return;
+    }
     if (!wsAuthorized(options.authStore, req.headers.cookie)) {
       observer.answered("ws", "auth");
       socket.destroy();
@@ -287,7 +293,7 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
       return;
     }
     const limit = options.limiter?.(ip);
-    if (limit && !limit.ok && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie))) {
+    if (limit && !limit.ok && !(options.authStore && isSessionCookie(options.authStore, req.headers.cookie))) {
       observer.answered("ws", "rate_limited");
       refuse(socket, 429, limit.retryAfter);
       return;
@@ -299,7 +305,8 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
     }
     // Checked once here, so an admin's socket is never cut mid-stream.
     const limited =
-      options.allowFrame !== undefined && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie));
+      options.allowFrame !== undefined &&
+      !(options.authStore && isSessionCookie(options.authStore, req.headers.cookie));
     wss.handleUpgrade(req, socket, head, (client) => {
       // Counted only once upgraded: a handshake ws rejects never reaches this callback to give its slot back.
       if (!perClient.take(ip, maxPerIp)) {
@@ -367,7 +374,11 @@ function bridge(client: WebSocket, req: IncomingMessage, conn: Connection, optio
       return;
     }
     try {
-      validateWsTarget(target, { allowedTestHosts: options.allowedTestHosts, selfHost: req.headers.host });
+      validateWsTarget(target, {
+        allowedTestHosts: options.allowedTestHosts,
+        selfHost: req.headers.host,
+        siteDomain: options.siteDomain?.host,
+      });
     } catch (error) {
       options.logger.debug(`ws blocked ${target.host}`);
       const ssrf = error instanceof SsrfBlockedError;

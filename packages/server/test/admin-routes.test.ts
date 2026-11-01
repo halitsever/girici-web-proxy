@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { adminRouter } from "../src/routes/admin.ts";
@@ -18,14 +19,19 @@ afterEach(() => new Promise<void>((resolve) => server.close(() => resolve())));
 const setup = { username: "halit", name: "Halit", email: "h@h.h", password: "pw-123456" };
 
 async function withAdmin(
-  options: { envBlocked?: string[] } = {},
+  options: { envBlocked?: string[]; siteDomain?: SiteDomain } = {},
 ): Promise<{ base: string; store: AuthStore; cookie: string; blocklist: HostBlocklist }> {
   const store = new AuthStore(openDb(":memory:"));
   const admin = store.createAdmin(setup);
   const blocklist = new HostBlocklist(options.envBlocked ?? [], store.blockedHosts());
   const app = express();
   app.use(
-    adminRouter(store, blocklist, new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), store)),
+    adminRouter(
+      store,
+      blocklist,
+      new BrandStore(join(mkdtempSync(join(tmpdir(), "girici-brand-")), "brand"), store),
+      options.siteDomain,
+    ),
   );
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -82,6 +88,19 @@ describe("adminRouter account", () => {
     expect(
       res.headers.getSetCookie().some((c) => c.startsWith(`${SESSION_COOKIE}=`) || c.startsWith("girici-session=")),
     ).toBe(true);
+  });
+
+  it("re-issues the site session after a password change", async () => {
+    const { base, cookie } = await withAdmin({ siteDomain: parseSiteDomain("proxy.test")! });
+    const res = await post(
+      base,
+      "/_g/account",
+      { name: "Halit", email: "h@h.h", password: "brand-new-pw", currentPassword: setup.password },
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    const site = res.headers.getSetCookie().find((c) => c.startsWith("girici-site="));
+    expect(site).toMatch(/; Domain=proxy\.test; Path=\/_g\/;/);
   });
 
   it("rejects a cross-origin update", async () => {

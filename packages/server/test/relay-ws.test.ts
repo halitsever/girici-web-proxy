@@ -2,7 +2,8 @@ import { createServer, type Server } from "node:http";
 import { connect as netConnect, type AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { parseSiteDomain } from "@girici/engine/shared";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
@@ -255,6 +256,24 @@ describe("ws relay (integration)", () => {
       client.on("error", (e) => reject(e));
       setTimeout(() => reject(new Error("did not open")), 3000);
     });
+  });
+
+  it("accepts a site session on a site host and refuses upgrades on the root", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    const url = await relayServer(await echoUpstream(), {
+      authStore: store,
+      siteDomain: parseSiteDomain("proxy.test")!,
+    });
+    const cookie = `girici-site=${createSiteSessionToken(admin.id, store.sessionSecret())}`;
+    const upgrade = (host: string) => {
+      const ws = new WebSocket(url, ["girici.v1"], { headers: { host, origin: `http://${host}`, cookie } });
+      cleanups.push(() => ws.close());
+      return ws;
+    };
+    await opened(upgrade("k6wjalxihe6pja6woodbryo47k.proxy.test"));
+    await expect(opened(upgrade("proxy.test"))).rejects.toThrow();
+    await expect(opened(upgrade("127.0.0.1"))).rejects.toThrow();
   });
 
   it("relays text and binary frames and forwards the upstream Set-Cookie", async () => {

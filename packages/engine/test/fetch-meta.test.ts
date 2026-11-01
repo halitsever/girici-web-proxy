@@ -14,6 +14,14 @@ describe("secFetchSite", () => {
   ])("secFetchSite(%s, %s) is %s", (from, to, site) => {
     expect(secFetchSite(from ? new URL(from) : null, new URL(to))).toBe(site);
   });
+
+  it("counts names in the private part of the public suffix list as sites of their own in subdomain mode", () => {
+    const alice = new URL("https://alice.github.io/");
+    const bob = new URL("https://bob.github.io/");
+    expect(secFetchSite(alice, bob)).toBe("same-site");
+    expect(secFetchSite(alice, bob, true)).toBe("cross-site");
+    expect(secFetchSite(new URL("https://a.example.com/"), new URL("https://b.example.com/"), true)).toBe("same-site");
+  });
 });
 
 describe("refererFor", () => {

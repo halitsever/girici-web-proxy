@@ -1,5 +1,5 @@
 import type { FrameLocator, Page } from "@playwright/test";
-import { expect, openThroughUi, test } from "./support/test.ts";
+import { expect, isSiteProject, openThroughUi, test } from "./support/test.ts";
 
 test("refuses another site's popup document but keeps messaging and navigation", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/cross-popup");
@@ -19,6 +19,7 @@ test("refuses another site's popup document but keeps messaging and navigation",
 test("keeps an embedded site's storage per top site and a same-site frame on its own storage", async ({ page }) => {
   await openThroughUi(page, "https://site-b.test/storage?set=b");
   await page.goto("/~/https/www.site-a.test/storage?set=w");
+  await expect(page.locator("#value")).toHaveText("w");
   await page.goto("/~/https/site-a.test/embed-storage");
   await expect(page.frameLocator("#b").locator("#value")).toHaveText("");
   await expect(page.frameLocator("#www").locator("#value")).toHaveText("w");
@@ -80,7 +81,11 @@ for (const [name, button] of [
   });
 }
 
-test("shows a storage change only to windows of the site that made it", async ({ page, context }) => {
+test("shows a storage change only to windows of the site that made it", async ({ page, context, browserName }) => {
+  test.skip(
+    isSiteProject(test.info()) && browserName === "webkit",
+    "WebKit sends no storage events between tabs on *.localhost site hosts, even between plain pages",
+  );
   await openThroughUi(page, "https://site-a.test/storage-events");
   const other = await context.newPage();
   await other.goto("/~/https/site-b.test/storage-events");

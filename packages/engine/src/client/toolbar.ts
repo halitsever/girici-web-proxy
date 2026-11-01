@@ -1,8 +1,13 @@
-import { append } from "../shared/primordials.ts";
-import { PROTOCOL_VERSION, SITE_DATA_RPC_PATH } from "../shared/protocol.ts";
+import { append, ownValue } from "../shared/primordials.ts";
+import {
+  PROTOCOL_VERSION,
+  SITE_DATA_RPC_PATH,
+  type SiteContext,
+  type SiteDataClearAnswer,
+} from "../shared/protocol.ts";
 import { captureSiteDataEnv, clearPartitions, type SiteDataEnv } from "../shared/site-data.ts";
-import { classifyInput } from "../shared/target.ts";
-import { readToolbarPrefs, UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
+import { classifyInput, type SearchEngine } from "../shared/target.ts";
+import { readToolbarPrefs } from "../shared/ui-settings.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import { TOOLBAR_CSS, TOOLBAR_HTML } from "./toolbar-view.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
@@ -78,8 +83,25 @@ export function createToolbarKeys(win: Realm): ToolbarKeys {
   };
 }
 
-export function shouldShowToolbar(input: { isTop: boolean; inherited: boolean; prefs: string | null }): boolean {
-  return input.isTop && !input.inherited && readToolbarPrefs(input.prefs).toolbar;
+/** On a site host `site` holds the UI's settings; the host's own storage belongs to the site. */
+export function shouldShowToolbar(input: {
+  isTop: boolean;
+  inherited: boolean;
+  prefs: string | null;
+  site?: { toolbar: boolean };
+}): boolean {
+  if (!input.isTop || input.inherited) return false;
+  return input.site ? input.site.toolbar : readToolbarPrefs(input.prefs).toolbar;
+}
+
+/** The Girici UI: the root in subdomain mode, else this origin. */
+export function toolbarHome(origin: string, sites?: SiteContext): string {
+  return `${sites ? sites.root : origin}/`;
+}
+
+/** The site whose partitions go, or null for all of them when the worker cleared the whole host. */
+export function partitionsToClear(answer: SiteDataClearAnswer): string | null {
+  return ownValue(answer, "all") === true ? null : answer.site;
 }
 
 /** A small overlay at the bottom-left corner; it never moves the page's own layout. */
@@ -89,9 +111,9 @@ export function installToolbar(
   natives: ToolbarNatives,
   nav: ToolbarNavigation,
   keys: ToolbarKeys,
+  options: { home: string; engine: SearchEngine },
 ): void {
   const doc = win.document;
-  const prefs = readToolbarPrefs(natives.storage?.getItem(UI_SETTINGS_KEY) ?? null);
   const host = doc.createElement(TOOLBAR_TAG);
   const root = natives.attachShadow(host);
   natives.setShadowHtml(root, TOOLBAR_HTML);
@@ -142,16 +164,16 @@ export function installToolbar(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ v: PROTOCOL_VERSION, op: "clear" }),
       });
-      const { site } = (await response.json()) as { site?: unknown };
-      if (!response.ok || typeof site !== "string") throw new Error("site data RPC failed");
-      await clearPartitions(natives.siteData, site);
+      const answer = (await response.json()) as SiteDataClearAnswer;
+      if (!response.ok || typeof answer?.site !== "string") throw new Error("site data RPC failed");
+      await clearPartitions(natives.siteData, partitionsToClear(answer));
       nav.reload();
     } catch {
       message.textContent = "Could not clear this site.";
     }
   };
   const submit = () => {
-    const resolution = classifyInput(address.value, prefs.engine);
+    const resolution = classifyInput(address.value, options.engine);
     if (resolution.kind === "url" || resolution.kind === "search") nav.assign(resolution.path);
     else address.setAttribute("aria-invalid", "true");
   };
@@ -159,7 +181,7 @@ export function installToolbar(
   handle.addEventListener("click", expand);
   panel.addEventListener("click", (event) => {
     const action = (event.target as Element | null)?.closest("button")?.dataset.action;
-    if (action === "home") nav.assign(ctx.origin + "/");
+    if (action === "home") nav.assign(options.home);
     else if (action === "back") win.history.back();
     else if (action === "forward") win.history.forward();
     else if (action === "reload") nav.reload();

@@ -9,13 +9,27 @@ import {
   WS_SEAL_PATH,
 } from "../shared/protocol.ts";
 import { isSealedPath, SEALED_PREFIX, type OpenSealed } from "../shared/sealed-address.ts";
+import type { SiteDomain } from "../shared/site-label.ts";
 
 export type Route =
   | { kind: "passthrough" }
   | { kind: "proxy"; target: URL; navigation: boolean; sealed: boolean }
   | { kind: "redirect"; location: string }
   | { kind: "invalid" }
-  | { kind: "unsealable" };
+  | { kind: "unsealable" }
+  /** An absolute address on another site host. */
+  | { kind: "move"; location: string }
+  /** A navigation that cannot be placed before this browser signs in. */
+  | { kind: "signin"; target: URL };
+
+/** Subdomain mode as the router sees it. */
+export interface SiteRouting {
+  /** This host's origin. */
+  origin: string;
+  domain: SiteDomain;
+  /** The origin of the host that serves a URL's site, or null without the label key. */
+  hostOf(url: URL): string | null;
+}
 
 export interface RouteInput {
   url: string;
@@ -28,6 +42,7 @@ export interface RouteInput {
   open?: OpenSealed;
   /** Given while sealing is on, or for a sealed request while this browser has the key. */
   seal?: (url: URL) => string;
+  site?: SiteRouting;
 }
 
 export function classifyRequest(input: RouteInput): Route {
@@ -43,7 +58,7 @@ export function classifyRequest(input: RouteInput): Route {
     if (input.clientUrl && isOwnOrigin(input.clientUrl, input.origin)) return { kind: "passthrough" };
     return { kind: "proxy", target: url, navigation: false, sealed: false };
   }
-  if (isReservedPath(url.pathname)) return { kind: "passthrough" };
+  if (isHostReservedPath(url.pathname, !!input.site)) return { kind: "passthrough" };
 
   const pathAndQuery = url.pathname + url.search;
   const sealOnLoad = input.topLevelGet ? input.seal : undefined;
@@ -52,6 +67,8 @@ export function classifyRequest(input: RouteInput): Route {
     const bare = url.search === "" && url.href.endsWith("?") ? "?" : "";
     const target = input.open?.(pathAndQuery + bare) ?? null;
     if (target) {
+      const away = placeOf(target, input);
+      if (away) return away;
       const address = sealOnLoad?.(target);
       // A query written after the token is sealed in, so the address bar never shows it.
       if (address !== undefined && address !== pathAndQuery) return { kind: "redirect", location: address };
@@ -67,6 +84,9 @@ export function classifyRequest(input: RouteInput): Route {
       const base = sealedBase(input);
       return base ? relativeToSealed(`../${sliceAfter(pathAndQuery, PROXY_PREFIX)}`, input) : { kind: "invalid" };
     }
+    // Another host seals its own site's addresses, so a move carries the plain one.
+    const away = placeOf(target, input);
+    if (away) return away;
     if (sealOnLoad) return { kind: "redirect", location: sealOnLoad(target) };
     const canonical = encodeUrl(target);
     if (canonical !== pathAndQuery) return { kind: "redirect", location: canonical };
@@ -79,7 +99,16 @@ export function classifyRequest(input: RouteInput): Route {
   // A sealed page whose address does not open here must not reach the Girici server with its cookies.
   if (!base) return isSealedClient(from, input.origin) ? { kind: "unsealable" } : { kind: "passthrough" };
   const real = new URL(pathAndQuery, base.origin);
-  return { kind: "redirect", location: sealOnLoad ? sealOnLoad(real) : encodeUrl(real) };
+  return placeOf(real, input) ?? { kind: "redirect", location: sealOnLoad ? sealOnLoad(real) : encodeUrl(real) };
+}
+
+/** In subdomain mode a navigation whose site lives on another host goes there; null keeps it on this one. */
+function placeOf(target: URL, input: RouteInput): Route | null {
+  const site = input.site;
+  if (!site || !input.navigation) return null;
+  const host = site.hostOf(target);
+  if (host === null) return { kind: "signin", target };
+  return host === site.origin ? null : { kind: "move", location: host + encodeUrl(target) };
 }
 
 /** Resolves a path the browser placed under a sealed page against that page's real address. */
@@ -95,6 +124,8 @@ function relativeToSealed(relative: string, input: RouteInput): Route {
   // A path such as javascript:x resolves to no address the proxy can carry or seal.
   if (real.protocol !== "http:" && real.protocol !== "https:") return { kind: "invalid" };
   if (input.navigation) {
+    const away = placeOf(real, input);
+    if (away) return away;
     return { kind: "redirect", location: (input.topLevelGet ? input.seal?.(real) : undefined) ?? encodeUrl(real) };
   }
   return { kind: "proxy", target: real, navigation: false, sealed: false };
@@ -127,6 +158,19 @@ function isOwnOrigin(value: string, origin: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Routes the network answers whatever the mode, so a worker that has not read its mode yet need not answer them. A
+ * clear hop's Clear-Site-Data then always comes from the network itself.
+ */
+export function isNetworkInEitherMode(url: URL, origin: string): boolean {
+  return url.origin === origin && url.pathname.startsWith("/_g/sites/");
+}
+
+/** Paths the network answers; on a site host `/` and `/robots.txt` belong to the page's own site. */
+export function isHostReservedPath(pathname: string, siteMode: boolean): boolean {
+  return siteMode ? pathname.startsWith("/_g/") : isReservedPath(pathname);
 }
 
 /** The real URL behind one of our proxy URLs, or null for the Girici UI and foreign URLs. */
@@ -226,7 +270,8 @@ export interface ReservedRequest {
 
 /**
  * Proxied pages share our origin, so the browser sends the admin's cookie with their calls too. Only the UI's own
- * calls and top-level page loads pass; the worker's own fetches never come through its fetch handler.
+ * calls and top-level page loads pass; the worker's own fetches never come through its fetch handler. A site host
+ * has no UI, so nothing passes there.
  */
 export function reservedAccess(
   pathname: string,
@@ -234,9 +279,10 @@ export function reservedAccess(
   client: ClientShape | null | undefined,
   origin: string,
   ui: UiClientSet,
+  siteMode = false,
 ): "allow" | "deny" {
   const path = normalizePath(pathname);
-  if (WORKER_ONLY.has(path) || NO_BROWSER.has(path)) return "deny";
+  if (siteMode || WORKER_ONLY.has(path) || NO_BROWSER.has(path)) return "deny";
   if (request.mode === "navigate") {
     return request.destination === "document" && request.method === "GET" ? "allow" : "deny";
   }
