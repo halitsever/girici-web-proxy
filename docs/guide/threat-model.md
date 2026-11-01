@@ -70,8 +70,8 @@ What stays open, and what the mode adds:
 - Site labels appear in DNS lookups and the TLS handshake, so a network observer sees one stable label per site. Anyone
   allowed to browse the instance can match labels to sites.
 - Navigations between sites arrive without a `Referer`, and a POST carries `Origin: null`.
-- In WebKit, uploads from script-built forms to another site lose their files. In every browser, a multipart POST to a
-  site never opened before stops at a page that explains why. WebKit gives an embedded site its own worker install
+- In WebKit, a form that uploads files to another site loses its fields and files. In every browser, a multipart POST
+  to a site never opened before stops at a page that explains why. WebKit gives an embedded site its own worker install
   and cookie jar for each site that embeds it.
 - Browser protections keyed to the site, such as HTTP cache partitioning, the `window.name` reset, process-per-site
   and SameSite, see one site for all Girici hosts.

@@ -175,9 +175,9 @@ back to the site afterwards.
 - **Navigations between sites lose their initiator.** The receiving site gets no `Referer`, and a POST carries
   `Origin: null`, as browsers send under `no-referrer`. Embeds that insist on a referrer, such as maps with
   referrer-restricted API keys or some video players, may refuse to load.
-- **Some cross-site form posts lose their body or stop.** In Safari, a file upload from a form that a script builds and
-  posts to another site arrives without its files. In every browser, a `multipart/form-data` POST to a site never
-  opened before in that browser stops at a page that asks to open the site once first.
+- **Some cross-site form posts lose their body or stop.** In Safari, a form that uploads files to another site arrives
+  without its fields and files. In every browser, a `multipart/form-data` POST to a site never opened before in that
+  browser stops at a page that asks to open the site once first.
 - **Safari installs an embedded site again per embedder.** Each site that embeds another gets its own worker install
   and cookie jar for it.
 - **Browser protections keyed to the site treat all Girici hosts as one.** Every host sits under one registrable
@@ -206,6 +206,8 @@ What visitors notice:
   them, and each site starts empty and signed out on its own host. **Settings → Site data** offers to remove the old
   data.
 - **Plain links keep working.** `/~/` links and bookmarks on the root redirect to the site's host.
+- **Admins stay signed in.** On a private instance, the first visit to the Girici UI or to a `/~/` link extends the
+  admin's session to the site hosts. A site's own address opened before that lands on the Girici home page once.
 - **Encrypted links stop working.** An encrypted address (`/~/x/…`) from single-origin mode opens a page that says to
   open the site again from Girici.
 - **The old service worker retires.** The UI removes the service worker left on the root and reloads once. A tab left
@@ -220,8 +222,9 @@ of reach, until they clear it there.
 
 ## Troubleshooting
 
-**Every page answers 404.** Girici answers 404 on any host that is neither `GIRICI_SITE_DOMAIN` nor one label in front
-of it; only `/healthz` and `/robots.txt` work there, so health checks by IP address keep passing. Check that the
+**Every page answers 404.** Girici answers 404 on any host that is neither `GIRICI_SITE_DOMAIN` nor a site host, a
+26-character label in front of it; only `/healthz` and `/robots.txt` work there, so health checks by IP address keep
+passing. Check that the
 address in the browser matches the variable exactly: the same name, a port only if the address shows one, and no
 `:443`. `www.proxy.example`, other subdomains and the server's IP address all get 404. Redirect them in the proxy if
 visitors use them.
