@@ -118,6 +118,8 @@ export function createChildConfig(
       inherit: { __proto__: null, origin: ctx.origin, base: hrefOf(ctx.realUrl()) },
       ...(current.cookiesBlocked !== undefined ? { cookiesBlocked: current.cookiesBlocked } : undefined),
       ...(current.site !== undefined ? { site: current.site } : undefined),
+      // A blank or srcdoc frame sits on its creator's host, which a renewal cannot change.
+      ...(initial.sites !== undefined ? { sites: initial.sites } : undefined),
     } as ClientConfig;
   };
 }
