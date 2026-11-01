@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createSiteSessionToken } from "../src/auth/cookie.ts";
+import { createSessionToken, createSiteSessionToken } from "../src/auth/cookie.ts";
 import { FRESH_POST } from "../src/routes/bootstrap.ts";
 import { RETIRE_WORKER, SEALED_GONE } from "../src/routes/sites.ts";
 import { siteHostFor } from "../src/sites/hosts.ts";
@@ -41,6 +41,28 @@ describe("the root in subdomain mode", () => {
     for (const cookie of [`girici-site=${token}`, `__Secure-girici-site=${token}`]) {
       const res = await send("/~/https/www.site-a.test/x", { host: "proxy.test", headers: { cookie } });
       expect(res.headers.location, cookie).toBe(`//${siteA}/~/https/www.site-a.test/x`);
+    }
+  });
+
+  it("gives a signed-in admin the site session on the root redirect", async () => {
+    store.setPublicAccess(false);
+    const admin = `girici-session=${createSessionToken(store.admin()!.id, store.sessionSecret())}`;
+    const res = await send("/~/https/www.site-a.test/x", { host: "proxy.test", headers: { cookie: admin } });
+    expect(res.headers.location).toBe(`//${siteA}/~/https/www.site-a.test/x`);
+    expect(res.cookies).toHaveLength(1);
+    expect(res.cookies[0]).toMatch(/^girici-site=[^;]+; Max-Age=\d+; Domain=proxy\.test; Path=\/_g\/;/);
+    const stale = `girici-session=${createSessionToken(store.admin()!.id, store.sessionSecret(), Date.now() - 10_000)}`;
+    store.revokeSessions(Date.now() - 5_000);
+    const revoked = await send("/~/https/www.site-a.test/x", { host: "proxy.test", headers: { cookie: stale } });
+    expect(revoked.headers.location).toMatch(/^\/_g\/login\?next=/);
+    expect(revoked.cookies).toEqual([]);
+  });
+
+  it("never issues the site session on a site host", async () => {
+    const admin = `girici-session=${createSessionToken(store.admin()!.id, store.sessionSecret())}`;
+    for (const path of ["/_g/auth/state", "/~/https/site-a.test/", "/_g/sites/config", "/"]) {
+      const res = await send(path, { host: siteA, headers: { cookie: admin, "sec-fetch-dest": "document" } });
+      expect(res.cookies, path).toEqual([]);
     }
   });
 

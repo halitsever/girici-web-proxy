@@ -17,7 +17,7 @@ import {
   type SitePlanAnswer,
 } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
-import { isSessionCookie, siteSessionAdmin } from "../auth/gate.ts";
+import { addSiteSession, isSessionCookie, siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { isOwnHost } from "../http/origin.ts";
 import { clearPage, openPlan, PLAN_TTL_MS, signPlan, type ClearPlan } from "../sites/clear.ts";
@@ -63,6 +63,8 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
       res.redirect(302, `${LOGIN_PATH}?next=${encodeURIComponent(target.href)}`);
       return;
     }
+    // The site host's relay needs the site session, which an admin signed in before subdomain mode lacks.
+    addSiteSession(req, res, store, domain);
     // Scheme-relative, so the site host opens on the scheme the page used.
     res.redirect(302, `//${siteHostFor(target, setup)}${encodeUrl(target)}`);
   });

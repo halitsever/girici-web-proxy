@@ -24,7 +24,19 @@ export function createSiteSessionToken(sub: number, secret: string, now = Date.n
 
 /** The first valid admin session in a Cookie header, or null when every token is missing, expired or unsigned. */
 export function readSession(cookieHeader: string | undefined, secret: string, now = Date.now()): SessionPayload | null {
-  return firstSession(cookieHeader, [SESSION_COOKIE, PLAIN_SESSION_COOKIE], undefined, secret, now);
+  return readAdminSession(cookieHeader, secret, now)?.payload ?? null;
+}
+
+/** Also tells whether the session came in the https-only cookie, the one hint of the page's scheme on a GET. */
+export function readAdminSession(
+  cookieHeader: string | undefined,
+  secret: string,
+  now = Date.now(),
+): { payload: SessionPayload; https: boolean } | null {
+  const secure = firstSession(cookieHeader, [SESSION_COOKIE], undefined, secret, now);
+  if (secure) return { payload: secure, https: true };
+  const plain = firstSession(cookieHeader, [PLAIN_SESSION_COOKIE], undefined, secret, now);
+  return plain ? { payload: plain, https: false } : null;
 }
 
 /** The first valid site session; an admin token under a site cookie's name does not count. */
@@ -63,11 +75,30 @@ export function issueSession(req: Request, res: Response, sub: number, secret: s
   const options = { httpOnly: true, sameSite: "lax", path: "/", maxAge: SESSION_TTL_MS } as const;
   if (https) res.cookie(SESSION_COOKIE, token, { ...options, secure: true });
   else res.cookie(PLAIN_SESSION_COOKIE, token, options);
-  if (!siteDomain) return;
-  const site = createSiteSessionToken(sub, secret);
-  const siteOptions = { ...options, domain: siteDomain.host, path: SITE_SESSION_PATH };
-  if (https) res.cookie(SITE_SESSION_COOKIE, site, { ...siteOptions, secure: true });
-  else res.cookie(PLAIN_SITE_SESSION_COOKIE, site, siteOptions);
+  if (siteDomain) issueSiteSession(res, sub, secret, siteDomain, https);
+}
+
+/** `exp` lets a site session end with the admin session it was made from. */
+export function issueSiteSession(
+  res: Response,
+  sub: number,
+  secret: string,
+  siteDomain: SiteDomain,
+  https: boolean,
+  exp?: number,
+): void {
+  const now = Date.now();
+  const issued = exp === undefined ? now : exp - SESSION_TTL_MS;
+  const token = createSiteSessionToken(sub, secret, issued);
+  const options = {
+    httpOnly: true,
+    sameSite: "lax",
+    domain: siteDomain.host,
+    path: SITE_SESSION_PATH,
+    maxAge: issued + SESSION_TTL_MS - now,
+  } as const;
+  if (https) res.cookie(SITE_SESSION_COOKIE, token, { ...options, secure: true });
+  else res.cookie(PLAIN_SITE_SESSION_COOKIE, token, options);
 }
 
 export function clearSession(res: Response, siteDomain?: SiteDomain): void {

@@ -1,7 +1,7 @@
 import type { SiteDomain } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { clearSession, issueSession } from "../auth/cookie.ts";
-import { sessionAdmin } from "../auth/gate.ts";
+import { addSiteSession, sessionAdmin } from "../auth/gate.ts";
 import { generateSetupCode, setupCodeMatches } from "../auth/setup-code.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
@@ -36,6 +36,8 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
 
   router.get("/_g/auth/state", (req, res) => {
     res.setHeader("Cache-Control", "no-store");
+    // The UI reads this on every load, so an admin cookie from before subdomain mode gains its site session here.
+    if (options.siteDomain) addSiteSession(req, res, store, options.siteDomain);
     res.json(state(store, isAuthed(store, req), options.siteDomain));
   });
 

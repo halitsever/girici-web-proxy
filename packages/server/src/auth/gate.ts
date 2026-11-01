@@ -1,6 +1,8 @@
-import type { RequestHandler } from "express";
+import type { SiteDomain } from "@girici/engine/shared";
+import type { Request, RequestHandler, Response } from "express";
 import { sendRelayError } from "../http/relay-error.ts";
-import { readSession, readSiteSession } from "./cookie.ts";
+import { requestHost } from "../sites/hosts.ts";
+import { issueSiteSession, readAdminSession, readSession, readSiteSession } from "./cookie.ts";
 import type { SessionPayload } from "./session.ts";
 import type { AdminInfo, AuthStore } from "./store.ts";
 
@@ -26,6 +28,18 @@ export function isAdminCookie(store: AuthStore, cookieHeader: string | undefined
 /** Either session lets the admin browse; only `sessionAdmin` may change anything. */
 export function isSessionCookie(store: AuthStore, cookieHeader: string | undefined): boolean {
   return isAdminCookie(store, cookieHeader) || siteSessionAdmin(store, cookieHeader) !== null;
+}
+
+/**
+ * An admin signed in before subdomain mode holds only the admin cookie, which site hosts never see. On the root this
+ * adds a site session that ends when that admin session does.
+ */
+export function addSiteSession(req: Request, res: Response, store: AuthStore, siteDomain: SiteDomain): void {
+  if (requestHost(res).kind === "site" || siteSessionAdmin(store, req.headers.cookie)) return;
+  const session = readAdminSession(req.headers.cookie, store.sessionSecret());
+  if (!session || !currentAdmin(store, session.payload)) return;
+  const { sub, exp } = session.payload;
+  issueSiteSession(res, sub, store.sessionSecret(), siteDomain, session.https, exp);
 }
 
 function currentAdmin(store: AuthStore, payload: SessionPayload | null): AdminInfo | null {

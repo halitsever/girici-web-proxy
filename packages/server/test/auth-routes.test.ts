@@ -4,7 +4,9 @@ import { parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { authRouter } from "../src/routes/auth.ts";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE, SESSION_TTL_MS } from "../src/auth/cookie.ts";
+import { siteSessionAdmin } from "../src/auth/gate.ts";
+import { verifySession } from "../src/auth/session.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { hostRequest } from "./helpers/host-request.ts";
@@ -44,6 +46,48 @@ describe("authRouter state", () => {
   it("reports setup needed when no admin exists", async () => {
     const res = await fetch(`${await listen(new AuthStore(openDb(":memory:")))}/_g/auth/state`);
     expect(await res.json()).toMatchObject({ setup: true, authed: false, public: false });
+  });
+
+  it("gives a signed-in admin the site session from the sign-in state, ending with the admin's", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const base = await listen(store, { siteDomain: parseSiteDomain("proxy.test:8443")! });
+    const stateWith = (cookie?: string) =>
+      fetch(`${base}/_g/auth/state`, { headers: cookie ? { cookie } : {} }).then((res) => res.headers.getSetCookie());
+    const issuedAt = Date.now() - 86_400_000;
+    const token = createSessionToken(admin.id, store.sessionSecret(), issuedAt);
+
+    const [secure, ...rest] = await stateWith(`${SESSION_COOKIE}=${token}`);
+    expect(rest).toEqual([]);
+    expect(secure).toMatch(
+      /^__Secure-girici-site=[^;]+; Max-Age=\d+; Domain=proxy\.test; Path=\/_g\/; Expires=[^;]+; HttpOnly; Secure; SameSite=Lax$/,
+    );
+    const site = secure!.split(";")[0]!.split("=")[1]!;
+    expect(verifySession(site, store.sessionSecret())).toMatchObject({ aud: "site", exp: issuedAt + SESSION_TTL_MS });
+    expect(siteSessionAdmin(store, `girici-site=${site}`)?.id).toBe(admin.id);
+    expect(Number(/Max-Age=(\d+)/.exec(secure!)![1])).toBeLessThanOrEqual((SESSION_TTL_MS - 86_400_000) / 1000);
+
+    const [plain] = await stateWith(`girici-session=${token}`);
+    expect(plain).toMatch(/^girici-site=[^;]+;/);
+    expect(plain).not.toMatch(/Secure/);
+
+    const fresh = createSiteSessionToken(admin.id, store.sessionSecret());
+    expect(await stateWith(`${SESSION_COOKIE}=${token}; girici-site=${fresh}`)).toEqual([]);
+    expect(await stateWith()).toEqual([]);
+    expect(await stateWith(`${SESSION_COOKIE}=${fresh}`)).toEqual([]);
+    expect(await stateWith(`girici-session=junk`)).toEqual([]);
+    store.revokeSessions();
+    expect(await stateWith(`${SESSION_COOKIE}=${token}`)).toEqual([]);
+  });
+
+  it("issues no site session from the sign-in state in single-origin mode", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin(setup);
+    const base = await listen(store);
+    const res = await fetch(`${base}/_g/auth/state`, {
+      headers: { cookie: `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}` },
+    });
+    expect(res.headers.getSetCookie()).toEqual([]);
   });
 
   it("names the site domain in the sign-in state", async () => {
