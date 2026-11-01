@@ -72,7 +72,11 @@ export function errorResponse(code: ErrorPageCode, status: number, target: URL |
 
 /** Every service-worker refusal is an inert document, so a navigation to it cannot run script on our origin. */
 export function forbiddenResponse(): Response {
-  return new Response(null, { status: 403, headers: inertHeaders() });
+  // Without a type, Chromium saves a refused navigation as a download and Firefox never finishes loading it.
+  return new Response("Forbidden", {
+    status: 403,
+    headers: { ...inertHeaders(), "content-type": "text/plain; charset=utf-8" },
+  });
 }
 
 function escapeHtml(value: string): string {

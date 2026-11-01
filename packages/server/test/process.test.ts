@@ -87,6 +87,44 @@ describe("server process", () => {
     expect(Date.now() - started).toBeLessThan(3000);
   }, 15_000);
 
+  it("saves the traffic it counted when stopped", async () => {
+    const statsDir = mkdtempSync(join(tmpdir(), "girici-data-"));
+    const port = await freePort();
+    const child = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "info", GIRICI_DATA_DIR: statsDir });
+    const exited = exitCode(child);
+    await waitForOutput(child, /listening/);
+    // No admin and no public access, so the auth gate refuses it.
+    expect((await fetch(`http://127.0.0.1:${port}/_g/r/https/site.test/`)).status).toBe(401);
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+    const db = openDb(join(statsDir, "girici.db"));
+    expect(db.prepare("SELECT requests, refused FROM traffic_daily").all()).toEqual([{ requests: 0, refused: 1 }]);
+    db.close();
+  }, 15_000);
+
+  it("serves the status to the admin always and the metrics only with a token", async () => {
+    const port = await freePort();
+    const token = "process-metrics-token-0123";
+    const child = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "info", GIRICI_METRICS_TOKEN: token });
+    const exited = exitCode(child);
+    await waitForOutput(child, /listening/);
+    const base = `http://127.0.0.1:${port}`;
+    expect((await fetch(`${base}/_g/admin/status`)).status).toBe(401);
+    await fetch(`${base}/_g/r/https/site.test/`);
+    const metrics = await fetch(`${base}/metrics`, { headers: { authorization: `Bearer ${token}` } });
+    expect(metrics.status).toBe(200);
+    expect(await metrics.text()).toContain('girici_relay_requests_total{kind="http",code="auth"} 1');
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+
+    const plain = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "info" });
+    const plainExited = exitCode(plain);
+    await waitForOutput(plain, /listening/);
+    expect((await fetch(`${base}/metrics`, { headers: { authorization: `Bearer ${token}` } })).status).toBe(404);
+    plain.kill("SIGTERM");
+    expect(await plainExited).toBe(0);
+  }, 15_000);
+
   it("prints the trust-everything warning even at LOG_LEVEL=error", async () => {
     const port = await freePort();
     const child = start({ PORT: String(port), HOST: "127.0.0.1", LOG_LEVEL: "error", GIRICI_TRUST_PROXY: "true" });

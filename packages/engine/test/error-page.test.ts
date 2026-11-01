@@ -64,4 +64,10 @@ describe("forbiddenResponse", () => {
     expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
+
+  it("names its type, so a refused navigation shows a page instead of starting a download", async () => {
+    const res = forbiddenResponse();
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await res.text()).toBe("Forbidden");
+  });
 });

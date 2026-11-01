@@ -32,6 +32,8 @@ const OUTCOMES: Record<RelayErrorCode, "refused" | "failed"> = {
   proxy: "failed",
 };
 
+export const RELAY_ERROR_CODES = Object.keys(OUTCOMES) as readonly RelayErrorCode[];
+
 export function outcomeClass(code: RelayErrorCode | null): "ok" | "refused" | "failed" {
   return code === null ? "ok" : OUTCOMES[code];
 }
@@ -57,7 +59,7 @@ export interface TrafficCounters {
   startedAt: number;
 }
 
-/** Counts relay traffic by minute, by day and for the process lifetime. Never keeps a host, path or address. */
+/** Relay traffic as plain counts: it never keeps a host, path or address. */
 export class TrafficStats implements RelayObserver {
   readonly #now: () => number;
   readonly #startedAt: number;
