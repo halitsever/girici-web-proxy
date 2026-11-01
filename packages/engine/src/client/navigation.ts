@@ -3,12 +3,16 @@ import {
   append,
   apply,
   define,
+  exec,
   hrefOf,
   isWebUrl,
   listIncludes,
+  lowerCase,
   newUrl,
   originOf,
+  parseUrl,
   pathnameOf,
+  promiseThen,
   startsWith,
   toText,
 } from "../shared/primordials.ts";
@@ -27,6 +31,9 @@ const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
 /** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
 const LATER_EVENTS = ["contextmenu", "dragstart"];
 const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
+const FORM_OVERRIDES = ["formaction", "formmethod", "formenctype", "formtarget"];
+/** rel tokens that open a link's or form's window without an opener, which no realm then holds. */
+const SEVERING_REL = /(?:^|[\t\n\f\r ])(?:noopener|noreferrer)(?:$|[\t\n\f\r ])/;
 
 // Taken at load: these hooks run on page calls, after page code may have replaced them.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
@@ -44,6 +51,7 @@ export function installNavigation(
   invoke: Invoke,
   guard: WindowGuard,
   blobs: Pick<BlobDocuments, "swap" | "swapLink" | "restoreLinks" | "swapForm">,
+  prepareTarget: (target: string, destination: string | undefined) => void = () => {},
 ): NavigationHooks {
   const history = win.History.prototype;
   const historyOf = ownDescriptor(win, "history")?.get;
@@ -76,7 +84,7 @@ export function installNavigation(
     const proxied = url === undefined || url === null || url === "" ? url : blobs.swap(ctx.toProxy(toText(url)));
     const opened: unknown = apply(nativeOpen, this ?? win, [proxied, target, features]);
     // Until the page it was opened for arrives, a popup shows a blank page of this origin.
-    return guard.wrap(opened, openedOrigin(proxied, ctx.origin)) as Window | null;
+    return guard.wrap(opened, openedOrigin(proxied, ctx.origin, ctx.realBase())) as Window | null;
   }, nativeOpen);
   win.open = hookedOpen as typeof win.open;
 
@@ -98,6 +106,7 @@ export function installNavigation(
   // adopted from a parent run this code too, so nothing below may test values with this realm's own classes.
   const elementProto = win.Element.prototype;
   const { getAttributeNode, getAttribute, hasAttribute } = elementProto;
+  const querySelector = win.Document?.prototype.querySelector;
   const localNameOf = ownDescriptor(elementProto, "localName")?.get;
   const namespaceOf = ownDescriptor(elementProto, "namespaceURI")?.get;
   const attrValue = win.Attr ? ownDescriptor(win.Attr.prototype, "value") : undefined;
@@ -143,6 +152,28 @@ export function installNavigation(
     else attribute.value = ctx.toProxy(value);
   };
   const listeners: Array<[string, (event: Event) => void, boolean]> = [];
+  /** The real origin an element's URL attribute points to; an empty one is the document's own address. */
+  const destinationOf = (element: unknown, name: string): string | undefined => {
+    const attribute = apply(getAttributeNode, element, [name]) as Attr | null;
+    const raw = attribute ? toText(read(attrValue?.get, attribute, "value")) : "";
+    // A link the fixer already proxied names its real address only once unrewritten.
+    const url = parseUrl(ctx.fromProxy(raw), ctx.realBase());
+    return url && isWebUrl(url) ? originOf(url) : undefined;
+  };
+  /** The window name a link or form loads into: its own target, else the document's base target. */
+  const windowNameOf = (element: unknown, submitter: unknown): string | null => {
+    if (submitter && apply(hasAttribute, submitter, ["formtarget"])) return attributeOf(submitter, "formtarget");
+    if (apply(hasAttribute, element, ["target"])) return attributeOf(element, "target");
+    const base = querySelector ? (apply(querySelector, win.document, ["base[target]"]) as Element | null) : null;
+    return base ? attributeOf(base, "target") : null;
+  };
+  /** Readies a named window for a link or form before the browser makes it with the page's address. */
+  const readyTarget = (element: unknown, submitter: unknown, urlName: string) => {
+    const name = windowNameOf(element, submitter);
+    if (!name || exec(SEVERING_REL, lowerCase(attributeOf(element, "rel") ?? "")) !== null) return;
+    const formaction = submitter ? attributeOf(submitter, "formaction") : null;
+    prepareTarget(name, formaction ? destinationOf(submitter, "formaction") : destinationOf(element, urlName));
+  };
   const fixLink = (event: Event) => {
     const path = pathOf(event);
     for (let index = 0; index < path.length; index++) {
@@ -179,6 +210,7 @@ export function installNavigation(
   form.submit = function (this: HTMLFormElement) {
     fix(this, "action");
     blobs.swapForm(this);
+    if (kindOf(this) === "form") readyTarget(this, null, "action");
     apply(submit, this, []);
   };
   form.requestSubmit = function (this: HTMLFormElement, submitter?: HTMLElement | null) {
@@ -187,7 +219,31 @@ export function installNavigation(
     apply(requestSubmit, this, [submitter]);
   };
 
-  // These run after the page's own handlers, so links and forms a page handles itself are left alone.
+  // These run after the page's own handlers, so links and forms a page handles itself are left alone. A named
+  // window is readied first, before the listeners below may hold the navigation back.
+  append(listeners, [
+    "click",
+    (event) => {
+      if (read(preventedOf, event, "defaultPrevented") || !plainClick(event)) return;
+      const path = pathOf(event);
+      for (let index = 0; index < path.length; index++) {
+        const kind = kindOf(path[index]);
+        if (kind !== "link" && kind !== "svg link") continue;
+        readyTarget(path[index], null, "href");
+        return;
+      }
+    },
+    false,
+  ]);
+  append(listeners, [
+    "submit",
+    (event) => {
+      const target = read(targetOf, event, "target");
+      if (read(preventedOf, event, "defaultPrevented") || kindOf(target) !== "form") return;
+      readyTarget(target, read(submitterOf, event, "submitter"), "action");
+    },
+    false,
+  ]);
   append(listeners, [
     "click",
     (event) => {
@@ -205,7 +261,7 @@ export function installNavigation(
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
       // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
-      void writes.then(() => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
+      void promiseThen(writes, () => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
     },
     false,
   ]);
@@ -217,10 +273,10 @@ export function installNavigation(
       if (!writes || read(preventedOf, event, "defaultPrevented") || kindOf(target) !== "form") return;
       const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
       const formTarget = attributeOf(target, "target");
-      if ((formTarget && formTarget !== "_self") || overridesForm(submitter)) return;
+      if ((formTarget && formTarget !== "_self") || overridesForm(submitter, hasAttribute)) return;
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
-      void writes.then(() => {
+      void promiseThen(writes, () => {
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");
@@ -285,11 +341,13 @@ function addressOf(url: string, ctx: UrlContext): string {
 }
 
 /** A submitter that redirects the form elsewhere is left to the browser rather than replayed without its overrides. */
-function overridesForm(submitter: HTMLElement | null): boolean {
-  return (
-    !!submitter &&
-    ["formaction", "formmethod", "formenctype", "formtarget"].some((name) => submitter.hasAttribute(name))
-  );
+function overridesForm(submitter: HTMLElement | null, hasAttribute: Element["hasAttribute"]): boolean {
+  if (!submitter) return false;
+  // Indexed, with the window's own hasAttribute: this runs on the page's submits.
+  for (let index = 0; index < FORM_OVERRIDES.length; index++) {
+    if (apply(hasAttribute, submitter, [FORM_OVERRIDES[index]])) return true;
+  }
+  return false;
 }
 
 /** form.submit() leaves out the clicked button, so its name and value travel in a hidden field instead. */

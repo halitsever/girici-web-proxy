@@ -38,6 +38,8 @@ export interface UrlContext {
   inherit(next: InheritedContext | undefined, seal?: OriginSeal): void;
   /** Whether a document that reuses this window may take `next` without changing the window's real origin. */
   accepts(next: InheritedContext | undefined, seal?: OriginSeal): boolean;
+  /** Whether the document now in this window, read with its own `next` and seal, has the origin the window was given. */
+  keepsOrigin(next: InheritedContext | undefined, seal?: OriginSeal): boolean;
 }
 
 /** The real URL behind a proxy address on `proxyOrigin`, hash kept, or null for any other address. */
@@ -179,6 +181,13 @@ export function createUrlContext(win: Realm, initial?: InheritedContext, seal?: 
       if (ownUrl()) return true;
       const base = next ? parseUrl(next.base) : null;
       return base !== null && originOf(base) === pinned;
+    },
+    keepsOrigin: (next, offered) => {
+      const sealed = sealedPath(win.location.href);
+      const own = sealed === null ? ownUrl() : (fitting(offered)?.open(sealed) ?? null);
+      // A document without a proxy address of its own, such as a blob page, names its origin by what it inherits.
+      const real = own ?? (sealed === null && next ? parseUrl(next.base) : null);
+      return real !== null && originOf(real) === pinned;
     },
   };
 }

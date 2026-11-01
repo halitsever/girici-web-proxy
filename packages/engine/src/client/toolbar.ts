@@ -1,3 +1,4 @@
+import { append } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, SITE_DATA_RPC_PATH } from "../shared/protocol.ts";
 import { captureSiteDataEnv, clearPartitions, type SiteDataEnv } from "../shared/site-data.ts";
 import { classifyInput } from "../shared/target.ts";
@@ -98,7 +99,10 @@ export function installToolbar(
     // Adopted sheets sit outside the page's CSS and its style-src rules.
     const sheet = new win.CSSStyleSheet();
     sheet.replaceSync(TOOLBAR_CSS);
-    root.adoptedStyleSheets = [sheet];
+    // The window's own array: the setter iterates it, and this realm's iterator may be another page's.
+    const sheets = new win.Array<CSSStyleSheet>();
+    append(sheets, sheet);
+    root.adoptedStyleSheets = sheets;
   } catch {
     // Without constructable sheets the toolbar still works, unstyled.
   }

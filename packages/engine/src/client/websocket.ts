@@ -2,20 +2,25 @@ import {
   append,
   apply,
   hrefOf,
+  includes,
   isArray,
   mapOf,
   newUrl,
   ownValue,
   parseJson,
+  parseUrl,
+  protocolOf,
   quoteJson,
   sliceOf,
   startsWith,
-  toText,
+  stringOf,
 } from "../shared/primordials.ts";
 import { WS_PREP_PATH } from "../shared/protocol.ts";
-import type { Realm, UrlContext } from "./url-context.ts";
+import type { UrlContext } from "./url-context.ts";
 
 const SUBPROTOCOL = "girici.v1";
+/** Taken at load, for a realm that has no DOMException to throw. */
+const NativeSyntaxError = SyntaxError;
 
 /** Reflect the upstream close code the browser refuses to send in close(). */
 function mapIncomingClose(code: number): number {
@@ -32,7 +37,7 @@ function sendableClose(code: number | undefined): number | undefined {
 
 function protocolList(protocols: string | string[] | undefined): string[] {
   if (protocols == null) return [];
-  return isArray(protocols) ? mapOf(protocols, toText) : [toText(protocols)];
+  return isArray(protocols) ? mapOf(protocols, stringOf) : [stringOf(protocols)];
 }
 
 /** Written out from strings, so neither a replaced JSON.stringify nor a toJSON the page added ever sees the seal. */
@@ -43,13 +48,48 @@ function openingFrame(url: string, protocols: string[], seal: string | null): st
   return `{"u":${quoteJson(url)},"p":[${list}],"s":${seal === null ? "null" : quoteJson(seal)}}`;
 }
 
-/** Route page WebSockets through the server relay while keeping the browser API intact. */
-export function installWebSocket(win: Realm, ctx: UrlContext): void {
-  const Native = win.WebSocket;
-  const nativeFetch = win.fetch;
+/** The globals the shim reads and replaces, which a window and a worker scope both carry. */
+export interface WebSocketRealm {
+  WebSocket: typeof WebSocket;
+  fetch: typeof fetch;
+  EventTarget: typeof EventTarget;
+  Event: typeof Event;
+  MessageEvent: typeof MessageEvent;
+  CloseEvent: typeof CloseEvent;
+  Blob: typeof Blob;
+  DOMException?: typeof DOMException;
+}
+
+/** Route page and worker WebSockets through the server relay while keeping the browser API intact. */
+export function installWebSocket(
+  realm: WebSocketRealm,
+  ctx: Pick<UrlContext, "origin" | "realUrl"> & Partial<Pick<UrlContext, "realBase">>,
+): void {
+  const Native = realm.WebSocket;
+  const nativeFetch = realm.fetch;
+  const Exception = realm.DOMException;
   const relayUrl = (startsWith(ctx.origin, "http") ? `ws${sliceOf(ctx.origin, 4)}` : ctx.origin) + "/_g/ws";
 
-  class GiriciWebSocket extends win.EventTarget {
+  const syntaxError = (message: string): Error =>
+    Exception ? new Exception(message, "SyntaxError") : new NativeSyntaxError(message);
+  /** As the browser reads a socket address: against the base, http(s) as ws(s), and no other scheme or fragment. */
+  const socketUrl = (raw: string): URL => {
+    const parsed = parseUrl(raw, ctx.realBase ? ctx.realBase() : ctx.realUrl());
+    if (!parsed) throw syntaxError(`The URL '${raw}' is invalid.`);
+    const href = hrefOf(parsed);
+    const protocol = protocolOf(parsed);
+    let url = parsed;
+    if (protocol === "http:") url = newUrl(`ws${sliceOf(href, 4)}`);
+    else if (protocol === "https:") url = newUrl(`wss${sliceOf(href, 5)}`);
+    else if (protocol !== "ws:" && protocol !== "wss:")
+      throw syntaxError(
+        `The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${protocol}' is not allowed.`,
+      );
+    if (includes(href, "#")) throw syntaxError("Fragment identifiers are not allowed in WebSocket URLs.");
+    return url;
+  };
+
+  class GiriciWebSocket extends realm.EventTarget {
     static readonly CONNECTING = 0;
     static readonly OPEN = 1;
     static readonly CLOSING = 2;
@@ -73,8 +113,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
     #bufferedBeforeOpen = 0;
 
     constructor(url: string | URL, protocols?: string | string[]) {
+      const real = socketUrl(stringOf(url));
       super();
-      const real = newUrl(toText(url), ctx.realUrl());
       this.url = hrefOf(real);
       void this.#connect(real, protocolList(protocols));
     }
@@ -107,7 +147,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       inner.onmessage = (event: MessageEvent) => this.#fromRelay(event.data);
       inner.onclose = (event: CloseEvent) => this.#closed(event.code, event.reason, event.wasClean);
       inner.onerror = () => {
-        if (!this.#opened) this.#emit(new win.Event("error"));
+        if (!this.#opened) this.#emit(new realm.Event("error"));
       };
     }
 
@@ -126,8 +166,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
         return;
       }
       if (isArrayBuffer(data) && this.binaryType === "blob")
-        this.#emit(new win.MessageEvent("message", { data: new win.Blob([data as ArrayBuffer]) }));
-      else this.#emit(new win.MessageEvent("message", { data }));
+        this.#emit(new realm.MessageEvent("message", { data: new realm.Blob([data as ArrayBuffer]) }));
+      else this.#emit(new realm.MessageEvent("message", { data }));
     }
 
     #open(protocol: string | undefined): void {
@@ -140,7 +180,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
       }
       this.#queue = [];
       this.#bufferedBeforeOpen = 0;
-      this.#emit(new win.Event("open"));
+      this.#emit(new realm.Event("open"));
     }
 
     send(data: string | ArrayBuffer | Blob | ArrayBufferView): void {
@@ -163,8 +203,8 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
     #closed(code: number, reason: string, wasClean: boolean): void {
       if (this.readyState === 3) return;
       this.readyState = 3;
-      if (!this.#opened && !wasClean) this.#emit(new win.Event("error"));
-      this.#emit(new win.CloseEvent("close", { code: mapIncomingClose(code), reason: reason ?? "", wasClean }));
+      if (!this.#opened && !wasClean) this.#emit(new realm.Event("error"));
+      this.#emit(new realm.CloseEvent("close", { code: mapIncomingClose(code), reason: reason ?? "", wasClean }));
     }
 
     #emit(event: Event): void {
@@ -174,7 +214,7 @@ export function installWebSocket(win: Realm, ctx: UrlContext): void {
     }
   }
 
-  win.WebSocket = GiriciWebSocket as unknown as typeof WebSocket;
+  realm.WebSocket = GiriciWebSocket as unknown as typeof WebSocket;
 }
 
 function sizeOf(data: string | ArrayBuffer | Blob | ArrayBufferView): number {

@@ -68,6 +68,18 @@ describe("wsSealRouter", () => {
     expect((await send(base, { ...fine, cookie: "a=1\r\nx: y" })).status).toBe(400);
   });
 
+  it("seals the opaque Origin of a worker no page vouched for", async () => {
+    const { base, store } = await listen();
+    const res = await send(base, { url: "wss://chat.test/", origin: "null", cookie: null });
+    expect(res.status).toBe(200);
+    const { seal } = (await res.json()) as { seal: string };
+    expect(openWsSeal(store.sessionSecret(), seal, new URL("wss://chat.test/"))).toEqual({
+      origin: "null",
+      cookie: null,
+    });
+    expect((await send(base, { url: "wss://chat.test/", origin: "null", cookie: "sid=1" })).status).toBe(400);
+  });
+
   it("answers only at its exact path", async () => {
     const { base } = await listen();
     const res = await fetch(`${base}${WS_SEAL_PATH}/`, {

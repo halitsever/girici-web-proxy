@@ -1,3 +1,5 @@
+import { charCodeAt, exec, fromBase64, newBytes, replaceAll, strictUtf8 } from "./primordials.ts";
+
 export const HEADER = {
   relay: "x-girici-relay",
   method: "x-girici-method",
@@ -16,11 +18,15 @@ export const HEADER = {
 /** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
 export const PROTOCOL_VERSION = 2;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
+/** The most script cookie writes one RPC carries; the worker refuses a longer batch. */
+export const COOKIE_BATCH_LIMIT = 50;
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
 /** A page announces each worker it starts here; the worker names the same nonce when it loads the runtime. */
 export const WORKER_RPC_PATH = "/_g/rpc/worker";
 export const WORKER_NONCE_PARAM = "n";
+/** A SharedWorker's script address, which tabs of one site share so the browser joins them to one instance. */
+export const SHARED_WORKER_PATH = "/_g/rpc/shared-worker";
 // Only the service worker calls these two; pages never need them.
 export const POT_PATH = "/_g/pot";
 export const WS_SEAL_PATH = "/_g/ws-seal";
@@ -125,12 +131,19 @@ export function encodeHeaderValue(value: string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+const BASE64URL = /^[A-Za-z0-9_-]*$/;
+const URL_SAFE_CHARS = /[-_]/g;
+const NativeTypeError = TypeError;
+
+/** Natives taken at load only, since this runs inside page calls. */
 export function decodeHeaderValue(value: string): string {
-  if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new TypeError("Header value is not base64url");
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (exec(BASE64URL, value) === null) throw new NativeTypeError("Header value is not base64url");
+  let base64 = replaceAll(value, URL_SAFE_CHARS, (char) => (char === "-" ? "+" : "/"));
+  while (base64.length % 4 !== 0) base64 += "=";
+  const binary = fromBase64(base64);
+  const bytes = newBytes(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = charCodeAt(binary, index);
+  return strictUtf8(bytes);
 }
 
 export function encodeHeaderList(pairs: ReadonlyArray<readonly [string, string]>): string {

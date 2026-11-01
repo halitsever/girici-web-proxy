@@ -1,4 +1,6 @@
-import { define, endsWith } from "../shared/primordials.ts";
+import { define, endsWith, joined } from "../shared/primordials.ts";
+import { maskNative } from "./native-mask.ts";
+import type { ScriptText } from "./script-text.ts";
 import type { Realm } from "./url-context.ts";
 
 // Taken at load, so a page that replaced them never receives a native or the markup on its way in.
@@ -8,11 +10,13 @@ const lowerCase = String.prototype.toLowerCase;
 const ownDescriptor = Object.getOwnPropertyDescriptor;
 
 type Method = (...args: unknown[]) => unknown;
+type ForTarget = (target: unknown, html: string) => string;
 
 /**
  * HTML a page writes into the DOM is rewritten so its URLs stay proxied, and read back as the real markup it wrote.
  * Markup can hold frames, so each write ends with `afterWrite`, which gives new child windows the runtime.
- * `reopened` restores what a document cleared by an implicit open lost.
+ * `reopened` restores what a document cleared by an implicit open lost. Markup written into a script element is its
+ * code, so it goes to `scripts`.
  */
 export function installHtmlSinks(
   win: Realm,
@@ -20,11 +24,64 @@ export function installHtmlSinks(
   unhtml: (html: string) => string,
   afterWrite: (target: unknown) => void,
   reopened: (doc: unknown) => void,
+  scripts: Pick<ScriptText, "isScript" | "write" | "read">,
 ): void {
   const element = win.Element.prototype;
-  wrapHtmlProperty(element, "innerHTML", rewriteHtml, unhtml, afterWrite);
-  wrapHtmlProperty(element, "outerHTML", rewriteHtml, unhtml, afterWrite);
-  if (win.ShadowRoot) wrapHtmlProperty(win.ShadowRoot.prototype, "innerHTML", rewriteHtml, unhtml, afterWrite);
+  const markup: ForTarget = (target, html) =>
+    scripts.isScript(target) ? scripts.write(target, html) : rewriteHtml(html);
+  const restore: ForTarget = (target, html) => (scripts.isScript(target) ? scripts.read(target, html) : unhtml(html));
+  wrapHtmlProperty(element, "innerHTML", markup, restore, afterWrite);
+  // outerHTML replaces the element itself, so its markup is parsed in the parent and is never script text.
+  wrapHtmlProperty(
+    element,
+    "outerHTML",
+    (_target, html) => rewriteHtml(html),
+    (_target, html) => unhtml(html),
+    afterWrite,
+  );
+  const shadowRoot = win.ShadowRoot?.prototype;
+  if (shadowRoot) wrapHtmlProperty(shadowRoot, "innerHTML", markup, restore, afterWrite);
+  // setHTML's sanitizer keeps links and image addresses, so its input is rewritten as well.
+  const setters = ["setHTMLUnsafe", "setHTML"] as const;
+  const roots = [element, shadowRoot];
+  // Indexed: adopting a frame installs this inside a page call, after the page may have replaced the array iterator.
+  for (let root = 0; root < roots.length; root++) {
+    const proto = roots[root];
+    if (!proto) continue;
+    for (let index = 0; index < setters.length; index++) {
+      wrapMethod(
+        proto,
+        setters[index] as string,
+        (native) =>
+          function (this: unknown, html: unknown, ...rest: unknown[]) {
+            try {
+              return apply(native, this, joined([markup(this, toText(html))], rest));
+            } finally {
+              afterWrite(this);
+            }
+          },
+      );
+    }
+    wrapMethod(
+      proto,
+      "getHTML",
+      (native) =>
+        function (this: unknown, ...args: unknown[]) {
+          return restore(this, toText(apply(native, this, args)));
+        },
+    );
+  }
+  const parsers = ["parseHTMLUnsafe", "parseHTML"] as const;
+  for (let index = 0; index < parsers.length; index++) {
+    wrapMethod(
+      win.Document,
+      parsers[index] as string,
+      (native) =>
+        function (this: unknown, html: unknown, ...rest: unknown[]) {
+          return apply(native, this, joined([rewriteHtml(toText(html))], rest));
+        },
+    );
+  }
 
   const nativeInsert = element.insertAdjacentHTML as Method;
   element.insertAdjacentHTML = function (this: Element, position: InsertPosition, text: string) {
@@ -91,11 +148,19 @@ export function installHtmlSinks(
   };
 }
 
+/** Replaces `proto[name]` with what `wrap` makes of it, only where the browser has that method. */
+function wrapMethod(proto: object, name: string, wrap: (native: Method) => Method): void {
+  const descriptor = ownDescriptor(proto, name);
+  const native = descriptor?.value as unknown;
+  if (typeof native !== "function") return;
+  define(proto, name, { ...descriptor, value: maskNative(wrap(native as Method), native) });
+}
+
 function wrapHtmlProperty(
   proto: object,
   name: string,
-  rewriteHtml: (html: string) => string,
-  unhtml: (html: string) => string,
+  rewriteHtml: ForTarget,
+  unhtml: ForTarget,
   afterWrite: (target: unknown) => void,
 ): void {
   const descriptor = ownDescriptor(proto, name);
@@ -106,12 +171,12 @@ function wrapHtmlProperty(
     enumerable: descriptor.enumerable ?? true,
     get: get
       ? function (this: unknown) {
-          return unhtml(toText(apply(get, this, [])));
+          return unhtml(this, toText(apply(get, this, [])));
         }
       : undefined,
     set(this: unknown, value: unknown) {
       try {
-        apply(set, this, [rewriteHtml(toText(value))]);
+        apply(set, this, [rewriteHtml(this, toText(value))]);
       } finally {
         afterWrite(this);
       }

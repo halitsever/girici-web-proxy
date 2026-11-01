@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Invoke } from "../src/client/invoke.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
-import { createWindowGuard, realOriginOf } from "../src/client/windows.ts";
+import {
+  createWindowGuard,
+  markWindow,
+  openedOrigin,
+  realOriginOf,
+  seversOpener,
+  WINDOW_BOUND,
+} from "../src/client/windows.ts";
 import { DESCRIPTOR_ADDITIONS, REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const proxy = "http://proxy.test";
@@ -33,8 +40,11 @@ function guardFor(
   openSealed: (pathAndQuery: string) => URL | null = () => null,
 ) {
   // A realm's own window getters, which read whatever window they are applied to. This realm is a top-level window.
-  const win = { DOMException, postMessage: () => {} } as unknown as Realm;
-  for (const name of ["closed", "length", "top", "parent", "opener"]) {
+  const getAttribute = function (this: { attributes: Record<string, string> }, name: string) {
+    return this.attributes[name] ?? null;
+  };
+  const win = { DOMException, postMessage: () => {}, Element: { prototype: { getAttribute } } } as unknown as Realm;
+  for (const name of ["closed", "length", "top", "parent", "opener", "frameElement"]) {
     Object.defineProperty(win, name, {
       get(this: Record<string, unknown>) {
         return this === (win as unknown) ? (name === "top" || name === "parent" ? win : null) : this[name];
@@ -44,6 +54,7 @@ function guardFor(
   const ctx = {
     origin: proxy,
     realUrl: () => new URL(`${realOrigin}/page`),
+    realBase: () => new URL(`${realOrigin}/page`),
     openSealed,
     toProxy: (raw: string) => {
       navigated.push(raw);
@@ -52,6 +63,32 @@ function guardFor(
   } as unknown as UrlContext;
   return createWindowGuard(win, ctx, invoke, swapBlob);
 }
+
+describe("seversOpener", () => {
+  it("reads window features as the HTML standard does", () => {
+    const severed = [
+      "noopener",
+      "NoOpener=yes",
+      "noopener=true",
+      "noopener=1",
+      "  noopener = 2 ",
+      "width=200,noreferrer",
+    ];
+    const kept = ["noopener=0", "noopener=no", "noopener=false", "xnoopener", "noopenerx", "noopener=abc", ""];
+    expect(severed.map(seversOpener)).toEqual(severed.map(() => true));
+    expect(kept.map(seversOpener)).toEqual(kept.map(() => false));
+    // The last value of a repeated feature counts.
+    expect([seversOpener("noopener=0,noopener"), seversOpener("noopener,noopener=0")]).toEqual([true, false]);
+  });
+});
+
+describe("openedOrigin", () => {
+  it("resolves a relative address against the document's base, not the proxy root", () => {
+    expect(openedOrigin("page", proxy, new URL("https://c.test/dir/"))).toBe("https://c.test");
+    expect(openedOrigin("/~/https/b.test/x", proxy, new URL("https://c.test/dir/"))).toBe("https://b.test");
+    expect(openedOrigin("page", proxy)).toBeUndefined();
+  });
+});
 
 describe("realOriginOf", () => {
   for (const [name, target, key, replacement] of REPLACED_BUILTINS) {
@@ -130,6 +167,42 @@ describe("createWindowGuard", () => {
     // The page it was opened for may still send it back to this origin.
     popup.location.href = `${proxy}/~/https/a.test/back`;
     expect(wrapped.document).toBe(document);
+  });
+
+  it("restricts a blank frame whose element names another origin's page, as it does a popup headed there", () => {
+    const guard = guardFor("https://a.test");
+    const frame = (attributes: Record<string, string>) =>
+      fakeWindow("about:blank", proxy, {
+        __g$: { realOrigin: () => "https://a.test" },
+        document: {},
+        frameElement: { attributes },
+      });
+    const away = frame({ src: "/~/https/b.test/x" });
+    const wrapped = guard.wrap(away) as Record<string, unknown>;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    away.location.href = `${proxy}/~/https/b.test/x`;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    const stay: Array<Record<string, string>> = [
+      { src: "/~/https/a.test/next" },
+      { src: "/~/https/b.test/x", srcdoc: "" },
+      {},
+    ];
+    for (const attributes of stay) {
+      const home = frame(attributes);
+      expect(guard.wrap(home)).toBe(home);
+    }
+  });
+
+  it("keeps a blank window another realm's engine sent to another site locked, as that engine does", () => {
+    const guard = guardFor("https://a.test");
+    const frame = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" }, document: {} });
+    markWindow(frame, WINDOW_BOUND, "https://b.test");
+    const wrapped = guard.wrap(frame) as Record<string, unknown>;
+    expect(() => wrapped.document).toThrow(/SecurityError|Blocked/);
+    // A mark the page made itself, as an accessor, counts for nothing.
+    const forged = fakeWindow("about:blank", proxy, { __g$: { realOrigin: () => "https://a.test" }, document: {} });
+    Object.defineProperty(forged, WINDOW_BOUND, { get: () => "https://b.test" });
+    expect(guard.wrap(forged)).toBe(forged);
   });
 
   it("lets an opener reach a popup that came back to its origin on a sealed address", () => {
@@ -290,6 +363,23 @@ describe("createWindowGuard", () => {
       ["replace", `${proxy}/~/proxied//d`],
       ["href", `${proxy}/~/proxied/https://e.test/`],
     ]);
+  });
+
+  it("assigns a restricted window's href from the page's own realm when it has an assigner", () => {
+    const assigned: unknown[] = [];
+    const win = { DOMException, postMessage: () => {} } as unknown as Realm;
+    const ctx = {
+      origin: proxy,
+      realUrl: () => new URL("https://a.test/page"),
+      realBase: () => new URL("https://a.test/page"),
+      openSealed: () => null,
+      toProxy: (raw: string) => `${proxy}/~/proxied/${raw}`,
+    } as unknown as UrlContext;
+    const guard = createWindowGuard(win, ctx, direct, undefined, (location, url) => assigned.push([location, url]) > 0);
+    const target = fakeWindow(`${proxy}/~/https/b.test/`);
+    const wrapped = guard.wrap(target) as { location: { href: string } };
+    wrapped.location.href = "https://c.test/";
+    expect(assigned).toEqual([[target.location, `${proxy}/~/proxied/https://c.test/`]]);
   });
 
   it("describes a wrapper's members whatever the page added to Object.prototype", () => {

@@ -1,6 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { COMPAT_ROUTES } from "./compat/index.ts";
 import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
 
 const abortable = abortableRoutes();
@@ -34,7 +35,7 @@ const PNG = Buffer.from(
   "base64",
 );
 
-function page(title: string, body: string, head = ""): string {
+export function page(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>${head}</head><body>${body}</body></html>`;
 }
 
@@ -227,14 +228,15 @@ const REALTIME = page(
 </script>`,
 );
 
-type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
+export type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
-const script =
-  (body: string): Route =>
-  (_req, res) => {
+// Compat fixtures load before this module's body runs, so the helpers they use are hoisted function declarations.
+export function script(body: string): Route {
+  return (_req, res) => {
     res.writeHead(200, { "content-type": "application/javascript" });
     res.end(body);
   };
+}
 
 const cookieEcho: Route = (req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
@@ -243,6 +245,13 @@ const cookieEcho: Route = (req, res) => {
 const cookieApi: Route = (_req, res) => {
   res.writeHead(200, { "content-type": "text/plain", "set-cookie": "api=1; Path=/" });
   res.end("ok");
+};
+/** Sets a script-visible cookie whose fresh name and value carry the cookie spy's marker, and answers with it. */
+const xsSync: Route = (_req, res) => {
+  const id = randomBytes(6).toString("hex");
+  const pair = `xsl_s${id}=xsl_w${id}`;
+  res.writeHead(200, { "content-type": "text/plain", "set-cookie": `${pair}; Path=/` });
+  res.end(pair);
 };
 const COOKIE_SCRIPT = page(
   "Cookie script",
@@ -636,12 +645,12 @@ const login: Route = (_req, res) => {
   res.end();
 };
 
-const html =
-  (body: string): Route =>
-  (_req, res) => {
+export function html(body: string): Route {
+  return (_req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(body);
   };
+}
 const png: Route = (_req, res) => {
   res.writeHead(200, { "content-type": "image/png" });
   res.end(PNG);
@@ -853,9 +862,33 @@ const EXEC = page(
   out.nested = dyn;
   out.toString = /\\[native code\\]/.test(Function.prototype.toString.call(setTimeout));
   out.evalDirect = eval("location.href");
+  const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
+  const generator = new GeneratorFunction("yield 1; return location.href")();
+  generator.next();
+  out.generator = generator.next().value;
+  out.params = new Function("a = location.href", "return a")();
+  out.objectBody = new Function({ toString: () => "return location.href" })();
+  out.escaped = new Function("return l\\\\u006fcation.href")();
+  setTimeout({ toString: () => "window.__o = location.href" }, 0);
+  const later = Promise.all([
+    new AsyncFunction("await 0; return location.href")(),
+    (async () => {
+      const steps = new AsyncGeneratorFunction("yield 1; await 0; return location.href")();
+      await steps.next();
+      return (await steps.next()).value;
+    })(),
+  ]).then((values) => {
+    out.async = values[0];
+    out.asyncGenerator = values[1];
+  });
   setTimeout(() => {
     out.timer = window.__t;
-    document.getElementById("results").textContent = JSON.stringify(out);
+    out.objectTimer = window.__o;
+    later.then(() => {
+      document.getElementById("results").textContent = JSON.stringify(out);
+    });
   }, 50);
 </script>`,
 );
@@ -1287,6 +1320,448 @@ const XS_OPENED = page(
 </script>`,
 );
 
+// Wraps its own built-ins, then opens or embeds the victim with this page's query. The browser reuses the blank window
+// it made, so this page's runtime serves the victim; "check" lists each value with the victim's marker, and each
+// object of the victim's realm, that reached a wrapper. With "descriptors=off" Object.prototype gets no `value`, `get`
+// or `set`, which break descriptor literals such as MagicString's.
+const XS_COOKIE_SPY = page(
+  "Cookie spy",
+  `<button id="open">open</button><button id="frame">frame</button><button id="check">check</button>
+<pre id="results"></pre>
+<script>
+  const descriptorFields = new URLSearchParams(location.search).get("descriptors") !== "off";
+  const spy = (() => {
+    "use strict";
+    const mark = "xs" + "l_";
+    const found = [];
+    const R = Reflect;
+    const apply = R.apply;
+    const construct = R.construct;
+    const ownKeys = R.ownKeys;
+    const getDesc = R.getOwnPropertyDescriptor;
+    const define = R.defineProperty;
+    const getProto = R.getPrototypeOf;
+    const objectProto = Object.prototype;
+    const hasOwn = Object.prototype.hasOwnProperty;
+    const includes = String.prototype.includes;
+    const charAt = String.prototype.charAt;
+    const toTag = Object.prototype.toString;
+    const stringValue = String.prototype.valueOf;
+    const nativeAtob = atob;
+    const exec = RegExp.prototype.exec;
+    const decode = TextDecoder.prototype.decode;
+    const decoder = new TextDecoder();
+    const nativeThen = Promise.prototype.then;
+    const NativePromise = Promise;
+    const NativeTypeError = TypeError;
+    const mapForEach = Map.prototype.forEach;
+    const setForEach = Set.prototype.forEach;
+    const hrefOf = getDesc(URL.prototype, "href").get;
+    const stringify = JSON.stringify;
+    const base64 = /^[A-Za-z0-9+/_-]{12,}={0,2}$/;
+    let busy = false;
+
+    const note = (where, text) => {
+      if (found.length < 100) define(found, found.length, { __proto__: null, value: where + ": " + text, writable: true, enumerable: true, configurable: true });
+    };
+    const fromBase64 = (text) => {
+      let out = "";
+      for (let i = 0; i < text.length; i++) {
+        const c = apply(charAt, text, [i]);
+        out += c === "-" ? "+" : c === "_" ? "/" : c;
+      }
+      while (out.length % 4) out += "=";
+      return nativeAtob(out);
+    };
+    const scanText = (where, text) => {
+      if (apply(includes, text, [mark])) return note(where, text);
+      if (apply(exec, base64, [text]) === null) return;
+      try {
+        const plain = fromBase64(text);
+        if (apply(includes, plain, [mark])) note(where, "base64 of " + plain);
+      } catch {}
+    };
+    // An object whose prototype chain ends at another realm's Object.prototype; a null-prototype one belongs to none.
+    const foreign = (value) => {
+      let current = value;
+      for (let step = 0; step < 32; step++) {
+        let next;
+        try {
+          next = getProto(current);
+        } catch {
+          return false;
+        }
+        if (next === null) return current !== value && current !== objectProto;
+        current = next;
+      }
+      return false;
+    };
+    const watch = (where, value) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(where, value, 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const scan = (where, value, depth) => {
+      if (typeof value === "string") return scanText(where, value);
+      if (typeof value !== "object" || value === null || value === found || depth > 3) return;
+      let tag;
+      try {
+        tag = apply(toTag, value, []);
+      } catch {
+        return;
+      }
+      if (foreign(value)) return note(where, "an object of another realm, " + tag);
+      if (tag === "[object String]") return scanText(where, apply(stringValue, value, []));
+      if (tag === "[object XMLHttpRequest]") return note(where, "an XMLHttpRequest");
+      if (tag === "[object URL]") return scanText(where, apply(hrefOf, value, []));
+      if (tag === "[object Uint8Array]" || tag === "[object ArrayBuffer]") {
+        try {
+          scanText(where, apply(decode, decoder, [value]));
+        } catch {}
+        return;
+      }
+      if (tag === "[object Promise]") {
+        try {
+          apply(nativeThen, value, [(settled) => watch(where + " settled", settled), () => {}]);
+        } catch {}
+        return;
+      }
+      if (tag === "[object Map]" || tag === "[object Set]") {
+        const each = (item, key) => {
+          scan(where, key, depth + 1);
+          scan(where, item, depth + 1);
+        };
+        try {
+          apply(tag === "[object Map]" ? mapForEach : setForEach, value, [each]);
+        } catch {}
+        return;
+      }
+      if (tag !== "[object Array]" && tag !== "[object Object]") return;
+      let keys;
+      try {
+        keys = ownKeys(value);
+      } catch {
+        return;
+      }
+      for (let i = 0; i < keys.length && i < 64; i++) {
+        try {
+          const d = getDesc(value, keys[i]);
+          if (d && apply(hasOwn, d, ["value"])) scan(where, d.value, depth + 1);
+        } catch {}
+      }
+    };
+    const watchCall = (label, self, args) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(label, self, 0);
+        for (let i = 0; i < args.length; i++) scan(label, args[i], 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const method = (owner, key, label) => {
+      const d = getDesc(owner, key);
+      if (!d || typeof d.value !== "function") return;
+      const original = d.value;
+      const wrapped = function (...args) {
+        watchCall(label, new.target ? undefined : this, args);
+        return new.target ? construct(original, args, new.target) : apply(original, this, args);
+      };
+      define(owner, key, { __proto__: null, value: wrapped, writable: true, enumerable: d.enumerable, configurable: true });
+    };
+    const getter = (owner, key, label) => {
+      const d = getDesc(owner, key);
+      if (!d || typeof d.get !== "function") return;
+      const get = d.get;
+      const wrapped = function () {
+        watchCall(label, this, []);
+        return apply(get, this, []);
+      };
+      define(owner, key, { __proto__: null, get: wrapped, set: d.set, enumerable: d.enumerable, configurable: true });
+    };
+    const global = (name) => {
+      const original = window[name];
+      const wrapped = function (...args) {
+        watchCall(name, undefined, args);
+        return new.target ? construct(original, args, new.target) : apply(original, this, args);
+      };
+      const keys = ownKeys(original);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (key !== "length" && key !== "name" && key !== "prototype") define(wrapped, key, getDesc(original, key));
+      }
+      if (original.prototype) wrapped.prototype = original.prototype;
+      window[name] = wrapped;
+    };
+    const methods = (owner, label, keys) => {
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        method(owner, key, label + "." + (typeof key === "symbol" ? key.description : key));
+      }
+    };
+    // Notes who reads or writes the key through the prototype; a write lands as the own data property it would make.
+    const field = (owner, key, label) => {
+      define(owner, key, {
+        __proto__: null,
+        get() {
+          watchCall(label, this, []);
+          return undefined;
+        },
+        set(value) {
+          watchCall(label, this, [value]);
+          if ((typeof this === "object" && this !== null) || typeof this === "function") {
+            define(this, key, { __proto__: null, value, writable: true, enumerable: true, configurable: true });
+          }
+        },
+        configurable: true,
+      });
+    };
+
+    methods(Array.prototype, "Array.prototype", ["filter", "map", "sort", "join", "push", "find", "findIndex", "forEach", "some", "every", "indexOf", "includes", "slice", "concat", "reduce", "splice", "values", "entries", "keys", "flat", "flatMap", "at", Symbol.iterator]);
+    methods(Array, "Array", ["from", "of", "isArray"]);
+    methods(String.prototype, "String.prototype", ["split", "slice", "substring", "substr", "trim", "trimStart", "trimEnd", "indexOf", "lastIndexOf", "includes", "startsWith", "endsWith", "replace", "replaceAll", "toLowerCase", "toUpperCase", "charAt", "charCodeAt", "codePointAt", "at", "repeat", "match", "matchAll", "padStart", "padEnd", "concat", "localeCompare", "normalize", "toString", "valueOf", Symbol.iterator]);
+    methods(String, "String", ["fromCharCode", "fromCodePoint", "raw"]);
+    methods(RegExp.prototype, "RegExp.prototype", ["exec", "test", Symbol.replace, Symbol.split, Symbol.match, Symbol.matchAll, Symbol.search]);
+    const urlParts = ["href", "origin", "protocol", "username", "password", "host", "hostname", "port", "pathname", "search", "hash", "searchParams"];
+    for (let i = 0; i < urlParts.length; i++) getter(URL.prototype, urlParts[i], "URL.prototype." + urlParts[i]);
+    methods(URL.prototype, "URL.prototype", ["toString", "toJSON"]);
+    methods(Date, "Date", ["parse", "now", "UTC"]);
+    methods(Number, "Number", ["isNaN", "isFinite", "parseInt", "parseFloat", "isInteger"]);
+    methods(JSON, "JSON", ["parse", "stringify"]);
+    methods(Promise, "Promise", ["all", "allSettled", "race", "any", "resolve", "reject"]);
+    methods(Promise.prototype, "Promise.prototype", ["then", "catch", "finally"]);
+    define(Promise.prototype, "constructor", {
+      __proto__: null,
+      get() {
+        watchCall("Promise.prototype.constructor", this, []);
+        return NativePromise;
+      },
+      set() {},
+      configurable: true,
+    });
+    define(Object.prototype, "then", {
+      __proto__: null,
+      get() {
+        watchCall("Object.prototype.then", this, []);
+        return undefined;
+      },
+      set() {},
+      configurable: true,
+    });
+    methods(Object, "Object", ["keys", "values", "entries", "assign", "fromEntries"]);
+    methods(Object.prototype, "Object.prototype", ["toString", "valueOf"]);
+    define(Object.prototype, Symbol.toPrimitive, {
+      __proto__: null,
+      value(hint) {
+        watchCall("Object.prototype[Symbol.toPrimitive]", this, []);
+        // OrdinaryToPrimitive, so conversions keep working.
+        const first = hint === "string" ? "toString" : "valueOf";
+        const second = hint === "string" ? "valueOf" : "toString";
+        const one = this[first];
+        if (typeof one === "function") {
+          const result = apply(one, this, []);
+          if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+        }
+        const two = this[second];
+        if (typeof two === "function") {
+          const result = apply(two, this, []);
+          if (result === null || (typeof result !== "object" && typeof result !== "function")) return result;
+        }
+        throw new NativeTypeError("Cannot convert object to primitive value");
+      },
+      writable: true,
+      configurable: true,
+    });
+    methods(Uint8Array, "Uint8Array", ["from", "of"]);
+    methods(TextDecoder.prototype, "TextDecoder.prototype", ["decode"]);
+    methods(TextEncoder.prototype, "TextEncoder.prototype", ["encode"]);
+    methods(WeakSet.prototype, "WeakSet.prototype", ["has", "add"]);
+    methods(WeakMap.prototype, "WeakMap.prototype", ["get", "set", "has"]);
+    methods(Set.prototype, "Set.prototype", ["has", "add"]);
+    methods(Map.prototype, "Map.prototype", ["get", "set", "has"]);
+    methods(Function.prototype, "Function.prototype", ["call", "apply", "bind"]);
+    methods(Reflect, "Reflect", ["apply", "construct", "defineProperty", "deleteProperty", "get", "getOwnPropertyDescriptor", "getPrototypeOf", "has", "isExtensible", "ownKeys", "preventExtensions", "set", "setPrototypeOf"]);
+    const globals = ["atob", "btoa", "String", "Number", "URL", "parseInt", "parseFloat", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "isNaN", "Proxy"];
+    for (let i = 0; i < globals.length; i++) global(globals[i]);
+    const fields = ["cookies", "changes", "name", "domain", "path", "expires", "creation", "cookiesBlocked", "transfer", "ignoreSearch"];
+    for (let i = 0; i < fields.length; i++) field(Object.prototype, fields[i], "Object.prototype." + fields[i]);
+    for (let i = 0; i < 4; i++) field(Array.prototype, "" + i, "Array.prototype[" + i + "]");
+    // Last: from here on a descriptor literal without own get and set is invalid in this realm.
+    const descriptors = ["value", "get", "set"];
+    for (let i = 0; descriptorFields && i < descriptors.length; i++) field(Object.prototype, descriptors[i], "Object.prototype." + descriptors[i]);
+
+    return () => {
+      busy = true;
+      return stringify(found);
+    };
+  })();
+  // "host" picks the victim's site: another site, or another origin of this one.
+  const victimHost = new URLSearchParams(location.search).get("host") || "site-b.test";
+  const victim = "https://" + victimHost + "/xs-cookie-victim" + location.search;
+  document.getElementById("open").onclick = () => {
+    open(victim);
+  };
+  document.getElementById("frame").onclick = () => {
+    const frame = document.createElement("iframe");
+    frame.id = "victim";
+    frame.src = victim;
+    document.body.appendChild(frame);
+  };
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = spy();
+  };
+</script>`,
+);
+
+// Gives its address, and each cookie or storage name it sets or reads, a fresh value that starts with the spy's
+// marker. "do" picks one path; "seed" is a second tab whose writes reach the others as worker messages. "reused" tells
+// whether this window kept the runtime of the page that made it: its cookie getter then belongs to another realm.
+const XS_COOKIE_VICTIM = page(
+  "Cookie victim",
+  `<button id="read">read</button><pre id="cookie"></pre><pre id="results"></pre>
+<script>
+  const mark = "xs" + "l" + "_";
+  const fresh = (kind) => mark + kind + Math.random().toString(36).slice(2, 10);
+  const scenario = new URLSearchParams(location.search).get("do");
+  const cookieGetter = Object.getOwnPropertyDescriptor(Document.prototype, "cookie").get;
+  const reused = Object.getPrototypeOf(cookieGetter) !== Function.prototype;
+  const secrets = [];
+  const report = (extra) => {
+    document.getElementById("results").textContent = JSON.stringify(Object.assign({ scenario, reused, secrets }, extra));
+  };
+  document.getElementById("read").onclick = () => {
+    document.getElementById("cookie").textContent = document.cookie;
+  };
+  const xhr = (url) =>
+    new Promise((resolve) => {
+      const request = new XMLHttpRequest();
+      request.open("GET", url);
+      request.onload = () => resolve(request.responseText);
+      request.send();
+    });
+  const write = async () => {
+    const name = fresh("n");
+    const value = fresh("v");
+    secrets.push(name, value);
+    document.cookie = name + "=" + value + "; path=/; max-age=3600; expires=Fri, 01 Jan 2100 00:00:00 GMT";
+    // Echo waits for the write to reach the worker's jar.
+    await fetch("/cookie/echo");
+  };
+  const paths = {
+    seed: write,
+    write,
+    read: () => ({ cookie: document.cookie }),
+    listen: () => ({}),
+    async sync() {
+      const one = await (await fetch("/cookie/xs-sync")).text();
+      const two = await xhr("/cookie/xs-sync");
+      secrets.push(one, two);
+    },
+    async store() {
+      if (!window.cookieStore) return { store: "absent" };
+      const name = fresh("n");
+      const value = fresh("v");
+      secrets.push(name, value);
+      await cookieStore.set(name, value);
+      const one = await cookieStore.get(name);
+      const named = await cookieStore.get({ name });
+      const all = await cookieStore.getAll();
+      // document.cookie shows the cookie only when it went through the runtime, not the browser's own store.
+      const mirrored = document.cookie.includes(name);
+      return { store: [one?.value === value, named?.value === value, all.some((c) => c.name === name), mirrored] };
+    },
+    async srcdoc() {
+      // The runtime tag a srcdoc gets carries the cookie snapshot.
+      await write();
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<p>srcdoc</p>";
+      return { srcdoc: frame.srcdoc === "<p>srcdoc</p>" };
+    },
+    storage() {
+      const key = fresh("k");
+      const value = fresh("v");
+      secrets.push(key, value);
+      localStorage.setItem(key, value);
+      const described = Object.getOwnPropertyDescriptor(localStorage, key);
+      const storage = [
+        localStorage[key] === value,
+        described.value === value,
+        localStorage.key(3) === null,
+        Object.keys(localStorage).includes(key),
+        localStorage.constructor === Storage,
+      ];
+      localStorage.removeItem(key);
+      return { storage };
+    },
+    destructure() {
+      const { location: here, document: doc } = window;
+      return { destructure: typeof here.href === "string" && doc === document };
+    },
+    async caches() {
+      const name = fresh("c");
+      secrets.push(name);
+      let cache;
+      try {
+        cache = await caches.open(name);
+      } catch (error) {
+        // WebKit's Cache API stays with the blank document of a reused window, which has stopped.
+        return { caches: "unavailable: " + error.name };
+      }
+      await cache.put("/xs-probe", new Response(fresh("r")));
+      const names = await caches.keys();
+      const hit = await caches.match("/xs-probe");
+      const named = await caches.match("/xs-probe", { cacheName: name, note: fresh("o") });
+      return { caches: [names.includes(name), !!hit, !!named] };
+    },
+    async idb() {
+      if (!indexedDB.databases) return { idb: "absent" };
+      const name = fresh("d");
+      secrets.push(name);
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.open(name);
+        request.onsuccess = () => {
+          request.result.close();
+          resolve();
+        };
+        request.onerror = () => reject(request.error);
+      });
+      const listed = await indexedDB.databases();
+      return { idb: listed.some((entry) => entry.name === name) };
+    },
+    async locks() {
+      if (!navigator.locks) return { locks: "absent" };
+      const name = fresh("l");
+      secrets.push(name);
+      const held = await navigator.locks.request(name, async () => {
+        const state = await navigator.locks.query();
+        return state.held.some((lock) => lock.name === name);
+      });
+      return { locks: held };
+    },
+    post() {
+      const note = fresh("o");
+      secrets.push(note);
+      return new Promise((resolve) => {
+        addEventListener("message", (event) => {
+          if (event.data === "xs-post") resolve({ post: true });
+        });
+        postMessage("xs-post", { targetOrigin: "/", note });
+      });
+    },
+  };
+  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
+  (async () => {
+    const run = paths[scenario] ?? paths.listen;
+    report((await run()) ?? {});
+  })();
+</script>`,
+);
+
 const EMBED_STORAGE = page(
   "Embed storage",
   `<iframe id="b" src="https://site-b.test/storage"></iframe>
@@ -1302,9 +1777,15 @@ const REUSE = page(
   const frame = document.createElement("iframe");
   frame.src = "https://site-b.test/reuse-child";
   document.body.appendChild(frame);
-  frame.contentWindow.mark = "reused";
+  let contentWindow = "open";
+  try {
+    frame.contentWindow.mark = "reused";
+  } catch (error) {
+    contentWindow = error.name;
+  }
+  frames[0].mark = "reused";
   window.addEventListener("message", (event) => {
-    const out = { ...event.data, fromChild: event.source === frame.contentWindow };
+    const out = { ...event.data, fromChild: event.source === frame.contentWindow, contentWindow };
     document.getElementById("results").textContent = JSON.stringify(out);
   });
 </script>`,
@@ -1818,6 +2299,348 @@ const INERT = page(
 </script>`,
 );
 
+// Wraps its own built-ins, then hands the realm victim a window by the "via" path. "check" lists each value with the
+// victim's marker that reached a wrapper, and the messages the victim sent.
+const XS_REALM_OPENER = page(
+  "Realm opener",
+  `<button id="go">go</button><button id="check">check</button><a id="link">link</a>
+<form id="form" method="get"><input name="via" id="form-via"></form>
+<iframe id="same" src="/xs-realm-idle"></iframe>
+<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  window.__xsRealmA = "site-a";
+  const spy = (() => {
+    "use strict";
+    const mark = "xs" + "r_";
+    const found = [];
+    const R = Reflect;
+    const apply = R.apply;
+    const construct = R.construct;
+    const getDesc = R.getOwnPropertyDescriptor;
+    const define = R.defineProperty;
+    const ownKeys = R.ownKeys;
+    const includes = String.prototype.includes;
+    const toTag = Object.prototype.toString;
+    const stringValue = String.prototype.valueOf;
+    const stringify = JSON.stringify;
+    let busy = false;
+    const note = (where, text) => {
+      if (found.length < 50) define(found, found.length, { __proto__: null, value: where + ": " + text, writable: true, enumerable: true, configurable: true });
+    };
+    const scan = (where, value, depth) => {
+      if (typeof value === "string") {
+        if (apply(includes, value, [mark])) note(where, value);
+        return;
+      }
+      if (typeof value !== "object" || value === null || depth > 2) return;
+      let tag;
+      try {
+        tag = apply(toTag, value, []);
+      } catch {
+        return;
+      }
+      if (tag === "[object String]") return scan(where, apply(stringValue, value, []), depth);
+      if (tag !== "[object Array]" && tag !== "[object Object]") return;
+      let keys;
+      try {
+        keys = ownKeys(value);
+      } catch {
+        return;
+      }
+      for (let i = 0; i < keys.length && i < 64; i++) {
+        try {
+          const d = getDesc(value, keys[i]);
+          if (d && "value" in d) scan(where, d.value, depth + 1);
+        } catch {}
+      }
+    };
+    const watch = (label, self, args) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(label, self, 0);
+        for (let i = 0; i < args.length; i++) scan(label, args[i], 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const wrapAll = (owner, label) => {
+      const keys = ownKeys(owner);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const d = getDesc(owner, key);
+        if (key === "constructor" || !d || !d.configurable) continue;
+        const name = label + "." + (typeof key === "symbol" ? key.description : key);
+        if (typeof d.value === "function") {
+          const original = d.value;
+          const wrapped = function (...args) {
+            watch(name, this, args);
+            return new.target ? construct(original, args, new.target) : apply(original, this, args);
+          };
+          define(owner, key, { __proto__: null, value: wrapped, writable: true, enumerable: d.enumerable, configurable: true });
+        } else if (typeof d.get === "function") {
+          const get = d.get;
+          const wrapped = function () {
+            watch(name, this, []);
+            return apply(get, this, []);
+          };
+          define(owner, key, { __proto__: null, get: wrapped, set: d.set, enumerable: d.enumerable, configurable: true });
+        }
+      }
+    };
+    const owners = [
+      [String.prototype, "String.prototype"], [String, "String"], [Array.prototype, "Array.prototype"], [Array, "Array"],
+      [RegExp.prototype, "RegExp.prototype"], [Object, "Object"], [JSON, "JSON"], [Reflect, "Reflect"],
+      [Map.prototype, "Map.prototype"], [Set.prototype, "Set.prototype"], [WeakMap.prototype, "WeakMap.prototype"],
+      [WeakSet.prototype, "WeakSet.prototype"], [Function.prototype, "Function.prototype"], [Number, "Number"],
+      [Promise.prototype, "Promise.prototype"], [URL.prototype, "URL.prototype"], [Symbol, "Symbol"],
+    ];
+    for (let i = 0; i < owners.length; i++) wrapAll(owners[i][0], owners[i][1]);
+    const globals = ["atob", "btoa", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "parseInt"];
+    for (let i = 0; i < globals.length; i++) {
+      const name = globals[i];
+      const original = window[name];
+      window[name] = function (...args) {
+        watch(name, undefined, args);
+        return apply(original, this, args);
+      };
+    }
+    return () => {
+      busy = true;
+      return stringify(found);
+    };
+  })();
+  const via = new URLSearchParams(location.search).get("via");
+  const victim = (path) => "https://site-b.test/xs-realm-victim?via=" + path;
+  const idle = "https://site-a.test/xs-realm-idle";
+  // Answers late, so a window a link or form sends there stays blank meanwhile.
+  const slow = "https://site-a.test/xs-realm-slow";
+  const messages = [];
+  let w = null;
+  let lock = null;
+  const submit = (target, path, action = "https://site-b.test/xs-realm-victim") => {
+    const form = document.getElementById("form");
+    document.getElementById("form-via").value = path;
+    form.target = target;
+    form.action = action;
+    form.submit();
+  };
+  const follow = (target, href) => {
+    const link = document.getElementById("link");
+    link.target = target;
+    link.href = href;
+    link.click();
+  };
+  // Readies a blank window's realm for the next page: the engine script that page runs takes Reflect.apply at load,
+  // so a renewal it asks for seems to succeed without running.
+  const prepare = (handle) => {
+    const apply = handle.Reflect.apply;
+    handle.Reflect.apply = function (fn, self, args) {
+      if (typeof fn === "function" && fn.name === "renew") return true;
+      return apply(fn, self, args);
+    };
+  };
+  addEventListener("message", (event) => {
+    if (event.data === "idle" && via === "existing") open(victim("existing"), "xsr-existing");
+    if (!event.data || !event.data.via) return;
+    messages.push({ via: event.data.via, origin: event.origin, fromHandle: w !== null && event.source === w });
+    event.source.postMessage("pong", event.origin);
+  });
+  const paths = {
+    open: () => (w = open(victim("open"))),
+    blank: () => (w = open(victim("blank"), "_blank")),
+    named: () => (w = open(victim("named"), "xsr-named")),
+    "doc-open": () => (w = document.open(victim("doc-open"), "xsr-doc", "")),
+    existing: () => (w = open(idle, "xsr-existing")),
+    pending: () => {
+      open(idle, "xsr-pending");
+      w = open(victim("pending"), "xsr-pending");
+    },
+    javascript: () => {
+      prepare(open("javascript:void 0", "xsr-js"));
+      w = open(victim("javascript"), "xsr-js");
+    },
+    retarget: () => {
+      prepare(open(idle, "xsr-retarget"));
+      w = open(victim("retarget"), "xsr-retarget");
+    },
+    // The victim follows in a later task, once the browser has started the link's or form's own navigation.
+    "link-new": () => {
+      follow("xsr-linknew", slow);
+      prepare(open("", "xsr-linknew"));
+      setTimeout(() => (w = open(victim("link-new"), "xsr-linknew")), 100);
+    },
+    "form-new": () => {
+      submit("xsr-formnew", "form-new", slow);
+      prepare(open("", "xsr-formnew"));
+      setTimeout(() => (w = open(victim("form-new"), "xsr-formnew")), 100);
+    },
+    lock: () => {
+      w = open(victim("lock"), "xsr-lock");
+      // Another realm of this site reaches the same window by name before the other site's page arrives.
+      const other = document.getElementById("same").contentWindow.open("", "xsr-lock");
+      lock = failure(() => other.document);
+    },
+    link: () => {
+      w = open("", "xsr-link");
+      follow("xsr-link", victim("link"));
+    },
+    form: () => {
+      w = open("", "xsr-form");
+      submit("xsr-form", "form");
+    },
+    "form-opened": () => {
+      open(idle, "xsr-opened");
+      submit("xsr-opened", "form-opened");
+      w = open("", "xsr-opened");
+    },
+    redirect: () => (w = open("https://site-a.test/xs-realm-away?to=" + encodeURIComponent(victim("redirect")))),
+    away: () => {
+      w = open();
+      w.location = victim("away");
+    },
+    noopener: () => open(victim("noopener"), "_blank", "noopener"),
+  };
+  document.getElementById("go").onclick = () => paths[via]();
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = JSON.stringify({ spy: JSON.parse(spy()), messages, lock });
+  };
+</script>`,
+);
+
+// Answers a victim that names this page its opener, as one that asked for the victim's window by name becomes.
+const XS_REALM_IDLE = page(
+  "Realm idle",
+  `<script>
+  if (opener) opener.postMessage("idle", "*");
+  addEventListener("message", (event) => {
+    if (event.data && event.data.via) event.source.postMessage("pong", event.origin);
+  });
+</script>`,
+);
+
+// Compiles location reads through the generator and async constructors of a blank frame's own realm.
+const XS_REALM_EXEC = page(
+  "Realm exec",
+  `<pre id="results"></pre>
+<script>
+  document.body.appendChild(document.createElement("iframe"));
+  const child = frames[0];
+  const make = (source) => child.Function("return " + source)().constructor;
+  const generator = make("function* () {}")("return location.href")().next().value;
+  Promise.all([
+    make("async function () {}")("return location.href")(),
+    make("async function* () {}")("return location.href")().next(),
+  ]).then(([plain, asyncGenerator]) => {
+    document.getElementById("results").textContent = JSON.stringify({ generator, async: plain, asyncGenerator: asyncGenerator.value });
+  });
+</script>`,
+);
+
+// Lists every hook in its realm whose functions come from another realm, tries to compile code through each one's
+// constructor, then runs code, markup and cookies with a fresh marker through whatever hooks it has.
+const XS_REALM_VICTIM = page(
+  "Realm victim",
+  `<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  const via = new URLSearchParams(location.search).get("via");
+  const ownFunction = Object.getPrototypeOf(function () {});
+  const getProto = Object.getPrototypeOf;
+  const getDesc = Object.getOwnPropertyDescriptor;
+  const ownKeys = Reflect.ownKeys;
+  const foreign = [];
+  const seen = new Set();
+  // A subclass constructor such as EvalError reaches this realm's Function.prototype further up its chain.
+  const own = (fn) => {
+    for (let proto = getProto(fn); proto !== null; proto = getProto(proto)) if (proto === ownFunction) return true;
+    return false;
+  };
+  const check = (label, fn) => {
+    if (typeof fn !== "function" || seen.has(fn)) return;
+    seen.add(fn);
+    if (!own(fn)) foreign.push([label, fn]);
+  };
+  const scan = (label, object) => {
+    let keys;
+    try {
+      keys = ownKeys(object);
+    } catch {
+      return;
+    }
+    for (const key of keys) {
+      let d;
+      try {
+        d = getDesc(object, key);
+      } catch {
+        continue;
+      }
+      if (!d) continue;
+      const name = label + "." + String(key);
+      check(name, d.value);
+      check(name + " get", d.get);
+      check(name + " set", d.set);
+    }
+  };
+  const windows = new Set(["window", "self", "frames", "parent", "top", "opener", "globalThis"]);
+  scan("window", window);
+  for (const key of Object.getOwnPropertyNames(window)) {
+    if (windows.has(key)) continue;
+    const value = getDesc(window, key)?.value;
+    if (typeof value === "function" && value.prototype && typeof value.prototype === "object") scan(key + ".prototype", value.prototype);
+    else if (typeof value === "object" && value !== null) scan(key, value);
+  }
+  for (const sample of [function* () {}, async function () {}, async function* () {}]) scan("sample", getProto(sample));
+  const compiled = [];
+  const tried = new Set();
+  const attempt = (label, fn) => {
+    try {
+      const make = fn.constructor;
+      if (typeof make !== "function" || tried.has(make)) return;
+      tried.add(make);
+      if (make("return typeof __xsRealmA")() === "string") compiled.push(label);
+    } catch {}
+  };
+  attempt("cookie getter", getDesc(Document.prototype, "cookie")?.get);
+  if (window.__g$) attempt("__g$.renew", window.__g$.renew);
+  for (const [label, fn] of foreign) attempt(label, fn);
+
+  const mark = "xs" + "r" + "_";
+  const fresh = (kind) => mark + kind + Math.random().toString(36).slice(2, 10);
+  eval("void '" + fresh("e") + "'");
+  new Function("return '" + fresh("f") + "'")();
+  document.createElement("div").innerHTML = '<a href="/' + fresh("h") + '">x</a>';
+  document.cookie = fresh("n") + "=" + fresh("v") + "; path=/";
+  void document.cookie;
+  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
+  setTimeout("void '" + fresh("t") + "'", 0);
+
+  const report = (pong) => {
+    document.getElementById("results").textContent = JSON.stringify({
+      via,
+      foreign: foreign.length,
+      sample: foreign.slice(0, 5).map((entry) => entry[0]),
+      compiled,
+      history: history.length,
+      referrer: document.referrer,
+      name: window.name,
+      opener: opener !== null,
+      openerDocument: opener ? failure(() => opener.document) : "none",
+      pong,
+    });
+  };
+  if (opener) {
+    addEventListener("message", (event) => {
+      if (event.data === "pong") report(event.origin);
+    });
+    opener.postMessage({ via }, "https://site-a.test");
+  } else {
+    report(null);
+  }
+</script>`,
+);
+
 const typed =
   (type: string | null, body: string): Route =>
   (_req, res) => {
@@ -1825,7 +2648,7 @@ const typed =
     res.end(body);
   };
 
-const ROUTES: Record<string, Record<string, Route>> = {
+export const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
     "/style.css": css("#title { color: rgb(1, 2, 3); }"),
@@ -1922,6 +2745,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/xs-hooks": html(XS_HOOKS),
     "/xs-opener": html(XS_OPENER),
     "/xs-held": html(XS_HELD),
+    "/xs-cookie-spy": html(XS_COOKIE_SPY),
     "/xs-sealed-opener": html(XS_SEALED_OPENER),
     "/xs-js-host": html(XS_JS_HOST),
     "/served-blobs": html(SERVED_BLOBS),
@@ -2080,12 +2904,28 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sealed/spa": sealedCookie(SEALED_SPA),
     "/sealed/next": html(page("Sealed next", SEALED_ECHO)),
     "/sealed/search": sealedSearch,
+    "/xs-realm": html(XS_REALM_OPENER),
+    "/xs-realm-idle": html(XS_REALM_IDLE),
+    "/xs-realm-slow": (_req, res) => {
+      setTimeout(() => {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(XS_REALM_IDLE);
+      }, 3000);
+    },
+    "/xs-realm-exec": html(XS_REALM_EXEC),
+    "/xs-realm-away": (req, res) => {
+      res.writeHead(302, { location: new URL(req.url ?? "/", "http://fixture").searchParams.get("to") ?? "/" });
+      res.end();
+    },
   },
   "www.site-a.test": {
     "/landing": html(page("Landing", "<h1>Landing</h1>")),
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
     "/sealed/cookie-echo": cookieEcho,
+    "/xs-cookie-victim": html(XS_COOKIE_VICTIM),
+    "/cookie/xs-sync": xsSync,
+    "/cookie/echo": cookieEcho,
   },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {
@@ -2111,6 +2951,8 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/storage-events": html(STORAGE_EVENTS),
     "/xs-child": html(XS_CHILD),
     "/xs-opened": html(XS_OPENED),
+    "/xs-cookie-victim": html(XS_COOKIE_VICTIM),
+    "/cookie/xs-sync": xsSync,
     "/xs-js-child": html(XS_JS_CHILD),
     "/reuse-child": html(REUSE_CHILD),
     "/broadcast": html(
@@ -2119,6 +2961,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
         `<script>const channel = new BroadcastChannel("probe"); setInterval(() => channel.postMessage("x"), 200);</script>`,
       ),
     ),
+    "/xs-realm-victim": html(XS_REALM_VICTIM),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };
@@ -2129,7 +2972,7 @@ export function handleFixture(req: IncomingMessage, res: ServerResponse): void {
   req.on("end", () => {
     const host = (req.headers.host ?? "").split(":")[0] ?? "";
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
-    const route = ROUTES[host]?.[path];
+    const route = ROUTES[host]?.[path] ?? COMPAT_ROUTES[host]?.[path];
     if (route) {
       route(req, res, Buffer.concat(chunks).toString());
       return;
