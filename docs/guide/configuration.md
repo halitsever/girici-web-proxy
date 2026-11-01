@@ -19,8 +19,14 @@ stops the server with a message naming the variable.
 | `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica so sessions validate across them. |
 | `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
+| `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may move per minute, such as `50MB`, with bursts up to one minute's worth. A response that starts under the limit finishes. The signed-in admin is never limited. |
+| `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may move per day, such as `2GB`. Counts reset at midnight UTC and when Girici restarts. |
+| `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more characters. |
+| `GIRICI_POW_DIFFICULTY` | `16` | How hard the browser check is, 1 to 24; each step doubles the work. The check itself is switched on in Settings. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
+
+Sizes take `B`, `KB`, `MB`, `GB` or `TB` (powers of 1024, any case); a bare number is bytes.
 
 ## Trust proxy
 

@@ -12,10 +12,20 @@ describe("PrefsService", () => {
     const saved: unknown[] = [];
     const prefs = new PrefsService({ load: async () => undefined, save: async (value) => void saved.push(value) });
     await prefs.ready();
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: false, instanceSeal: false });
+    expect(prefs.current()).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: false,
+      instanceSeal: false,
+      seen: false,
+    });
     await prefs.set({ blockThirdPartyCookies: false });
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false });
-    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false }]);
+    expect(prefs.current()).toEqual({
+      blockThirdPartyCookies: false,
+      sealAddresses: false,
+      instanceSeal: false,
+      seen: false,
+    });
+    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false, seen: false }]);
   });
 
   it("loads a stored choice and survives a broken store", async () => {
@@ -42,7 +52,12 @@ describe("PrefsService", () => {
       save: async () => {},
     });
     await stored.ready();
-    expect(stored.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: true, instanceSeal: false });
+    expect(stored.current()).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: true,
+      instanceSeal: false,
+      seen: false,
+    });
   });
 });
 
@@ -80,7 +95,7 @@ describe("readPrefsMessage", () => {
   });
 
   it("lets the UI turn the instance switch on but never off, which only the server's answer does", () => {
-    expect(readPrefsMessage({ ...valid, instanceSeal: false }, ui, origin, known)).toEqual({
+    expect(readPrefsMessage({ ...valid, instanceSeal: false, seen: false }, ui, origin, known)).toEqual({
       blockThirdPartyCookies: false,
     });
   });

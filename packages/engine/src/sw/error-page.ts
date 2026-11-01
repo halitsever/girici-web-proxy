@@ -23,14 +23,26 @@ const MESSAGES: Record<ErrorPageCode, string> = {
   rate_limited: "Too many requests from your network. Wait a moment, then reload.",
   blocked: "{host} is blocked on this Girici server.",
   proxy: "Girici's upstream proxy could not reach {host}.",
+  quota: "Your network has used up its data allowance on this Girici server. Try again {wait}.",
+  challenge: "Girici needs to check this browser before it opens {host}. Reload the page.",
   runtime:
     "Girici could not verify its page script. If a CDN or proxy in front of this server rewrites or minifies JavaScript, turn that off for /_g/.",
   sealed:
     "This address was sealed in another browser, or this browser's address key was reset. Open the site again from Girici.",
 };
 
-export function errorPage(code: ErrorPageCode, target: URL | null): string {
-  const message = (MESSAGES[code] ?? MESSAGES.connect).replace("{host}", escapeHtml(target?.host ?? "the site"));
+/** The server's Retry-After in words, rounded up so the page never promises an earlier time. */
+export function waitText(seconds: number | undefined): string {
+  if (seconds === undefined) return "later";
+  if (seconds <= 90) return "in a minute";
+  if (seconds < 90 * 60) return `in ${Math.ceil(seconds / 60)} minutes`;
+  return `in ${Math.ceil(seconds / 3600)} hours`;
+}
+
+export function errorPage(code: ErrorPageCode, target: URL | null, retryAfter?: number): string {
+  const message = (MESSAGES[code] ?? MESSAGES.connect)
+    .replace("{host}", () => escapeHtml(target?.host ?? "the site"))
+    .replace("{wait}", () => waitText(retryAfter));
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -48,15 +60,14 @@ export function errorPage(code: ErrorPageCode, target: URL | null): string {
 }
 
 /** Error pages run no script and keep no opener, so a proxied page cannot borrow their realm on our origin. */
-export function errorResponse(code: ErrorPageCode, status: number, target: URL | null): Response {
-  return new Response(errorPage(code, target), {
-    status,
-    headers: {
-      "content-type": "text/html; charset=utf-8",
-      ...inertHeaders(),
-      "cross-origin-opener-policy": "same-origin",
-    },
-  });
+export function errorResponse(code: ErrorPageCode, status: number, target: URL | null, retryAfter?: number): Response {
+  const headers: Record<string, string> = {
+    "content-type": "text/html; charset=utf-8",
+    ...inertHeaders(),
+    "cross-origin-opener-policy": "same-origin",
+  };
+  if (retryAfter !== undefined) headers["retry-after"] = String(retryAfter);
+  return new Response(errorPage(code, target, retryAfter), { status, headers });
 }
 
 /** Every service-worker refusal is an inert document, so a navigation to it cannot run script on our origin. */

@@ -18,7 +18,42 @@ describe("loadConfig", () => {
       rateLimit: 3000,
       blockedHosts: [],
       upstreamProxy: undefined,
+      bandwidthLimit: 0,
+      dailyQuota: 0,
+      metricsToken: undefined,
+      powDifficulty: 16,
     });
+  });
+
+  it("reads the open-instance limits and names the variable when one is wrong", () => {
+    expect(loadConfig({})).toMatchObject({
+      bandwidthLimit: 0,
+      dailyQuota: 0,
+      metricsToken: undefined,
+      powDifficulty: 16,
+    });
+    expect(loadConfig({ GIRICI_BANDWIDTH_LIMIT: "50MB" }).bandwidthLimit).toBe(52_428_800);
+    expect(loadConfig({ GIRICI_DAILY_QUOTA: "1.5 gb" }).dailyQuota).toBe(1_610_612_736);
+    expect(loadConfig({ GIRICI_DAILY_QUOTA: "4096" }).dailyQuota).toBe(4096);
+    for (const bad of ["lots", "5 MiB", "-1MB", "1e6", "MB"]) {
+      expect(() => loadConfig({ GIRICI_BANDWIDTH_LIMIT: bad })).toThrow(
+        `GIRICI_BANDWIDTH_LIMIT must be a size such as 500MB or 2GB (0 turns it off), got "${bad}"`,
+      );
+    }
+    expect(loadConfig({ GIRICI_POW_DIFFICULTY: "4" }).powDifficulty).toBe(4);
+    for (const bad of ["0", "25", "x", "16.5"]) {
+      expect(() => loadConfig({ GIRICI_POW_DIFFICULTY: bad })).toThrow(
+        /GIRICI_POW_DIFFICULTY must be a whole number from 1 to 24/,
+      );
+    }
+  });
+
+  it("takes a metrics token of 16 or more characters and never echoes one", () => {
+    expect(loadConfig({ GIRICI_METRICS_TOKEN: " abcdefghijklmnop " }).metricsToken).toBe("abcdefghijklmnop");
+    expect(() => loadConfig({ GIRICI_METRICS_TOKEN: "short-token" })).toThrow(
+      /GIRICI_METRICS_TOKEN must be at least 16/,
+    );
+    expect(() => loadConfig({ GIRICI_METRICS_TOKEN: "short-token" })).not.toThrow(/short-token/);
   });
 
   it("reads the data dir, trust proxy, and session secret override", () => {

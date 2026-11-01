@@ -9,7 +9,7 @@ export interface UpstreamResponse {
 }
 
 export type TransportResult =
-  { ok: true; response: UpstreamResponse } | { ok: false; code: RelayErrorCode; status: number };
+  { ok: true; response: UpstreamResponse } | { ok: false; code: RelayErrorCode; status: number; retryAfter?: number };
 
 /** The seam where a Wisp transport, with TLS in the browser, can later replace our relay. */
 export interface Transport {
@@ -39,7 +39,13 @@ export class HttpRelayTransport implements Transport {
       return CONNECT_ERROR;
     }
     const error = relay.headers.get(HEADER.error);
-    if (error) return { ok: false, code: error as RelayErrorCode, status: relay.status };
+    if (error) {
+      const failure: TransportResult = { ok: false, code: error as RelayErrorCode, status: relay.status };
+      // Digits only: an HTTP date or junk gives no wait rather than a wrong one.
+      const wait = relay.headers.get("retry-after")?.trim();
+      if (wait && /^\d{1,9}$/.test(wait)) failure.retryAfter = Number(wait);
+      return failure;
+    }
     try {
       const setCookie = relay.headers.get(HEADER.setCookie);
       return {

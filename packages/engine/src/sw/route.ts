@@ -1,5 +1,13 @@
 import { decodeUrl, encodeUrl, isReservedPath, PROXY_PREFIX } from "../shared/codec.ts";
-import { LOGIN_PATH, POT_PATH, SETUP_PATH, WS_SEAL_PATH } from "../shared/protocol.ts";
+import {
+  CHALLENGE_PATH,
+  LOGIN_PATH,
+  METRICS_PATH,
+  POT_PATH,
+  POW_PATH,
+  SETUP_PATH,
+  WS_SEAL_PATH,
+} from "../shared/protocol.ts";
 import { isSealedPath, SEALED_PREFIX, type OpenSealed } from "../shared/sealed-address.ts";
 
 export type Route =
@@ -164,9 +172,11 @@ export interface UiClientSet {
   has(id: string): boolean;
 }
 
-const UI_ROUTES = new Set(["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH]);
+const UI_ROUTES = new Set(["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH, CHALLENGE_PATH]);
 const WORKER_ONLY = new Set([POT_PATH, WS_SEAL_PATH]);
-const ADMIN_PATHS = new Set(["/_g/account", "/_g/logout", LOGIN_PATH, SETUP_PATH]);
+const ADMIN_PATHS = new Set(["/_g/account", "/_g/logout", LOGIN_PATH, SETUP_PATH, POW_PATH]);
+/** Served to scrapers only; nothing in the browser may reach it. */
+const NO_BROWSER = new Set([METRICS_PATH]);
 const ADMIN_PREFIXES = ["/_g/admin/", "/_g/auth/"];
 
 /** True for an address on one of the UI's own routes. */
@@ -200,7 +210,12 @@ function normalizePath(pathname: string): string {
 /** The admin API, plus the endpoints only this worker calls. */
 export function isGuardedPath(pathname: string): boolean {
   const path = normalizePath(pathname);
-  return WORKER_ONLY.has(path) || ADMIN_PATHS.has(path) || ADMIN_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return (
+    WORKER_ONLY.has(path) ||
+    NO_BROWSER.has(path) ||
+    ADMIN_PATHS.has(path) ||
+    ADMIN_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
 }
 
 export interface ReservedRequest {
@@ -220,7 +235,8 @@ export function reservedAccess(
   origin: string,
   ui: UiClientSet,
 ): "allow" | "deny" {
-  if (WORKER_ONLY.has(normalizePath(pathname))) return "deny";
+  const path = normalizePath(pathname);
+  if (WORKER_ONLY.has(path) || NO_BROWSER.has(path)) return "deny";
   if (request.mode === "navigate") {
     return request.destination === "document" && request.method === "GET" ? "allow" : "deny";
   }
