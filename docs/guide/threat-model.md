@@ -41,7 +41,9 @@ pages usually reach each other, but not for all of them. These gaps are known an
 - **Windows that start blank.** A page from another site that loads in a frame the embedding page created blank (its
   address set before insertion, or parser-inserted and adopted before its first page arrives) still runs on hooks
   from the embedding page's JavaScript world. So does one that a server redirect brings into a popup the opener
-  opened for one of its own pages. Only per-site origin isolation, described below, separates these fully.
+  opened for one of its own pages, and in Chromium one that a link or form opens in a new named window when the page
+  stops the click or submit event from reaching Girici. Only per-site origin isolation, described below, separates
+  these fully.
 - **The origin private file system is not partitioned.** `navigator.storage.getDirectory()` returns one folder that
   every site shares.
 - **Blob URLs are shared.** A site that learns another site's `blob:` URL can read it.
