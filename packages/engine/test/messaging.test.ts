@@ -14,6 +14,7 @@ import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import type { WindowGuard } from "../src/client/windows.ts";
 import type { MessageEnvelope, SiteContext } from "../src/shared/protocol.ts";
 import { toBase64Url } from "../src/shared/seal-cipher.ts";
+import { siteLabel } from "../src/shared/site-label.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 describe("post", () => {
@@ -264,7 +265,7 @@ const HOST_A = "https://k6wjalxihe6pja6woodbryo47k.proxy.test";
 const HOST_B = "https://g4fjzasx42nioynauh4u6ncvdg.proxy.test";
 const fromB = (fields: Record<string, unknown> = {}) => ({
   "\u0000girici": 1,
-  o: "https://www.site-b.test",
+  o: "https://site-b.test",
   s: "https://site-b.test",
   t: "*",
   d: 5,
@@ -276,10 +277,7 @@ function siteLabels(answer: (origin: string) => Promise<string | null> = async (
   return createSiteLabels(
     SITES,
     () => "https://site-a.test",
-    async (origins) => {
-      const host = await answer(origins[0] as string);
-      return [[origins[0] as string, host]];
-    },
+    (origin) => answer(origin),
   );
 }
 
@@ -312,15 +310,15 @@ describe("createCrossSitePoster", () => {
     labels.verify(HOST_B, fromB());
     const { sent, post } = posterFor(labels);
     const port = {};
-    post(popup, "a", "https://www.site-b.test:443/path", [[port]]);
-    post(popup, "b", { targetOrigin: "https://www.site-b.test", transfer: [port] }, []);
+    post(popup, "a", "https://site-b.test:443/path", [[port]]);
+    post(popup, "b", { targetOrigin: "https://site-b.test", transfer: [port] }, []);
     post(popup, "c", { targetOrigin: "*" }, []);
     expect(sent.map((call) => call.slice(2))).toEqual([
       [HOST_B, [port]],
       [{ targetOrigin: HOST_B, transfer: [port] }],
       [{ targetOrigin: "*" }],
     ]);
-    expect((sent[0]?.[1] as MessageEnvelope).t).toBe("https://www.site-b.test");
+    expect((sent[0]?.[1] as MessageEnvelope).t).toBe("https://site-b.test");
   });
 
   it("drops a message for the sender's own origin or no web origin, and lets the browser refuse a bad one", async () => {
@@ -378,7 +376,7 @@ describe("createCrossSitePoster", () => {
       const labels = siteLabels();
       labels.verify(HOST_B, fromB());
       const { sent, post } = posterFor(labels);
-      post(popup, "a", "https://www.site-b.test", []);
+      post(popup, "a", "https://site-b.test", []);
       post(popup, "b", "*", []);
       post(popup, "c", "/", []);
       return sent;
@@ -459,8 +457,14 @@ describe("createSiteMessaging for a window that inherits its page", () => {
 describe("installMessaging in subdomain mode", () => {
   type FakeEvent = MessageEvent & { stopped?: boolean };
 
-  /** A site-a realm whose MessageEvent getters read the fake event's own native fields. */
-  function siteRealm() {
+  const senderWindow = { name: "sender" };
+
+  /**
+   * A site-a realm whose MessageEvent getters read the fake event's own native fields, with a page listener after the
+   * runtime's. Dispatching again marks the event untrusted. As in Chromium, a stopped event stays stopped when
+   * dispatched again; as in Firefox (`refusesSource`), a constructed event takes no cross-origin window as its source.
+   */
+  function siteRealm(answer?: (origin: string) => Promise<string | null>, refusesSource = false) {
     const listeners: Array<[string, (event: unknown) => void, unknown]> = [];
     const proto = {
       get data() {
@@ -470,12 +474,39 @@ describe("installMessaging in subdomain mode", () => {
         return (this as unknown as { nativeOrigin: string }).nativeOrigin;
       },
       get source() {
-        return null;
+        return (this as unknown as { nativeSource?: unknown }).nativeSource ?? null;
+      },
+      get ports() {
+        return (this as unknown as { nativePorts?: unknown }).nativePorts ?? [];
       },
     };
+    const dispatch = (message: FakeEvent) => {
+      if (refusesSource) message.stopped = false;
+      for (const [type, listener] of listeners) {
+        if (message.stopped) break;
+        if (type === "message") listener(message);
+      }
+      return message.stopped === true;
+    };
+    function FakeMessageEvent(
+      this: object,
+      type: string,
+      init: { data: unknown; origin: string; source: unknown; ports: unknown },
+    ) {
+      if (refusesSource && init.source !== null) throw new TypeError("not a WindowProxy");
+      Object.assign(this, {
+        type,
+        nativeData: init.data,
+        nativeOrigin: init.origin,
+        nativeSource: init.source,
+        nativePorts: init.ports,
+        isTrusted: false,
+      });
+    }
+    FakeMessageEvent.prototype = proto;
     const win = {
       ...fakeMessagingWin([], HOST_A),
-      MessageEvent: { prototype: proto },
+      MessageEvent: FakeMessageEvent,
       Event: {
         prototype: {
           stopImmediatePropagation(this: { stopped: boolean }) {
@@ -483,25 +514,123 @@ describe("installMessaging in subdomain mode", () => {
           },
         },
       },
+      EventTarget: {
+        prototype: {
+          dispatchEvent(message: FakeEvent) {
+            Object.assign(message, { isTrusted: false });
+            dispatch(message);
+            return true;
+          },
+        },
+      },
+      setTimeout,
       addEventListener: (type: string, listener: (event: unknown) => void, capture: unknown) =>
         listeners.push([type, listener, capture]),
     } as unknown as Realm;
     const event = (nativeOrigin: string, nativeData: unknown, isTrusted = true): FakeEvent =>
-      Object.assign(Object.create(proto) as FakeEvent, { nativeOrigin, nativeData, isTrusted });
-    const site = installMessaging(win, ctxFor("https://site-a.test", HOST_A), direct, asIs, siteLabels());
+      Object.assign(Object.create(proto) as FakeEvent, {
+        nativeOrigin,
+        nativeData,
+        nativeSource: senderWindow,
+        nativePorts: ["port"],
+        isTrusted,
+      });
+    const site = installMessaging(win, ctxFor("https://site-a.test", HOST_A), direct, asIs, siteLabels(answer));
     site?.listen();
-    const dispatch = (message: FakeEvent) => {
-      for (const [type, listener] of listeners) if (type === "message") listener(message);
-      return message.stopped === true;
-    };
-    return { listeners, event, dispatch };
+    const received: unknown[][] = [];
+    const sources: unknown[][] = [];
+    listeners.push([
+      "message",
+      (message) => {
+        received.push([(message as FakeEvent).origin, (message as FakeEvent).data]);
+        sources.push([(message as FakeEvent).source, (message as FakeEvent).ports]);
+      },
+      false,
+    ]);
+    return { listeners, event, dispatch, received, sources };
   }
 
   it("unwraps a verified envelope and reports the sender's real origin", () => {
     const { event } = siteRealm();
     const message = event(HOST_B, fromB());
     expect(message.data).toBe(5);
-    expect(message.origin).toBe("https://www.site-b.test");
+    expect(message.origin).toBe("https://site-b.test");
+  });
+
+  it("delivers a claim for a name under the sender's site once the worker confirms it, keeping the order", async () => {
+    const asked: string[] = [];
+    const { event, dispatch, received } = siteRealm(async (origin) => {
+      asked.push(origin);
+      return HOST_B;
+    });
+    expect(dispatch(event(HOST_B, fromB({ o: "https://www.site-b.test" })))).toBe(true);
+    expect(dispatch(event(HOST_B, fromB({ d: 6 })))).toBe(true);
+    expect(received).toEqual([]);
+    await vi.waitFor(() => expect(received).toHaveLength(2));
+    expect(received).toEqual([
+      ["https://www.site-b.test", 5],
+      ["https://site-b.test", 6],
+    ]);
+    expect(asked).toEqual(["https://www.site-b.test"]);
+    expect(dispatch(event(HOST_B, fromB({ o: "https://www.site-b.test", d: 7 })))).toBe(false);
+    expect(received[2]).toEqual(["https://www.site-b.test", 7]);
+  });
+
+  it("hands a held message on with its source and ports", async () => {
+    const { event, dispatch, sources } = siteRealm();
+    dispatch(event(HOST_B, fromB({ o: "https://www.site-b.test" })));
+    await vi.waitFor(() => expect(sources).toEqual([[senderWindow, ["port"]]]));
+  });
+
+  it("dispatches the held message itself where the browser takes no cross-origin window as a source", async () => {
+    const { event, dispatch, received, sources } = siteRealm(undefined, true);
+    dispatch(event(HOST_B, fromB({ o: "https://www.site-b.test" })));
+    await vi.waitFor(() => expect(received).toEqual([["https://www.site-b.test", 5]]));
+    expect(sources).toEqual([[senderWindow, ["port"]]]);
+  });
+
+  it("never delivers a public suffix's site claiming a site under it", async () => {
+    const suffix = "https://s3.amazonaws.com";
+    const suffixHost = `https://${siteLabel(siteKey, suffix)}.proxy.test`;
+    const victim = "https://victim.s3.amazonaws.com";
+    const victimHost = `https://${siteLabel(siteKey, victim)}.proxy.test`;
+    const { event, dispatch, received } = siteRealm(async (origin) => (origin === victim ? victimHost : suffixHost));
+    const forged = event(suffixHost, fromB({ o: victim, s: suffix, d: "forged" }));
+    expect(dispatch(forged)).toBe(true);
+    dispatch(event(suffixHost, fromB({ o: suffix, s: suffix, d: "own" })));
+    await vi.waitFor(() => expect(received).toEqual([[suffix, "own"]]));
+    expect(forged.origin).toBe("null");
+    expect(forged.data).toEqual(fromB({ o: victim, s: suffix, d: "forged" }));
+  });
+
+  it("drops a held message whose lookup never settles and delivers the next", async () => {
+    vi.useFakeTimers();
+    try {
+      const { event, dispatch, received } = siteRealm(() => new Promise(() => {}));
+      dispatch(event(HOST_B, fromB({ o: "https://www.site-b.test" })));
+      dispatch(event(HOST_B, fromB({ d: 6 })));
+      await vi.advanceTimersByTimeAsync(CROSS_SITE_TIMEOUT_MS - 1);
+      expect(received).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(received).toEqual([["https://site-b.test", 6]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("hands a message from this host or a sandboxed sender its data, keeping the origin it came with", () => {
+    const { event, dispatch, received } = siteRealm();
+    const own = event(HOST_A, fromB({ o: "https://site-a.test", s: "https://site-a.test" }));
+    expect(dispatch(own)).toBe(false);
+    expect(own.data).toBe(5);
+    expect(own.origin).toBe(HOST_A);
+    expect(dispatch(event("null", fromB()))).toBe(false);
+    expect(received).toEqual([
+      [HOST_A, 5],
+      ["null", 5],
+    ]);
+    expect(dispatch(event("null", fromB({ t: "https://site-c.test" })))).toBe(true);
+    expect(dispatch(event("null", fromB({ t: "https://site-a.test" })))).toBe(false);
   });
 
   it("unwraps the same while a page has replaced built-ins", () => {
@@ -509,21 +638,26 @@ describe("installMessaging in subdomain mode", () => {
     const read = () => {
       const message = event(HOST_B, fromB());
       const forged = event(HOST_B, fromB({ s: "https://site-c.test" }));
-      return [message.data, message.origin, forged.origin, event(HOST_A, "own").origin];
+      const own = event(HOST_A, fromB());
+      return [message.data, message.origin, forged.origin, event(HOST_A, "own").origin, own.data];
     };
     for (const [name, target, property, replacement] of REPLACED_BUILTINS) {
       expect(withReplaced(target, property, replacement, read), name).toEqual([
         5,
-        "https://www.site-b.test",
+        "https://site-b.test",
         "null",
         HOST_A,
+        5,
       ]);
     }
   });
 
-  it("listens in the capture phase", () => {
+  it("listens in the capture phase, before page listeners", () => {
     const { listeners } = siteRealm();
-    expect(listeners.map(([type, , capture]) => [type, capture])).toEqual([["message", true]]);
+    expect(listeners.map(([type, , capture]) => [type, capture])).toEqual([
+      ["message", true],
+      ["message", false],
+    ]);
   });
 
   it("stops a forged or misaddressed envelope before page listeners", () => {
@@ -543,10 +677,11 @@ describe("installMessaging in subdomain mode", () => {
     expect(event(HOST_B, fromB({ s: "https://site-c.test" })).origin).toBe("null");
   });
 
-  it("leaves events from this host, from elsewhere and made by the page as they are", () => {
+  it("leaves plain events from this host, events from elsewhere and events made by the page as they are", () => {
     const { event, dispatch } = siteRealm();
-    const own = event(HOST_A, fromB());
-    expect(own.data).toEqual(fromB());
+    const own = event(HOST_A, "plain");
+    expect(own.data).toBe("plain");
+    expect(own.origin).toBe(HOST_A);
     expect(dispatch(own)).toBe(false);
     expect(event("https://elsewhere.test", "x").origin).toBe("https://elsewhere.test");
     const made = event(HOST_B, fromB(), false);

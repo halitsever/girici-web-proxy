@@ -47,7 +47,7 @@ export function installMessaging(
   }
 
   // Before the origin hook below, so it takes the native getter.
-  const site = labels ? installSiteMessages(win, ctx, labels) : null;
+  const site = labels ? installSiteMessages(win, ctx, labels, sourceOf) : null;
   const descriptor = ownDescriptor(proto, "origin");
   const nativeOrigin = descriptor?.get;
   if (!nativeOrigin) return site;
