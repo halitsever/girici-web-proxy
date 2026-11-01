@@ -1,6 +1,6 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { installWebSocket } from "../src/client/websocket.ts";
+import { installWebSocket, type WebSocketRealm } from "../src/client/websocket.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
@@ -74,6 +74,23 @@ describe("installWebSocket", () => {
     const inner = MockWs.instances[0]!;
     expect(inner.url).toBe("ws://localhost:3000/_g/ws");
     expect(inner.protocols).toEqual(["girici.v1"]);
+  });
+
+  it("installs on a worker scope's globals, without a window", async () => {
+    const realm: WebSocketRealm = {
+      WebSocket: MockWs as unknown as typeof WebSocket,
+      fetch: (async () => ({ ok: true, json: async () => ({ seal: "S" }) })) as unknown as typeof fetch,
+      EventTarget,
+      Event,
+      MessageEvent,
+      CloseEvent: TestCloseEvent as unknown as typeof CloseEvent,
+      Blob,
+    };
+    installWebSocket(realm, { origin: ctx.origin, realUrl: ctx.realUrl });
+    MockWs.instances.length = 0;
+    new realm.WebSocket("wss://gateway.discord.gg/");
+    await flush();
+    expect(MockWs.instances[0]?.url).toBe("ws://localhost:3000/_g/ws");
   });
 
   it("asks for the seal at an absolute URL", async () => {

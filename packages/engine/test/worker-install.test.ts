@@ -8,7 +8,7 @@ import { prefixFor } from "../src/shared/partition.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
 import { recordingCalls } from "./recording-calls.ts";
-import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+import { DESCRIPTOR_ADDITIONS, REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const ORIGIN = "http://p.test";
 const RUNTIME = `${ORIGIN}/_g/worker.X.js`;
@@ -150,6 +150,62 @@ function installedScope(boot: Record<string, string> = {}) {
   });
   installWorker(scope as unknown as WorkerScope);
   return { ...fake, scope };
+}
+
+const SOCKET_ORIGIN = "http://proxy.test";
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+class TestCloseEvent extends Event {
+  readonly code: number;
+  readonly reason: string;
+  readonly wasClean: boolean;
+  constructor(type: string, init: { code?: number; reason?: string; wasClean?: boolean } = {}) {
+    super(type);
+    this.code = init.code ?? 0;
+    this.reason = init.reason ?? "";
+    this.wasClean = init.wasClean ?? false;
+  }
+}
+
+/** A worker scope whose WebSocket and fetch record what the relay shim asks for; ws-prep answers `prep`. */
+function socketScope(prep: unknown) {
+  const sockets: Array<{ url: string; protocols: unknown }> = [];
+  const relays: Array<{ onopen: (() => void) | null; sent: unknown[] }> = [];
+  const fetched: Array<[unknown, unknown]> = [];
+  class RecordingWebSocket {
+    onopen: (() => void) | null = null;
+    sent: unknown[] = [];
+    constructor(url: string, protocols?: unknown) {
+      sockets.push({ url, protocols });
+      relays.push(this);
+    }
+    send(data: unknown): void {
+      this.sent.push(data);
+    }
+  }
+  const scope = {
+    __giriciBase: "https://site-a.test/w.js",
+    __giriciRuntime: `${SOCKET_ORIGIN}/_g/worker.X.js`,
+    location: { origin: SOCKET_ORIGIN, href: `blob:${SOCKET_ORIGIN}/0` },
+    eval: (code: string) => code,
+    ...fakeGlobals().globals,
+    WebSocket: RecordingWebSocket as unknown as typeof WebSocket,
+    fetch: (url: unknown, init?: { body?: unknown }) => {
+      fetched.push([url, init?.body]);
+      // Answered on a later task, as the network would, so nothing the page adds meanwhile reads the response.
+      return new Promise((resolve) => setTimeout(() => resolve({ ok: true, json: async () => prep }), 0));
+    },
+    EventTarget,
+    Event,
+    MessageEvent,
+    CloseEvent: TestCloseEvent,
+    Blob,
+    RTCPeerConnection: class {},
+    WebSocketStream: class {},
+    WebTransport: class {},
+  };
+  return { scope, sockets, relays, fetched };
 }
 
 afterEach(() => {
@@ -339,6 +395,54 @@ describe("installWorker", () => {
     expect(Object.getPrototypeOf(new scope.SharedWorker("x")).constructor).toBe(scope.SharedWorker);
     expect(Object.getPrototypeOf(new scope.BroadcastChannel("x")).constructor).toBe(scope.BroadcastChannel);
     expect(Object.getPrototypeOf(new scope.EventSource()).constructor).toBe(scope.EventSource);
+  });
+
+  it("gives a worker the relay WebSocket, sealed through the worker's own fetch", async () => {
+    const { scope, sockets, relays, fetched } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    const socket = new scope.WebSocket("wss://site-a.test/chat");
+    expect(socket.url).toBe("wss://site-a.test/chat");
+    await flush();
+    expect(fetched[0]).toEqual(["http://proxy.test/_g/rpc/ws-prep", '{"url":"wss://site-a.test/chat"}']);
+    expect(sockets[0]).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
+    relays[0]?.onopen?.();
+    expect(JSON.parse(relays[0]?.sent[0] as string)).toEqual({ u: "wss://site-a.test/chat", p: [], s: "S" });
+  });
+
+  it("seals a worker's socket whatever the page replaced", async () => {
+    const pages: Array<[string, (run: () => void) => void]> = [
+      ...REPLACED_BUILTINS.map(([name, target, key, replacement]): [string, (run: () => void) => void] => [
+        name,
+        (run) => withReplaced(target, key, replacement, run),
+      ]),
+      [
+        "Object.prototype get and then",
+        (run) =>
+          withPrototypeAdditions({ get: DESCRIPTOR_ADDITIONS.get!, then: { value: () => {}, writable: true } }, run),
+      ],
+    ];
+    for (const [name, replaced] of pages) {
+      const { scope, sockets, relays, fetched } = socketScope({ seal: "S" });
+      installWorker(scope as unknown as WorkerScope);
+      let url: string | undefined;
+      replaced(() => {
+        url = new scope.WebSocket("wss://site-a.test/chat").url;
+      });
+      expect(url, name).toBe("wss://site-a.test/chat");
+      await flush();
+      expect(fetched[0], name).toEqual(["http://proxy.test/_g/rpc/ws-prep", '{"url":"wss://site-a.test/chat"}']);
+      expect(sockets[0], name).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
+      relays[0]?.onopen?.();
+      expect(JSON.parse(relays[0]?.sent[0] as string), name).toMatchObject({ s: "S" });
+    }
+  });
+
+  it("still takes WebRTC and the other transports away from workers", () => {
+    const { scope } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    for (const name of ["RTCPeerConnection", "WebSocketStream", "WebTransport"]) {
+      expect(Object.hasOwn(scope, name), name).toBe(false);
+    }
   });
 
   it("leaves a scope it already set up alone", () => {
