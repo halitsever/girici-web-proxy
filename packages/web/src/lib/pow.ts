@@ -1,4 +1,5 @@
 import { CHALLENGE_PATH, POW_PATH } from "@girici/engine/shared";
+import { resolveNext } from "./next";
 
 export { leadingZeroBits, solve } from "./pow-solve";
 
@@ -20,6 +21,18 @@ const LOOP_MS = 30_000;
 /** The server answers its paths in any letter case, so a next of /_G/challenge/ is this page too. */
 export function isChallengePath(pathname: string): boolean {
   return pathname.toLowerCase().replace(/\/+$/, "") === CHALLENGE_PATH;
+}
+
+/** Where a passed check goes: a proxy address or site host by leaving the UI, else a Girici page other than this one. */
+export function afterCheck(
+  next: string,
+  siteDomain: string | null,
+): { kind: "leave"; url: string } | { kind: "route"; path: string } {
+  const target = resolveNext(next, siteDomain);
+  if (target.kind === "proxy") return { kind: "leave", url: target.path };
+  if (target.kind === "site") return { kind: "leave", url: target.url };
+  const own = target.kind === "route" && !isChallengePath(new URL(target.path, "http://girici.invalid").pathname);
+  return { kind: "route", path: own ? target.path : "/" };
 }
 
 /** sessionStorage, or a stand-in where the browser refuses it, since reading the property alone can throw. */
