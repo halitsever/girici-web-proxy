@@ -19,6 +19,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:41000",
     proxy: { server: "http://127.0.0.1:41999", bypass: "127.0.0.1,localhost" },
+    // Specs find UI text by its English wording, and the UI follows the browser's language.
+    locale: "en-US",
     trace: "retain-on-failure",
   },
   webServer: [
