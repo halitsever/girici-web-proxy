@@ -43,24 +43,51 @@ describe("visited sites", () => {
     expect(again).toHaveLength(list.length);
   });
 
-  it("reads the first visited cookie that verifies", () => {
+  it("reads the visited cookies that verify", () => {
     const value = signVisited(["https://site-a.test"], keys);
     expect(readVisited(`girici-sites=junk; __Secure-girici-sites=${value}`, keys)).toEqual(["https://site-a.test"]);
     expect(readVisited(`girici-sites=${signVisited(["x"], other)}`, keys)).toEqual([]);
     expect(readVisited(undefined, keys)).toEqual([]);
   });
+
+  it("lists the sites of every visited value that verifies, so another value cannot hide them", () => {
+    const empty = signVisited([], keys);
+    const listed = signVisited(["https://site-a.test", "https://site-b.test"], keys);
+    const own = signVisited(["https://site-c.test", "https://site-a.test"], keys);
+    const header = `__Secure-girici-sites=${empty}; __Secure-girici-sites=${listed}; girici-sites=${own}`;
+    expect(readVisited(header, keys)).toEqual(["https://site-a.test", "https://site-b.test", "https://site-c.test"]);
+  });
 });
 
 describe("the settings cookie", () => {
-  it("reads the first prefs cookie that verifies", () => {
+  it("reads the prefs cookie that verifies", () => {
     const prefs = { ...DEFAULT_SITE_PREFS, toolbar: false, engine: "Bing" as const };
     const header = `a=b; girici-prefs=junk; girici-prefs=${signPrefs(prefs, keys)}; __Secure-girici-prefs=${signPrefs(
-      DEFAULT_SITE_PREFS,
+      { ...prefs, toolbar: true },
       keys,
     )}`;
     expect(readPrefsCookie(header, keys)).toEqual(prefs);
     expect(readPrefsCookie("girici-prefs=junk", keys)).toEqual(DEFAULT_SITE_PREFS);
     expect(readPrefsCookie(undefined, keys)).toEqual(DEFAULT_SITE_PREFS);
+  });
+
+  it("keeps blocking and sealing on when any value that verifies has them on", () => {
+    const open = signPrefs({ ...DEFAULT_SITE_PREFS, blockThirdPartyCookies: false, sealAddresses: false }, keys);
+    const sealed = signPrefs({ ...DEFAULT_SITE_PREFS, blockThirdPartyCookies: false, sealAddresses: true }, keys);
+    const blocking = signPrefs({ ...DEFAULT_SITE_PREFS, blockThirdPartyCookies: true, sealAddresses: false }, keys);
+    const read = (header: string) => {
+      const { blockThirdPartyCookies, sealAddresses } = readPrefsCookie(header, keys);
+      return { blockThirdPartyCookies, sealAddresses };
+    };
+    expect(read(`__Secure-girici-prefs=${open}`)).toEqual({ blockThirdPartyCookies: false, sealAddresses: false });
+    expect(read(`__Secure-girici-prefs=${open}; __Secure-girici-prefs=${sealed}`)).toEqual({
+      blockThirdPartyCookies: false,
+      sealAddresses: true,
+    });
+    expect(read(`__Secure-girici-prefs=${open}; girici-prefs=${blocking}; __Secure-girici-prefs=junk`)).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: false,
+    });
   });
 
   it("sets each cookie for the whole domain under /_g/sites", () => {

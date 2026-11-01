@@ -1,5 +1,6 @@
 import type { SiteDomain } from "@girici/engine/shared";
 import type { Request, Response } from "express";
+import { cookieValues } from "../http/cookie-values.ts";
 import { signSession, verifySession, type SessionPayload } from "./session.ts";
 
 export const SESSION_COOKIE = "__Host-girici";
@@ -55,11 +56,11 @@ function firstSession(
   secret: string,
   now: number,
 ): SessionPayload | null {
-  const cookies = parseCookies(cookieHeader);
   for (const name of names) {
-    const token = cookies[name];
-    const payload = token ? verifySession(token, secret, now) : null;
-    if (payload && payload.aud === aud) return payload;
+    for (const token of cookieValues(cookieHeader, [name])) {
+      const payload = verifySession(token, secret, now);
+      if (payload && payload.aud === aud) return payload;
+    }
   }
   return null;
 }
@@ -113,16 +114,4 @@ export function clearSession(res: Response, siteDomain?: SiteDomain): void {
 /** The page's own scheme, from the Origin these same-origin POSTs carry; a TLS terminator hides it from req. */
 function servedOverHttps(req: Request): boolean {
   return URL.parse(req.get("origin") ?? "")?.protocol === "https:";
-}
-
-function parseCookies(header: string | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  if (!header) return out;
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq < 0) continue;
-    const name = part.slice(0, eq).trim();
-    if (name) out[name] = part.slice(eq + 1).trim();
-  }
-  return out;
 }

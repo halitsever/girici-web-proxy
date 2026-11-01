@@ -54,4 +54,16 @@ describe("session cookie", () => {
     expect(readSession(`${SESSION_COOKIE}=${site}`, secret, 2_000)).toBeNull();
     expect(readSession(`${PLAIN_SESSION_COOKIE}=${site}`, secret, 2_000)).toBeNull();
   });
+
+  it("finds a valid session among several values of one name, wherever it stands", () => {
+    const site = createSiteSessionToken(7, secret, 1_000);
+    const admin = createSessionToken(7, secret, 1_000);
+    for (const header of [
+      `${SITE_SESSION_COOKIE}=${site}; ${SITE_SESSION_COOKIE}=junk`,
+      `x=1; ${SITE_SESSION_COOKIE}=junk; ${SITE_SESSION_COOKIE}=${site}`,
+    ]) {
+      expect(readSiteSession(header, secret, 2_000)?.sub, header).toBe(7);
+    }
+    expect(readSession(`${PLAIN_SESSION_COOKIE}=${admin}; ${PLAIN_SESSION_COOKIE}=junk`, secret, 2_000)?.sub).toBe(7);
+  });
 });

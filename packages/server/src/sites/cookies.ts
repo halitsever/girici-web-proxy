@@ -1,4 +1,5 @@
 import { readSitePrefs, type SiteDomain, type SitePrefs } from "@girici/engine/shared";
+import { cookieValues } from "../http/cookie-values.ts";
 import type { SiteKeys } from "./keys.ts";
 import { openValue, signedLength, signValue } from "./signed.ts";
 
@@ -28,21 +29,32 @@ export function signVisited(sites: readonly string[], keys: SiteKeys): string {
   return signValue(keys.cookies, "sites", sites);
 }
 
-/** A page with script on any site host can add same-name cookies, so the first value that verifies wins. */
+/**
+ * A page on any site host can add same-name cookies holding other values this server signed, so every value that
+ * verifies counts and the most private choice wins; the rest comes from the first.
+ */
 export function readPrefsCookie(cookieHeader: string | undefined, keys: SiteKeys): SitePrefs {
-  for (const value of cookieValues(cookieHeader, [PREFS_COOKIE, PLAIN_PREFS_COOKIE])) {
-    const prefs = openValue(keys.cookies, "prefs", value);
-    if (prefs !== null) return readSitePrefs(prefs);
+  const verified = cookieValues(cookieHeader, [PREFS_COOKIE, PLAIN_PREFS_COOKIE])
+    .map((value) => openValue(keys.cookies, "prefs", value))
+    .filter((opened) => opened !== null)
+    .map((opened) => readSitePrefs(opened));
+  const merged = verified[0] ?? readSitePrefs(null);
+  for (const prefs of verified) {
+    merged.blockThirdPartyCookies ||= prefs.blockThirdPartyCookies;
+    merged.sealAddresses ||= prefs.sealAddresses;
   }
-  return readSitePrefs(null);
+  return merged;
 }
 
+/** Every value that verifies adds its sites, so a planted value can hide none of them from clearing. */
 export function readVisited(cookieHeader: string | undefined, keys: SiteKeys): string[] {
+  const visited: string[] = [];
   for (const value of cookieValues(cookieHeader, [SITES_COOKIE, PLAIN_SITES_COOKIE])) {
     const sites = openValue(keys.cookies, "sites", value);
-    if (Array.isArray(sites)) return sites.filter((site): site is string => typeof site === "string");
+    if (!Array.isArray(sites)) continue;
+    for (const site of sites) if (typeof site === "string" && !visited.includes(site)) visited.push(site);
   }
-  return [];
+  return visited;
 }
 
 /** Newest first; the oldest sites fall off once the signed list would outgrow the cookie. */
@@ -57,16 +69,4 @@ export function siteCookie(name: "prefs" | "sites", value: string, domain: SiteD
   const [secureName, plainName] = COOKIE_NAMES[name];
   const prefix = `${https ? secureName : plainName}=${value}; Max-Age=${MAX_AGE_SECONDS}; Domain=${domain.host}`;
   return `${prefix}; Path=${COOKIE_PATH}; HttpOnly${https ? "; Secure" : ""}; SameSite=Lax`;
-}
-
-/** Every value of the named cookies, in header order; a header may carry one name several times. */
-function cookieValues(header: string | undefined, names: readonly string[]): string[] {
-  const values: string[] = [];
-  if (!header) return values;
-  for (const part of header.split(";")) {
-    const eq = part.indexOf("=");
-    if (eq < 0) continue;
-    if (names.includes(part.slice(0, eq).trim())) values.push(part.slice(eq + 1).trim());
-  }
-  return values;
 }
