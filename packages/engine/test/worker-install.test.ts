@@ -7,6 +7,7 @@ import { installWorkers } from "../src/client/workers.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { sharedWorkerPath } from "../src/shared/worker-boot.ts";
 import { recordingCalls } from "./recording-calls.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
@@ -217,15 +218,13 @@ describe("installWorker", () => {
     expect(code).toBe(bootFor(code, `${ORIGIN}/~/https/a.test/sub.js`, "https://a.test/sub.js"));
   });
 
-  it("gives nested shared and module workers the bootstrap too", () => {
+  it("gives nested module workers the bootstrap and shared ones their shared address", () => {
     const { scope, workers, blobs } = installedScope();
     new scope.SharedWorker("shared.js", "name");
     new scope.Worker("mod.js", { type: "module" });
-    const [shared, mod] = workers.map((url) => blobs.get(url));
-    expect([shared, mod]).toEqual([
-      bootFor(shared, `${ORIGIN}/~/https/a.test/shared.js`, "https://a.test/shared.js"),
-      bootFor(mod, `${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true),
-    ]);
+    const mod = blobs.get(workers[1] as string);
+    expect(workers[0]).toBe(ORIGIN + sharedWorkerPath(`${ORIGIN}/~/https/a.test/shared.js`, PARTITION, false));
+    expect(mod).toBe(bootFor(mod, `${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true));
   });
 
   it("keeps the worker's own base for a nested blob worker", () => {

@@ -1,6 +1,6 @@
-import { joined } from "../shared/primordials.ts";
+import { joined, startsWith } from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, WORKER_RPC_PATH } from "../shared/protocol.ts";
-import { workerBootstrapCode } from "../shared/worker-boot.ts";
+import { quote, sharedWorkerPath, workerBootstrapCode } from "../shared/worker-boot.ts";
 import { hookConstructor } from "./constructors.ts";
 
 export { workerBootstrapCode, type WorkerBoot } from "../shared/worker-boot.ts";
@@ -46,36 +46,47 @@ const then = Promise.prototype.then;
 const defineProperty = Object.defineProperty;
 const iteratorKey = Symbol.iterator;
 
-/** Starts every Worker and SharedWorker from a bootstrap blob, so the runtime is in place before the real script. */
+/**
+ * Starts every worker from a bootstrap, so the runtime is in place before the real script. A shared worker of a proxied
+ * script loads from an address the service worker answers, so tabs of one site join one instance; any other from a blob.
+ */
 export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
   // Taken now, so code that replaces them cannot hand the native constructor a script of its own.
   const urls = globals.URL;
   const createObjectURL = urls?.createObjectURL;
   const Blob = globals.Blob;
-  const bootstrapUrl = (raw: string, options: unknown): string => {
-    if (!start.runtimeUrl || !start.fetch || !createObjectURL || !Blob) {
-      throw new TypeError("Girici: no worker runtime to start this worker");
-    }
-    const source = isBlob(raw) ? { scriptUrl: raw, base: start.blobBase() } : start.resolve(raw);
+  const announce = (send: (input: string, init: object) => unknown, shared: string | null): string => {
     const nonce = randomHex();
     // Sent before the worker exists, so the service worker learns who started it before its first request.
-    const body = '{"v":' + PROTOCOL_VERSION + ',"n":"' + nonce + '"}';
-    const announced = apply(start.fetch, globals, [
-      start.origin + WORKER_RPC_PATH,
-      { __proto__: null, method: "POST", body },
-    ]);
+    const body =
+      '{"v":' + PROTOCOL_VERSION + ',"n":"' + nonce + '"' + (shared === null ? "" : ',"w":' + quote(shared)) + "}";
+    const announced = apply(send, globals, [start.origin + WORKER_RPC_PATH, { __proto__: null, method: "POST", body }]);
     // A failed announcement leaves the worker unbound, which the service worker treats as third-party.
     try {
       apply(then, announced, [undefined, () => {}]);
     } catch {
       // Not a promise, so there is no rejection to swallow.
     }
+    return nonce;
+  };
+  const bootstrapUrl = (raw: string, options: unknown, shared: boolean): string => {
+    if (!start.runtimeUrl || !start.fetch || !createObjectURL || !Blob) {
+      throw new TypeError("Girici: no worker runtime to start this worker");
+    }
+    const blob = isBlob(raw);
+    const source = blob ? { scriptUrl: raw, base: start.blobBase() } : start.resolve(raw);
+    const module = (options as { type?: unknown } | null | undefined)?.type === "module";
+    if (shared && !blob && startsWith(source.scriptUrl, start.origin + "/")) {
+      const path = sharedWorkerPath(source.scriptUrl, start.partition(), module);
+      announce(start.fetch, path);
+      return start.origin + path;
+    }
     const code = workerBootstrapCode({
       runtimeUrl: start.runtimeUrl,
-      nonce,
+      nonce: announce(start.fetch, null),
       ...source,
       partition: start.partition(),
-      module: (options as { type?: unknown } | null | undefined)?.type === "module",
+      module,
     });
     const blobOptions = { __proto__: null, type: "text/javascript" } as { type: string };
     return apply(createObjectURL, urls, [new Blob(blobParts(code), blobOptions)]) as string;
@@ -86,7 +97,10 @@ export function hookWorkers(globals: WorkerGlobals, start: WorkerStart): void {
     const name = names[index] as (typeof names)[number];
     const Native = globals[name];
     if (!Native) continue;
-    globals[name] = hookConstructor(Native, (input) => joined([bootstrapUrl(toText(input[0]), input[1])], input, 1));
+    const shared = name === "SharedWorker";
+    globals[name] = hookConstructor(Native, (input) =>
+      joined([bootstrapUrl(toText(input[0]), input[1], shared)], input, 1),
+    );
   }
 }
 
