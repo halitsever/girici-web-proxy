@@ -89,6 +89,42 @@ describe("CookieRpc", () => {
     expect(((await res.json()) as { cookies: Array<{ value: string }> }).cookies.map((c) => c.value)).toEqual(["2"]);
   });
 
+  it("applies a page's batches in order when a later one arrives first", async () => {
+    const cookies = await service();
+    const rpc = new CookieRpc(cookies, { maxWait: 1000 });
+    const header = () =>
+      cookies.header(page, { initiator: page, credentials: "include", topLevel: false, method: "GET" });
+    await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 1, cookies: ["a=1"] }), "c1", page);
+    const later = rpc.handle(post({ v: PROTOCOL_VERSION, seq: 3, cookies: ["a=3"] }), "c1", page);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(await header()).toBe("a=1");
+    await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 2, cookies: ["a=2", "b=2"] }), "c1", page);
+    await later;
+    expect(await header()).toBe("a=3; b=2");
+    // A batch that turns up after the writes that followed it never puts an older value back.
+    await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 2, cookies: ["a=old", "b=old"] }), "c1", page);
+    expect(await header()).toBe("a=3; b=2");
+  });
+
+  it("applies one batch of a page at a time, even when two arrive together", async () => {
+    const cookies = await service();
+    const applied: string[] = [];
+    const slow = {
+      setFromScript: async (url: URL, text: string) => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        applied.push(text);
+        return cookies.setFromScript(url, text);
+      },
+      snapshot: (url: URL) => cookies.snapshot(url),
+    } as unknown as CookieService;
+    const rpc = new CookieRpc(slow);
+    await Promise.all([
+      rpc.handle(post({ v: PROTOCOL_VERSION, seq: 2, cookies: ["a=1", "a=2"] }), "c1", page),
+      rpc.handle(post({ v: PROTOCOL_VERSION, seq: 3, cookies: ["a=3"] }), "c1", page),
+    ]);
+    expect(applied).toEqual(["a=1", "a=2", "a=3"]);
+  });
+
   it("still takes a single cookie", async () => {
     const cookies = await service();
     const res = await new CookieRpc(cookies).handle(post({ v: PROTOCOL_VERSION, seq: 1, cookie: "a=1" }), "c", page);

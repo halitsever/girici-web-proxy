@@ -136,7 +136,7 @@ describe("installCookies", () => {
     expect(cb.currentSeq()).toBe(0);
   });
 
-  it("sends a realm's writes in order, one request at a time", async () => {
+  it("sends a realm's writes in order without waiting for the previous answer", async () => {
     const { win, ctx, container, requests } = holdingRealm();
     installCookies(
       win,
@@ -151,13 +151,77 @@ describe("installCookies", () => {
     expect(requests.map((r) => r.body)).toEqual(['{"v":2,"seq":2,"cookies":["a=1","a=2"]}']);
     win.document.cookie = "a=3";
     await flushMicrotasks();
-    expect(requests).toHaveLength(1);
-    requests[0]!.answer();
-    await flushMicrotasks();
     expect(requests.map((r) => r.body)).toEqual([
       '{"v":2,"seq":2,"cookies":["a=1","a=2"]}',
       '{"v":2,"seq":3,"cookies":["a=3"]}',
     ]);
+  });
+
+  it("sends the writes a request names before that request, while the page thread is still busy", () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    win.document.cookie = "a=1";
+    // What the fetch and XHR hooks ask for the header, with no microtask run since the write.
+    expect(bridge.currentSeq()).toBe(1);
+    expect(requests.map((r) => r.body)).toEqual(['{"v":2,"seq":1,"cookies":["a=1"]}']);
+    win.document.cookie = "a=2";
+    expect(bridge.currentSeq()).toBe(2);
+    expect(requests.map((r) => r.body)).toEqual([
+      '{"v":2,"seq":1,"cookies":["a=1"]}',
+      '{"v":2,"seq":2,"cookies":["a=2"]}',
+    ]);
+    expect(bridge.currentSeq()).toBe(2);
+    expect(requests).toHaveLength(2);
+  });
+
+  it("sends and settles its writes while the page steers promise species", async () => {
+    /** A species whose construction throws, as a page can set on its promises and their constructor. */
+    const steer = function () {
+      throw new Error("page");
+    };
+    const species = { [Symbol.species]: steer };
+    const steering: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+      ["page Promise.prototype.constructor", PAGE.Promise.prototype, "constructor", { value: species }],
+      ["page Promise[Symbol.species]", PAGE.Promise, Symbol.species, { get: () => steer }],
+      ["Promise[Symbol.species]", Promise, Symbol.species, { get: () => steer }],
+    ];
+    for (const [name, target, key, replacement] of steering) {
+      const { win, ctx, container, requests } = holdingRealm();
+      const bridge = installCookies(
+        win,
+        ctx,
+        { v: 2, cookies: [] },
+        () => container,
+        () => {},
+      );
+      await flushMicrotasks();
+      const original = Object.getOwnPropertyDescriptor(target, key) as PropertyDescriptor;
+      Object.defineProperty(target, key, { ...original, ...replacement });
+      let released = false;
+      try {
+        win.document.cookie = "a=1";
+        void bridge.pendingWrites()!.then(() => (released = true));
+        await flushMicrotasks();
+        requests[0]?.answer([cookie("a", "1")]);
+        await flushMicrotasks();
+        await flushMicrotasks();
+        win.document.cookie = "a=2";
+        await flushMicrotasks();
+      } finally {
+        Object.defineProperty(target, key, original);
+      }
+      expect(released, name).toBe(true);
+      expect(
+        requests.map((r) => r.body),
+        name,
+      ).toEqual(['{"v":2,"seq":1,"cookies":["a=1"]}', '{"v":2,"seq":2,"cookies":["a=2"]}']);
+    }
   });
 
   it("splits a long burst into batches of fifty", async () => {
@@ -170,15 +234,9 @@ describe("installCookies", () => {
       () => {},
     );
     for (let i = 1; i <= 120; i++) win.document.cookie = `n${i}=1`;
-    const sent: Array<{ seq: number; cookies: string[] }> = [];
-    for (let batch = 0; batch < 3; batch++) {
-      await flushMicrotasks();
-      expect(requests).toHaveLength(batch + 1);
-      sent.push(JSON.parse(requests[batch]!.body) as { seq: number; cookies: string[] });
-      requests[batch]!.answer();
-    }
     await flushMicrotasks();
     expect(requests).toHaveLength(3);
+    const sent = requests.map((request) => JSON.parse(request.body) as { seq: number; cookies: string[] });
     expect(sent.map((body) => [body.seq, body.cookies.length])).toEqual([
       [50, 50],
       [100, 50],
@@ -347,8 +405,9 @@ describe("installCookies", () => {
     bridge.reset({ v: 2, cookies: [] });
     win.document.cookie = "new=1";
     await flushMicrotasks();
-    expect(requests).toHaveLength(2);
-    expect(requests[1]!.body).toBe('{"v":2,"seq":1,"cookies":["new=1"]}');
+    // The old document's two batches, then the new one's.
+    expect(requests).toHaveLength(3);
+    expect(requests[2]!.body).toBe('{"v":2,"seq":1,"cookies":["new=1"]}');
   });
 
   it("posts cookie writes to an absolute RPC URL, so blob documents can reach it", async () => {

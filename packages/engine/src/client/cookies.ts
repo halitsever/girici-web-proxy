@@ -64,7 +64,8 @@ export function installCookies(
   let queue: string[] = [];
   let head = 0;
   let sentSeq = 0;
-  let inflight = false;
+  // Batches sent and not answered yet; the worker applies them in seq order.
+  let outstanding = 0;
   let scheduled = false;
   let waiters: Array<() => void> = [];
   // Captured before the network hooks and storage partitioning wrap these.
@@ -97,58 +98,63 @@ export function installCookies(
     for (let index = 0; index < released.length; index++) (released[index] as () => void)();
   };
 
-  /** One RPC at a time, so the worker applies a page's writes in the order the page made them. */
+  /** Sends every queued write, in order; the worker applies each page's batches by seq, whatever order they land in. */
   const flush = () => {
     scheduled = false;
-    if (inflight || head >= queue.length) return;
-    const end = queue.length - head > COOKIE_BATCH_LIMIT ? head + COOKIE_BATCH_LIMIT : queue.length;
-    // Written out from strings, so a page's JSON.stringify or toJSON never sees the cookie.
-    let list = "";
-    for (let index = head; index < end; index++) list += (index > head ? "," : "") + quoteJson(queue[index] as string);
-    sentSeq += end - head;
-    if (end === queue.length) {
-      queue = [];
-      head = 0;
-    } else {
-      head = end;
+    while (head < queue.length) {
+      const end = queue.length - head > COOKIE_BATCH_LIMIT ? head + COOKIE_BATCH_LIMIT : queue.length;
+      // Written out from strings, so a page's JSON.stringify or toJSON never sees the cookie.
+      let list = "";
+      for (let index = head; index < end; index++)
+        list += (index > head ? "," : "") + quoteJson(queue[index] as string);
+      sentSeq += end - head;
+      if (end === queue.length) {
+        queue = [];
+        head = 0;
+      } else {
+        head = end;
+      }
+      send(`{"v":${PROTOCOL_VERSION},"seq":${sentSeq},"cookies":[${list}]}`, sentSeq);
     }
-    send(`{"v":${PROTOCOL_VERSION},"seq":${sentSeq},"cookies":[${list}]}`, sentSeq);
   };
 
   const send = (body: string, batchSeq: number) => {
-    inflight = true;
+    outstanding++;
     const batchGeneration = generation;
     const take = (answer: unknown) => {
       const cookies = typeof answer === "object" && answer !== null ? readCookies(ownValue(answer, "cookies")) : null;
       // Writes queued after this batch are already in the mirror, so only the newest batch's answer replaces it.
       if (cookies && batchSeq === seq && batchGeneration === generation) mirror = cookies;
     };
-    // Runs on an answer and on a failure alike.
+    // Runs once, on an answer and on a failure alike.
+    let settled = false;
     const done = () => {
-      if (batchGeneration !== generation) return;
-      inflight = false;
-      if (head < queue.length) flush();
-      else release();
+      if (settled || batchGeneration !== generation) return;
+      settled = true;
+      outstanding--;
+      if (outstanding === 0 && head >= queue.length) release();
     };
-    let sent: Promise<Response>;
+    // Each promise is unsteered first, since the captured then still asks the promise for its species.
     try {
-      sent = apply(nativeFetch, win, [
-        ctx.origin + COOKIE_RPC_PATH,
-        { __proto__: null, method: "POST", body } as RequestInit,
-      ]) as Promise<Response>;
+      const sent = unsteered(
+        apply(nativeFetch, win, [
+          ctx.origin + COOKIE_RPC_PATH,
+          { __proto__: null, method: "POST", body } as RequestInit,
+        ]) as Promise<Response>,
+      );
+      const answered = promiseThen(sent, (response): Promise<void> | undefined => {
+        if (apply(statusOf as (this: Response) => number, response, []) === 409) {
+          // The worker updated under this page; one reload brings a matching runtime.
+          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
+          return undefined;
+        }
+        const json = unsteered(apply(jsonOf as (this: Response) => Promise<unknown>, response, []));
+        return unsteered(promiseThen(json, take));
+      });
+      promiseThen(unsteered(answered), done, done);
     } catch {
       done();
-      return;
     }
-    const answered = promiseThen(sent, (response): Promise<void> | undefined => {
-      if (apply(statusOf as (this: Response) => number, response, []) === 409) {
-        // The worker updated under this page; one reload brings a matching runtime.
-        if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
-        return undefined;
-      }
-      return promiseThen(apply(jsonOf as (this: Response) => Promise<unknown>, response, []), take);
-    });
-    promiseThen(answered, done, done);
   };
 
   const write = (text: string) => {
@@ -158,8 +164,8 @@ export function installCookies(
     if (!blocked) mirror = applyCookieChanges(mirror, [cookie], now());
     seq++;
     append(queue, text);
-    // Writes made in one task go out together; writes made while a batch is out wait for the next one.
-    if (inflight || scheduled) return;
+    // Writes made in one task go out together, unless a request that names them goes out first.
+    if (scheduled) return;
     scheduled = true;
     promiseThen(loaded, flush);
   };
@@ -189,9 +195,13 @@ export function installCookies(
 
   return {
     listen,
-    currentSeq: () => seq,
+    currentSeq: () => {
+      // The request carrying this seq must not reach the worker before the writes it names.
+      if (head < queue.length) flush();
+      return seq;
+    },
     pendingWrites: () => {
-      if (!inflight && head >= queue.length) return null;
+      if (outstanding === 0 && head >= queue.length) return null;
       return unsteered(
         new NativePromise<void>((resolve) => {
           append(waiters, resolve);
@@ -217,7 +227,7 @@ export function installCookies(
       queue = [];
       head = 0;
       sentSeq = 0;
-      inflight = false;
+      outstanding = 0;
       release();
     },
     snapshot: () => copyCookies(mirror),
