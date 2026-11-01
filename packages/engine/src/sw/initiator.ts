@@ -14,15 +14,18 @@ export function isCrossSite(url: URL | null): boolean {
 
 /**
  * The real page a navigation came from. A label cannot be inverted, so a referrer on another site host counts only
- * when its own path names a site that lives there; anything else from that host is cross-site.
+ * when its own path names a site that lives there; anything else from that host is cross-site. On a site host a form
+ * post without a referrer is cross-site too: this host's pages keep same-host referrers, so it came from elsewhere.
  */
 export function navigationInitiator(
   referrer: string | null,
   origin: string,
   open: OpenSealed | undefined,
   site: SiteRouting | null,
+  method = "GET",
 ): URL | null {
   const today = realUrlOf(referrer, origin, open);
+  if (site && !referrer && method !== "GET" && method !== "HEAD") return CROSS_SITE;
   if (!site || !referrer || today) return today;
   let url: URL;
   try {

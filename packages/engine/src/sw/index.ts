@@ -325,7 +325,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
       // A navigation that arrives from another site host is cross-site, not a direct one.
       const initiator =
         navigation && site
-          ? navigationInitiator(referrer, origin, sealing.open, siteRouting() ?? null)
+          ? navigationInitiator(referrer, origin, sealing.open, siteRouting() ?? null, request.method)
           : realUrlOf(navigation ? referrer : clientUrl, origin, sealing.open);
       const seal = route.sealed && master ? master.originSeal(route.target.origin) : undefined;
       const sealsLoad = navigation && request.destination === "document" && master && sealing.enabled();
@@ -339,6 +339,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
           credentials: request.credentials,
           topLevel: request.destination === "document",
           method: request.method,
+          ...(site ? { privateDomains: true } : undefined),
         };
         const blocked = await cookiesBlocked(event, client, route.target);
         const cookieHeader = blocked ? null : await cookies.header(route.target, cookieContext);
@@ -350,6 +351,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
           clientUrl: initiator,
           isNavigation: navigation,
           cookie: cookieHeader,
+          ...(site ? { privateDomains: true } : undefined),
         });
         if (ytPlayer && playerBody && result.ok && result.response.body) {
           const webText = await new Response(result.response.body).text();

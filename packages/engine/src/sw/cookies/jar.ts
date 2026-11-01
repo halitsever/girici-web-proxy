@@ -8,6 +8,8 @@ export interface CookieRequestContext {
   credentials: RequestCredentials;
   topLevel: boolean;
   method: string;
+  /** Subdomain mode: names in the private part of the public suffix list are sites of their own. */
+  privateDomains?: boolean;
 }
 
 export interface CookieRecordStore {

@@ -435,6 +435,43 @@ describe("pages on site hosts", () => {
     expect(html.match(/&amp;quot;sites&amp;quot;/g)).toHaveLength(1);
   });
 
+  it("keeps a same-host referrer where the page asks for none", async () => {
+    const page = [
+      '<meta name="referrer" content="no-referrer"><meta name="Referrer" content="never">',
+      '<form rel="noreferrer nofollow" method="post"></form><a rel="noreferrer" referrerpolicy="no-referrer">x</a>',
+      '<meta name="description" content="no-referrer">',
+    ].join("");
+    const res = await buildPageResponse(
+      upstream(
+        [
+          ["content-type", "text/html"],
+          ["referrer-policy", "no-referrer, strict-origin-when-cross-origin, never"],
+        ],
+        page,
+      ),
+      onSite(),
+    );
+    expect(res.headers.get("referrer-policy")).toBe("same-origin, strict-origin-when-cross-origin, same-origin");
+    const html = await res.text();
+    expect(html).toContain('<meta name="referrer" content="same-origin"><meta name="Referrer" content="same-origin">');
+    expect(html).toContain('<form rel="noopener nofollow" method="post">');
+    expect(html).toContain('<a rel="noopener" referrerpolicy="same-origin">');
+    expect(html).toContain('<meta name="description" content="no-referrer">');
+
+    const single = await buildPageResponse(
+      upstream(
+        [
+          ["content-type", "text/html"],
+          ["referrer-policy", "no-referrer"],
+        ],
+        page,
+      ),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(single.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(await single.text()).toContain('<meta name="referrer" content="no-referrer">');
+  });
+
   it("marks every other response on a site host too", async () => {
     const image = await buildPageResponse(
       upstream([["content-type", "image/png"]], "png"),

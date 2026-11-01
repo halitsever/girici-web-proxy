@@ -44,6 +44,17 @@ describe("navigationInitiator", () => {
     expect(navigationInitiator(null, own, undefined, site)).toBeNull();
   });
 
+  it("calls a form post without a referrer cross-site on a site host, while a load without one stays direct", () => {
+    expect(navigationInitiator(null, own, undefined, site, "POST")).toBe(CROSS_SITE);
+    expect(navigationInitiator(null, own, undefined, site, "PUT")).toBe(CROSS_SITE);
+    expect(navigationInitiator(null, own, undefined, site, "GET")).toBeNull();
+    expect(navigationInitiator(null, own, undefined, site, "HEAD")).toBeNull();
+    expect(navigationInitiator(null, own, undefined, null, "POST")).toBeNull();
+    expect(navigationInitiator(`${own}/~/https/site-a.test/p`, own, undefined, site, "POST")?.href).toBe(
+      "https://site-a.test/p",
+    );
+  });
+
   it("keeps today's answer for a foreign referrer and without a site", () => {
     expect(navigationInitiator("https://evil.test/~/https/site-b.test/p", own, undefined, site)).toBeNull();
     expect(navigationInitiator("https://bbb.proxy.test/", own, undefined, null)).toBeNull();

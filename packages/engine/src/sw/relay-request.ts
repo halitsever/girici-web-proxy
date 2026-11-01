@@ -8,6 +8,8 @@ export interface RelayContext {
   target: URL;
   clientUrl: URL | null;
   isNavigation: boolean;
+  /** As in `CookieRequestContext`. */
+  privateDomains?: boolean;
 }
 
 // Sent as real headers so the browser HTTP cache can key and revalidate relay responses.
@@ -33,7 +35,7 @@ export async function buildRelayRequest(
 
   // An initiator known only as another site is what a browser sends under no-referrer: no Referer, Origin null.
   const crossSite = isCrossSite(ctx.clientUrl);
-  const site = crossSite ? "cross-site" : secFetchSite(ctx.clientUrl, ctx.target);
+  const site = crossSite ? "cross-site" : secFetchSite(ctx.clientUrl, ctx.target, ctx.privateDomains);
   const fetchMeta = ctx.isNavigation
     ? `document;navigate;${site};?1`
     : `${request.destination || "empty"};${request.mode};${site};`;

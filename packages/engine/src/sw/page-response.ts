@@ -29,6 +29,7 @@ import {
 import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
+import { keepSameHostReferrer, sameHostPolicy } from "./referrer-policy.ts";
 import type { TransportResult } from "./transport.ts";
 
 export interface PageContext {
@@ -113,7 +114,8 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   for (const [name, value] of envelope) {
     if (DROPPED_HEADERS.has(name) || name.startsWith("x-girici-")) continue;
     try {
-      const next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin, !!ctx.seal) : value;
+      let next = name === "refresh" ? rewriteRefresh(value, ctx.target, ctx.origin, !!ctx.seal) : value;
+      if (ctx.sites && name === "referrer-policy") next = sameHostPolicy(next);
       // An empty refresh is one that would have loaded a blob document.
       if (next !== "" || value === "") headers.append(name, next);
     } catch {
@@ -181,7 +183,14 @@ async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, valid
       // A srcdoc frame has no sealed address of its own, so it never gets the key.
       const frameInject = (base: URL) =>
         clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
-      return rewriteHtml(text, { url: ctx.target, origin: ctx.origin, inject, frameInject, opaque: !!ctx.seal });
+      return rewriteHtml(text, {
+        url: ctx.target,
+        origin: ctx.origin,
+        inject,
+        frameInject,
+        opaque: !!ctx.seal,
+        ...(ctx.sites ? { attribute: keepSameHostReferrer } : undefined),
+      });
     }
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
