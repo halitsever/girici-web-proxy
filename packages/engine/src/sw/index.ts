@@ -369,6 +369,8 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
         }
         const changes =
           result.ok && !blocked ? await cookies.store(route.target, result.response.setCookies, cookieContext) : [];
+        // A tab can leave a site host right after this page, and WebKit then stops the worker before the jar writes.
+        if (site) event.waitUntil(cookies.saved());
         if (pageConfig) await pageConfig;
         const siteState = site ? siteMode.state() : null;
         if (siteState && topLevelGet && result.ok && siteMode.hostOf(route.target) === origin) {
@@ -514,6 +516,7 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   const blocked = pageUrl ? await cookiesBlocked(event, client, pageUrl) : false;
   const response = await rpc.handle(event.request, event.clientId, pageUrl, { blocked });
   event.waitUntil(forgetClosedClients());
+  if (siteMode.settled() === "site") event.waitUntil(cookies.saved());
   return response;
 }
 
