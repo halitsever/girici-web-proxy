@@ -101,8 +101,89 @@ const DYNAMIC_SCRIPTS = page(
 </script>`,
 );
 
+// Script text that reaches a script through the other DOM methods; each case writes the address it sees.
+const SCRIPT_DOM = page(
+  "Script text through the DOM",
+  `<p id="rc"></p><p id="ap"></p><p id="frag"></p><p id="rin"></p><p id="rsur"></p><p id="cbefore"></p>
+<p id="crep"></p><p id="dswitch"></p><p id="moved"></p><p id="readback"></p>
+<script>
+  const code = (id) => 'document.getElementById("' + id + '").textContent = location.href';
+  const make = (type) => {
+    const script = document.createElement("script");
+    if (type) script.type = type;
+    return script;
+  };
+  const add = (script) => document.body.appendChild(script);
+  const attempt = (id, run) => {
+    try {
+      run();
+    } catch (error) {
+      document.getElementById(id).textContent = "threw " + error.name;
+    }
+  };
+
+  attempt("rc", () => add(make()).replaceChildren(code("rc")));
+  attempt("ap", () => {
+    const text = code("ap");
+    add(make()).append(text.slice(0, 12), text.slice(12));
+  });
+  attempt("frag", () => {
+    const text = code("frag");
+    const fragment = document.createDocumentFragment();
+    fragment.append(document.createTextNode(text.slice(0, 12)), document.createTextNode(text.slice(12)));
+    add(make()).appendChild(fragment);
+  });
+  attempt("rin", () => {
+    const range = document.createRange();
+    range.selectNodeContents(add(make()));
+    range.insertNode(document.createTextNode(code("rin")));
+  });
+  attempt("rsur", () => {
+    const holder = document.createElement("div");
+    holder.textContent = code("rsur");
+    add(holder);
+    const range = document.createRange();
+    range.selectNodeContents(holder);
+    range.surroundContents(make());
+  });
+  attempt("cbefore", () => {
+    const script = make();
+    const comment = document.createComment("c");
+    script.appendChild(comment);
+    add(script);
+    comment.before(code("cbefore"));
+  });
+  attempt("crep", () => {
+    const script = make();
+    const comment = document.createComment("c");
+    script.appendChild(comment);
+    add(script);
+    comment.replaceWith(code("crep"));
+  });
+  attempt("dswitch", () => {
+    const block = make("text/plain");
+    block.textContent = code("dswitch") + ";";
+    add(block);
+    block.type = "text/javascript";
+    block.append("void 0;");
+    document.getElementById("readback").textContent = String(block.text === code("dswitch") + ";void 0;");
+  });
+  attempt("moved", () => {
+    const other = document.implementation.createHTMLDocument("");
+    const block = other.createElement("script");
+    block.type = "text/plain";
+    block.textContent = code("moved");
+    other.body.appendChild(block);
+    add(block);
+    block.setAttribute("type", "text/javascript");
+    block.append(";");
+  });
+</script>`,
+);
+
 export const ROUTES: CompatRoutes = {
   "site-a.test": {
     "/dynamic-scripts": html(DYNAMIC_SCRIPTS),
+    "/dynamic-scripts-dom": html(SCRIPT_DOM),
   },
 };

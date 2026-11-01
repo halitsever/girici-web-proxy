@@ -10,6 +10,14 @@ test("a script written at run time sees the page's real address", async ({ page 
   await expect(page.locator("#readback")).toHaveText("true");
 });
 
+test("script text that goes in through other DOM methods sees the page's real address", async ({ page }) => {
+  await page.goto("/~/https/site-a.test/dynamic-scripts-dom");
+  for (const id of ["#rc", "#ap", "#frag", "#rin", "#rsur", "#cbefore", "#crep", "#dswitch", "#moved"]) {
+    await expect(page.locator(id), id).toHaveText("https://site-a.test/dynamic-scripts-dom");
+  }
+  await expect(page.locator("#readback")).toHaveText("true");
+});
+
 test("a data block reads back as written", async ({ page }) => {
   await page.goto("/~/https/site-a.test/dynamic-scripts");
   await expect(page.locator("#data")).toHaveText('{"a":1}');

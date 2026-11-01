@@ -6,6 +6,7 @@
 export const apply = Reflect.apply;
 const defineProperty = Reflect.defineProperty;
 const ownDescriptor = Reflect.getOwnPropertyDescriptor;
+const prototypeOf = Reflect.getPrototypeOf;
 const NativeUrl = URL;
 const NativeString = String;
 const strings = String.prototype;
@@ -272,6 +273,15 @@ export function append<T>(list: T[], item: T): void {
 
 export function setHas<T>(set: Set<T>, value: T): boolean {
   return apply(nativeSetHas, set, [value]);
+}
+
+/** The getter `name` has on `proto` or the nearest prototype above it, as AbstractRange holds Range's. */
+export function inheritedGetter(proto: object | null | undefined, name: PropertyKey): (() => unknown) | undefined {
+  for (let current = proto ?? null; current; current = prototypeOf(current)) {
+    const descriptor = ownDescriptor(current, name);
+    if (descriptor) return descriptor.get as (() => unknown) | undefined;
+  }
+  return undefined;
 }
 
 /** The [object Tag] brand, read without Function.prototype.call. */

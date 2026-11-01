@@ -253,21 +253,22 @@ export function install(
     // Before the attribute hooks, so it takes the browser's getAttribute.
     [
       "script text",
-      () =>
-        (scripts = installScriptText(win, {
+      () => {
+        scripts = installScriptText(win, {
           __proto__: null,
           classic: rewrite.js,
           module: rewrite.module,
           importMap: rewrite.importMap,
-        } as ScriptRewriters)),
+        } as ScriptRewriters);
+        frames?.addBackstop(scripts.check);
+      },
     ],
     [
       "attributes",
       () => {
-        const attributes = installAttributes(win, ctx, rewrite, blobs);
-        frames?.useBackstop((node, target) => {
-          attributes.normalize(node);
-          scripts.check(node, target);
+        const normalize = installAttributes(win, ctx, rewrite, blobs).normalize;
+        frames?.addBackstop((nodes) => {
+          for (let index = 0; index < nodes.length; index++) normalize(nodes[index]);
         });
       },
     ],

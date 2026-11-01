@@ -23,10 +23,19 @@ function fakeDom() {
     get isConnected(): boolean {
       return this.connected;
     }
+    parent: FakeNode | null = null;
+    get parentNode(): FakeNode | null {
+      return this.parent;
+    }
+    get childNodes(): FakeNodeList {
+      return new FakeNodeList((this as unknown as { children?: FakeNode[] }).children ?? []);
+    }
     get textContent(): string {
       return this.stored;
     }
     set textContent(value: string) {
+      const self = this as unknown as { writtenAs?: unknown[]; attributes?: Record<string, string> };
+      self.writtenAs?.push(self.attributes?.type ?? null);
       this.stored = String(value);
     }
   }
@@ -76,6 +85,18 @@ function fakeDom() {
     getAttribute(name: string): string | null {
       return this.attributes[name] ?? null;
     }
+    setAttribute(name: string, value: string): void {
+      this.attributes[name.toLowerCase()] = String(value);
+    }
+    removeAttribute(name: string): void {
+      delete this.attributes[name.toLowerCase()];
+    }
+    toggleAttribute(name: string, force?: boolean): boolean {
+      const present = force ?? !(name in this.attributes);
+      if (present) this.attributes[name] ??= "";
+      else delete this.attributes[name];
+      return present;
+    }
     querySelectorAll(): FakeNodeList {
       return scriptsIn(this.children);
     }
@@ -90,6 +111,14 @@ function fakeDom() {
   }
   // Trusted Types gives script elements their own textContent and innerText, shadowing Node's and HTMLElement's.
   class FakeHTMLScriptElement extends FakeHTMLElement {
+    /** The type each native text write saw, so a test can tell whether the browser would have run it. */
+    readonly writtenAs: Array<string | null> = [];
+    get type(): string {
+      return this.attributes.type ?? "";
+    }
+    set type(value: string) {
+      this.attributes.type = String(value);
+    }
     get text(): string {
       return this.stored;
     }
@@ -233,16 +262,16 @@ describe("installScriptText", () => {
     const { dom, scripts } = fakeDom();
     const parent = dom.element("div");
     const script = dom.script({ stored: "x" });
-    scripts.check(script, parent);
+    scripts.check([script], parent);
     expect(dom.nativeText(script)).toBe("[js:x]");
-    scripts.check(script, parent);
+    scripts.check([script], parent);
     expect(dom.nativeText(script)).toBe("[js:x]");
     expect(script.textContent).toBe("x");
     const connected = dom.script({ connected: true, stored: "y" });
-    scripts.check(connected, parent);
+    scripts.check([connected], parent);
     expect(dom.nativeText(connected)).toBe("y");
     const external = dom.script({ src: "/a.js", stored: "config" });
-    scripts.check(external, parent);
+    scripts.check([external], parent);
     expect(dom.nativeText(external)).toBe("config");
   });
 
@@ -251,11 +280,11 @@ describe("installScriptText", () => {
     const script = dom.script();
     script.textContent = "a";
     script.attributes.type = "module";
-    scripts.check(script, dom.element("div"));
+    scripts.check([script], dom.element("div"));
     expect(dom.nativeText(script)).toBe("[mod:a]");
     expect(script.textContent).toBe("a");
     script.attributes.type = "application/json";
-    scripts.check(script, dom.element("div"));
+    scripts.check([script], dom.element("div"));
     expect(dom.nativeText(script)).toBe("a");
   });
 
@@ -263,10 +292,10 @@ describe("installScriptText", () => {
     const { dom, scripts } = fakeDom();
     const first = dom.script({ stored: "a" });
     const second = dom.script({ stored: "b" });
-    scripts.check(dom.fragment(first, dom.element("p"), second), dom.element("div"));
+    scripts.check([dom.fragment(first, dom.element("p"), second)], dom.element("div"));
     expect([dom.nativeText(first), dom.nativeText(second)]).toEqual(["[js:a]", "[js:b]"]);
     const nested = dom.script({ stored: "c" });
-    scripts.check(dom.element("div", [nested]), dom.element("body"));
+    scripts.check([dom.element("div", [nested])], dom.element("body"));
     expect(dom.nativeText(nested)).toBe("[js:c]");
   });
 
@@ -274,26 +303,87 @@ describe("installScriptText", () => {
     const { dom, scripts } = fakeDom();
     const script = dom.script({ connected: true });
     const text = dom.text("z");
-    scripts.check(text, script);
+    scripts.check([text], script);
     expect(dom.nativeText(text)).toBe("[js:z]");
     // The insertion itself, which the backstop runs before.
     script.stored = text.stored;
     expect(script.textContent).toBe("z");
-    scripts.check(script, dom.element("div"));
+    scripts.check([script], dom.element("div"));
     expect(dom.nativeText(script)).toBe("[js:z]");
     const full = dom.script({ connected: true, stored: "a" });
     const more = dom.text("b");
-    scripts.check(more, full);
+    scripts.check([more], full);
     expect(dom.nativeText(more)).toBe("b");
     const other = dom.text("location");
-    scripts.check(other, dom.element("div"));
-    scripts.check(other, null);
+    scripts.check([other], dom.element("div"));
+    scripts.check([other], null);
     expect(dom.nativeText(other)).toBe("location");
+  });
+
+  it("joins strings going into an empty script and rewrites them as one", () => {
+    const { dom, scripts } = fakeDom();
+    const script = dom.script({ connected: true });
+    const args: unknown[] = ["location", ".href"];
+    scripts.check(args, script);
+    expect(args).toEqual(["[js:location.href]", ""]);
+    const data = dom.script({ connected: true, type: "application/json" });
+    const block: unknown[] = ['{"a":', "1}"];
+    scripts.check(block, data);
+    expect(block).toEqual(['{"a":', "1}"]);
+  });
+
+  it("joins the text nodes of a fragment going into an empty script", () => {
+    const { dom, scripts } = fakeDom();
+    const script = dom.script({ connected: true });
+    const first = dom.text("location");
+    const second = dom.text(".href");
+    scripts.check([dom.fragment(first, dom.element("b"), second)], script);
+    expect([dom.nativeText(first), dom.nativeText(second)]).toEqual(["[js:location.href]", ""]);
+  });
+
+  it("adds text to what Girici wrote into a script and rewrites the whole", () => {
+    const { dom, scripts } = fakeDom();
+    const script = dom.script({ connected: true });
+    script.text = "location";
+    const more = dom.text(".href");
+    scripts.check([more], script);
+    expect([dom.nativeText(script), dom.nativeText(more)]).toEqual(["", "[js:location.href]"]);
+    // The insertion itself.
+    script.stored = more.stored;
+    expect(script.text).toBe("location.href");
+    const own = dom.text("x");
+    own.parent = script;
+    scripts.check([own], script);
+    expect(dom.nativeText(own)).toBe("x");
+  });
+
+  it("rewrites a connected data block that becomes code while it is still data", () => {
+    const { dom } = fakeDom();
+    const switches: Array<[string, (script: ReturnType<typeof dom.script>) => void, string]> = [
+      ["setAttribute", (script) => script.setAttribute("TYPE", "module"), "[mod:x]"],
+      ["removeAttribute", (script) => script.removeAttribute("type"), "[js:x]"],
+      ["toggleAttribute", (script) => script.toggleAttribute("type"), "[js:x]"],
+      ["type", (script) => (script.type = "text/javascript"), "[js:x]"],
+    ];
+    for (const [name, change, native] of switches) {
+      const script = dom.script({ connected: true, type: "text/plain", stored: "x" });
+      change(script);
+      expect(dom.nativeText(script), name).toBe(native);
+      expect(script.writtenAs, name).toEqual(["text/plain"]);
+      expect(script.textContent, name).toBe("x");
+    }
+    const loose = dom.script({ type: "text/plain", stored: "x" });
+    loose.setAttribute("type", "module");
+    const stays = dom.script({ connected: true, type: "text/plain", stored: "x" });
+    stays.setAttribute("type", "application/json");
+    const external = dom.script({ connected: true, type: "text/plain", src: "/a.js", stored: "x" });
+    external.type = "";
+    expect([dom.nativeText(loose), dom.nativeText(stays), dom.nativeText(external)]).toEqual(["x", "x", "x"]);
   });
 
   it("ignores values that are not nodes", () => {
     const { dom, scripts } = fakeDom();
-    for (const value of [null, undefined, "x", 1, {}, dom.script]) scripts.check(value, dom.script());
+    for (const value of [null, undefined, 1, {}, dom.script]) scripts.check([value], dom.script());
     expect(scripts.isScript({})).toBe(false);
     expect(scripts.isScript(dom.text("x"))).toBe(false);
     expect(scripts.isScript(dom.script())).toBe(true);
@@ -304,12 +394,16 @@ describe("installScriptText", () => {
       const set = dom.script();
       set.textContent = "a";
       const inserted = dom.script({ stored: "b" });
-      scripts.check(dom.fragment(inserted), dom.element("div"));
+      scripts.check([dom.fragment(inserted)], dom.element("div"));
       const empty = dom.script({ connected: true });
       const text = dom.text("c");
-      scripts.check(text, empty);
+      scripts.check([text], empty);
       const data = dom.script({ type: "application/json" });
       data.textContent = "d";
+      const strings: unknown[] = ["e"];
+      scripts.check(strings, dom.script({ connected: true }));
+      const block = dom.script({ connected: true, type: "text/plain", stored: "f" });
+      block.setAttribute("type", "module");
       return [
         dom.nativeText(set),
         set.textContent,
@@ -317,9 +411,11 @@ describe("installScriptText", () => {
         inserted.textContent,
         text.stored,
         data.stored,
+        strings[0],
+        block.stored,
       ];
     };
-    const expected = ["[js:a]", "a", "[js:b]", "b", "[js:c]", "d"];
+    const expected = ["[js:a]", "a", "[js:b]", "b", "[js:c]", "d", "[js:e]", "[mod:f]"];
     type Replacement = (setup: ReturnType<typeof fakeDom>) => [object, PropertyKey, PropertyDescriptor];
     const replaced: Array<[string, Replacement]> = [
       ...REPLACED_BUILTINS.map(([name, target, key, descriptor]): [string, Replacement] => [

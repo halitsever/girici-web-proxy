@@ -1,4 +1,14 @@
-import { apply, define, lowerCase, NativeWeakMap, setHas, toText, trim } from "../shared/primordials.ts";
+import {
+  append,
+  apply,
+  define,
+  inheritedGetter,
+  lowerCase,
+  NativeWeakMap,
+  setHas,
+  toText,
+  trim,
+} from "../shared/primordials.ts";
 import { maskNative } from "./native-mask.ts";
 import type { Realm } from "./url-context.ts";
 
@@ -17,8 +27,8 @@ export interface ScriptText {
   write(target: unknown, text: string): string;
   /** What the page wrote, while the script still holds the text written for it. */
   read(target: unknown, text: string): string;
-  /** Runs before `node` goes into `target`, for script text no setter saw. */
-  check(node: unknown, target: unknown): void;
+  /** Runs before `nodes` go into `target`, for script text no setter saw; may put a rewrite in place of a string. */
+  check(nodes: unknown[], target: unknown): void;
 }
 
 interface ScriptRecord {
@@ -39,6 +49,7 @@ const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
+const DOCUMENT_NODE = 9;
 const FRAGMENT_NODE = 11;
 
 // Taken at load: these run inside page calls, after page code may have replaced the originals.
@@ -80,6 +91,8 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
   const localNameOf = ownDescriptor(element, "localName")?.get;
   const namespaceOf = ownDescriptor(element, "namespaceURI")?.get;
   const getAttribute = element.getAttribute;
+  const childNodesOf = ownDescriptor(node, "childNodes")?.get;
+  const parentOf = ownDescriptor(node, "parentNode")?.get;
   const data = accessorOf(win.Text.prototype, "data");
   const listLength = ownDescriptor(win.NodeList.prototype, "length")?.get;
   const elementQuery = element.querySelectorAll;
@@ -141,19 +154,59 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
     const next = remember(script, kind, original);
     if (next !== text && textContent?.set) apply(textContent.set, script, [next]);
   };
-  /** An empty script runs the first text that goes into it, even when it is already connected. */
-  const textInto = (text: unknown, target: unknown): void => {
-    if (!data || !isScript(target) || nativeText(target) !== "" || attribute(target, "src") !== null) return;
-    const value = toText(apply(data.get, text, []));
-    const next = remember(target, kindOf(target), value);
-    if (next !== value) apply(data.set, text, [next]);
+  /** The text a script holds that Girici can stand behind: none, or what it wrote there itself. */
+  const ownText = (script: unknown): string | null => {
+    const text = nativeText(script);
+    if (text === "") return "";
+    const record = recordOf(script);
+    return record !== undefined && record.native === text ? record.original : null;
   };
-  const check = (inserted: unknown, target: unknown): void => {
-    const type = nodeType(inserted);
-    if (type === TEXT_NODE) {
-      textInto(inserted, target);
-      return;
+  /**
+   * A connected script that has not run yet runs all of its text once more goes in, so the new text is joined to what
+   * it holds and rewritten as one. Text Girici did not write is left alone: it may already be rewritten.
+   */
+  const textInto = (nodes: unknown[], target: unknown): void => {
+    if (!data || !isScript(target) || attribute(target, "src") !== null) return;
+    const before = ownText(target);
+    if (before === null) return;
+    // Where each piece lives: an index into `nodes` for a string, else the text node itself.
+    const holders: unknown[] = [];
+    let added = "";
+    const take = (text: unknown): boolean => {
+      if (parentOf && apply(parentOf, text, []) === target) return false;
+      added += toText(apply(data.get, text, []));
+      append(holders, text);
+      return true;
+    };
+    for (let index = 0; index < nodes.length; index++) {
+      const value = nodes[index];
+      if (typeof value === "string") {
+        added += value;
+        append(holders, index);
+        continue;
+      }
+      const type = nodeType(value);
+      if (type === TEXT_NODE && !take(value)) return;
+      if (type !== FRAGMENT_NODE || !childNodesOf || !listLength) continue;
+      const children = apply(childNodesOf, value, []) as NodeList;
+      const length = apply(listLength, children, []) as number;
+      for (let child = 0; child < length; child++) if (nodeType(children[child]) === TEXT_NODE) take(children[child]);
     }
+    if (added === "") return;
+    const whole = before + added;
+    const next = remember(target, kindOf(target), whole);
+    if (next === whole && before === "") return;
+    // Emptied first, so the script holds only the rewrite once the insertion lands.
+    if (before !== "" && textContent?.set) apply(textContent.set, target, [""]);
+    for (let index = 0; index < holders.length; index++) {
+      const holder = holders[index];
+      const value = index === 0 ? next : "";
+      if (typeof holder === "number") nodes[holder] = value;
+      else apply(data.set, holder, [value]);
+    }
+  };
+  const checkOne = (inserted: unknown): void => {
+    const type = nodeType(inserted);
     if (type !== ELEMENT_NODE && type !== FRAGMENT_NODE) return;
     // A node being moved within the document holds only scripts that are connected too.
     if (type === ELEMENT_NODE && connectedOf && apply(connectedOf, inserted, [])) return;
@@ -168,6 +221,28 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
       // The insertion that follows reports whatever is wrong with this node.
     }
   };
+  const check = (nodes: unknown[], target: unknown): void => {
+    textInto(nodes, target);
+    for (let index = 0; index < nodes.length; index++) checkOne(nodes[index]);
+  };
+
+  /**
+   * A connected data block that becomes code runs its text once more goes in. Rewritten while it is still data, the
+   * browser does not run it on the change.
+   */
+  const typeChange = (script: unknown, next: string | null): void => {
+    if (!isScript(script) || attribute(script, "src") !== null || !connectedOf || !apply(connectedOf, script, []))
+      return;
+    const kind = scriptKindOf(next);
+    if (kind === "data" || kindOf(script) !== "data") return;
+    const text = nativeText(script);
+    if (text === "") return;
+    const native = rewriteAs(kind, text);
+    apply(mapSet, records, [script, { __proto__: null, native, original: text, kind } as ScriptRecord]);
+    if (native !== text && textContent?.set) apply(textContent.set, script, [native]);
+  };
+  hookTypeChanges(win, isScript, attribute, typeChange);
+  hookSurroundContents(win, isScript, attribute);
 
   const hook = (proto: object | undefined, name: string, convert: (value: unknown) => string): void => {
     const descriptor = proto && ownDescriptor(proto, name);
@@ -198,6 +273,112 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
   hook(script, "text", toText);
 
   return { isScript, write, read, check };
+}
+
+type AnyFunction = (this: unknown, ...args: unknown[]) => unknown;
+
+/** The calls that change a script's `type`: its property and the attribute methods named "type". */
+function hookTypeChanges(
+  win: Realm,
+  isScript: (target: unknown) => boolean,
+  attribute: (script: unknown, name: string) => string | null,
+  change: (script: unknown, next: string | null) => void,
+): void {
+  const element = win.Element.prototype;
+  const wrap = (proto: object | undefined, name: string, before: (self: unknown, args: unknown[]) => void) => {
+    const descriptor = proto && ownDescriptor(proto, name);
+    const native = descriptor?.value as AnyFunction | undefined;
+    if (!proto || typeof native !== "function") return;
+    const hooked = function (this: unknown, ...args: unknown[]): unknown {
+      if (isScript(this)) before(this, args);
+      return apply(native, this, args);
+    };
+    define(proto, name, { ...descriptor, value: maskNative(hooked, native) });
+  };
+  /** Converted once here, so the native call does not run a page's toString a second time. */
+  const named = (args: unknown[], index: number): boolean => {
+    const name = (args[index] = toText(args[index]));
+    return lowerCase(name) === "type";
+  };
+  const plainNamespace = (value: unknown) => value === null || value === undefined || value === "";
+  wrap(element, "setAttribute", (self, args) => {
+    if (args.length < 2 || !named(args, 0)) return;
+    change(self, (args[1] = toText(args[1])));
+  });
+  wrap(element, "setAttributeNS", (self, args) => {
+    if (args.length < 3 || !plainNamespace(args[0]) || !named(args, 1)) return;
+    change(self, (args[2] = toText(args[2])));
+  });
+  wrap(element, "removeAttribute", (self, args) => {
+    if (args.length > 0 && named(args, 0)) change(self, null);
+  });
+  wrap(element, "removeAttributeNS", (self, args) => {
+    if (args.length > 1 && plainNamespace(args[0]) && named(args, 1)) change(self, null);
+  });
+  wrap(element, "toggleAttribute", (self, args) => {
+    if (args.length === 0 || !named(args, 0)) return;
+    const current = attribute(self, "type");
+    const present = args.length > 1 ? !!args[1] : current === null;
+    change(self, present ? (current ?? "") : null);
+  });
+  const script = win.HTMLScriptElement?.prototype;
+  const property = script && ownDescriptor(script, "type");
+  const set = property?.set;
+  if (!script || !property || !set) return;
+  define(script, "type", {
+    ...property,
+    set: maskNative(function (this: unknown, value: unknown) {
+      const next = toText(value);
+      if (isScript(this)) change(this, next);
+      apply(set, this, [next]);
+    }, set),
+  });
+}
+
+/**
+ * surroundContents puts a range's text into an empty, connected script, which then runs it. Done here in steps, the
+ * text goes in through appendChild, whose backstop rewrites it.
+ */
+function hookSurroundContents(
+  win: Realm,
+  isScript: (target: unknown) => boolean,
+  attribute: (script: unknown, name: string) => string | null,
+): void {
+  const range = win.Range?.prototype;
+  const descriptor = range && ownDescriptor(range, "surroundContents");
+  const surround = descriptor?.value as AnyFunction | undefined;
+  if (!range || !win.Document || typeof surround !== "function") return;
+  const node = win.Node.prototype;
+  const doc = win.Document.prototype;
+  const startOf = inheritedGetter(range, "startContainer");
+  const selectNode = range?.selectNode as AnyFunction | undefined;
+  const ownerOf = ownDescriptor(node, "ownerDocument")?.get;
+  const typeOf = ownDescriptor(node, "nodeType")?.get;
+  const firstChildOf = ownDescriptor(node, "firstChild")?.get;
+  const appendChild = node.appendChild as AnyFunction;
+  const createElement = doc.createElement as AnyFunction;
+  const createFragment = doc.createDocumentFragment as AnyFunction;
+  const replaceChildren = win.Element.prototype.replaceChildren as AnyFunction | undefined;
+  const replaceWith = win.Element.prototype.replaceWith as AnyFunction | undefined;
+  if (!startOf || !selectNode || !ownerOf || !typeOf || !firstChildOf || !replaceChildren || !replaceWith) return;
+  const hooked = function (this: unknown, ...args: unknown[]): unknown {
+    const parent = args[0];
+    if (!isScript(parent) || attribute(parent, "src") !== null) return apply(surround, this, args);
+    const start = apply(startOf, this, []);
+    const owner = apply(typeOf, start, []) === DOCUMENT_NODE ? start : apply(ownerOf, start, []);
+    const holder = apply(createElement, owner, ["span"]);
+    // The browser checks the range and moves its contents as it would for the script.
+    apply(surround, this, [holder]);
+    const fragment = apply(createFragment, owner, []);
+    for (let child = apply(firstChildOf, holder, []); child; child = apply(firstChildOf, holder, []))
+      apply(appendChild, fragment, [child]);
+    apply(replaceChildren, parent, []);
+    apply(replaceWith, holder, [parent]);
+    apply(appendChild, parent, [fragment]);
+    apply(selectNode, this, [parent]);
+    return undefined;
+  };
+  define(range, "surroundContents", { ...descriptor, value: maskNative(hooked, surround) });
 }
 
 interface Accessor {
