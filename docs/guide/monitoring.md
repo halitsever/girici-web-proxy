@@ -19,7 +19,8 @@ curl -fsS https://proxy.example/healthz
 Signed in as the admin, open **Settings**. The **Status** section shows:
 
 - when the server started and how many relayed WebSockets are open now;
-- the last hour, minute by minute: data sent to browsers, requests, and refused requests;
+- the last hour: a chart of data sent to browsers minute by minute, and the hour's totals of requests, data sent
+  and refused requests;
 - the last 30 days: requests, data sent and received, refused and failed requests per day;
 - the bandwidth limit, the daily quota and whether the metrics endpoint is on.
 
@@ -35,7 +36,8 @@ replicas, each one counts its own traffic.
 ## Metrics
 
 Set `GIRICI_METRICS_TOKEN` to turn on `GET /metrics` in the Prometheus text format. The token needs 16 or more
-characters; `openssl rand -hex 32` makes one. Without the variable, `/metrics` does not exist.
+characters, using only letters, digits, `-._~+/` and a trailing `=`, since it travels in a header;
+`openssl rand -hex 32` makes one. Without the variable, `/metrics` does not exist.
 
 Every request must carry the token as `Authorization: Bearer <token>`. A missing or wrong token gets `401`.
 
@@ -70,9 +72,9 @@ scrape_configs:
 
 `credentials_file` reads the token from a file instead. With several replicas, scrape each one: they count apart.
 
-Proxied pages cannot reach `/metrics`: the service worker refuses it to every page it serves, and a page's own
-`/metrics` goes to the site it came from. The endpoint shares the proxy's port, so you can also keep it off the internet with a
-rule in your reverse proxy.
+Proxied pages cannot reach `/metrics`. A page's own `/metrics` links, once Girici rewrites them, go to the site the
+page came from, and one that escaped rewriting gets `403` from the service worker. The endpoint shares the proxy's
+port, so you can also keep it off the internet with a rule in your reverse proxy.
 
 ## Logs
 
