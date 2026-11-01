@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { STANDALONE_SHIM } from "../src/rewrite/js.ts";
+import type { ClientConfig, SiteContext } from "../src/shared/protocol.ts";
 import { MasterSealer } from "../src/shared/sealed-address.ts";
 import { SANDBOX_CSP } from "../src/sw/error-page.ts";
 import { buildPageResponse, type PageContext } from "../src/sw/page-response.ts";
@@ -389,5 +390,91 @@ describe("pages on sealed addresses", () => {
     );
     expect(res.status).toBe(303);
     expect(new URL(res.headers.get("location")!).searchParams.get("next")).toBe(master.seal(target));
+  });
+});
+
+describe("pages on site hosts", () => {
+  const own = "https://own.proxy.test";
+  const sites: SiteContext = {
+    domain: "proxy.test",
+    root: "https://proxy.test",
+    label: "k6wjalxihe6pja6woodbryo47k",
+    key: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    site: "https://site-a.test",
+    toolbar: false,
+    engine: "Google",
+  };
+  const onSite = (overrides: Partial<PageContext> = {}) =>
+    context({
+      origin: own,
+      target: new URL("https://site-a.test/x"),
+      navigation: true,
+      destination: "document",
+      uiOrigin: "https://proxy.test",
+      sites,
+      ...overrides,
+    });
+  const configOf = (html: string) =>
+    JSON.parse(
+      (/data-girici="([^"]*)"/.exec(html)?.[1] ?? "null")
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&"),
+    ) as ClientConfig;
+
+  it("marks site documents and gives them their site context", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], '<p>x</p><iframe srcdoc="<p>y</p>"></iframe>'),
+      onSite(),
+    );
+    expect(res.headers.get("origin-agent-cluster")).toBe("?1");
+    const html = await res.text();
+    expect(configOf(html).sites).toEqual(sites);
+    expect(html.match(/&amp;quot;sites&amp;quot;/g)).toHaveLength(1);
+  });
+
+  it("marks every other response on a site host too", async () => {
+    const image = await buildPageResponse(
+      upstream([["content-type", "image/png"]], "png"),
+      onSite({ destination: "image", navigation: false }),
+    );
+    expect(image.headers.get("origin-agent-cluster")).toBe("?1");
+    const empty = await buildPageResponse(upstream([], null, 204), onSite());
+    expect(empty.headers.get("origin-agent-cluster")).toBe("?1");
+  });
+
+  it("leaves single-origin pages unmarked", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(res.headers.get("origin-agent-cluster")).toBeNull();
+    expect(configOf(await res.text()).sites).toBeUndefined();
+  });
+
+  it("sends a site host's sign-in to the root with an absolute next", async () => {
+    const res = await buildPageResponse({ ok: false, code: "auth", status: 401 }, onSite());
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toBe("https://proxy.test/_g/login?next=https%3A%2F%2Fsite-a.test%2Fx");
+    const master = new MasterSealer(new Uint8Array(32).fill(3));
+    const sealed = await buildPageResponse(
+      { ok: false, code: "auth", status: 401 },
+      onSite({ address: (url) => master.seal(url) }),
+    );
+    const next = new URL(sealed.headers.get("location")!).searchParams.get("next")!;
+    expect(next).toBe(own + master.seal(new URL("https://site-a.test/x")));
+    expect(next.startsWith(`${own}/~/x/`)).toBe(true);
+  });
+
+  it("links its error pages home to the root", async () => {
+    const res = await buildPageResponse({ ok: false, code: "connect", status: 502 }, onSite());
+    expect(await res.text()).toContain('href="https://proxy.test/"');
+    const unverified = await buildPageResponse(
+      upstream([["content-type", "text/html"]], "<p>x</p>"),
+      onSite({ runtimeAvailable: async () => false }),
+    );
+    expect(await unverified.text()).toContain('href="https://proxy.test/"');
   });
 });

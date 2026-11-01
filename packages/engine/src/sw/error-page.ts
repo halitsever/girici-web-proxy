@@ -29,7 +29,8 @@ const MESSAGES: Record<ErrorPageCode, string> = {
     "This address was sealed in another browser, or this browser's address key was reset. Open the site again from Girici.",
 };
 
-export function errorPage(code: ErrorPageCode, target: URL | null): string {
+/** `home` is the root's address on a site host, where `/` belongs to the page's own site. */
+export function errorPage(code: ErrorPageCode, target: URL | null, home = "/"): string {
   const message = (MESSAGES[code] ?? MESSAGES.connect).replace("{host}", escapeHtml(target?.host ?? "the site"));
   return `<!doctype html>
 <html lang="en">
@@ -41,15 +42,15 @@ export function errorPage(code: ErrorPageCode, target: URL | null): string {
   <body>
     <h1>Girici</h1>
     <p>${message}</p>
-    <p><a href="/">Back to Girici</a></p>
+    <p><a href="${escapeHtml(home)}">Back to Girici</a></p>
   </body>
 </html>
 `;
 }
 
 /** Error pages run no script and keep no opener, so a proxied page cannot borrow their realm on our origin. */
-export function errorResponse(code: ErrorPageCode, status: number, target: URL | null): Response {
-  return new Response(errorPage(code, target), {
+export function errorResponse(code: ErrorPageCode, status: number, target: URL | null, home?: string): Response {
+  return new Response(errorPage(code, target, home), {
     status,
     headers: {
       "content-type": "text/html; charset=utf-8",
