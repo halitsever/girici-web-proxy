@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { CHALLENGE_PATH } from "@girici/engine/shared";
 import { LoaderCircle } from "lucide-vue-next";
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
@@ -8,14 +7,31 @@ import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/layout/BrandMark.vue";
 import SourceLink from "@/components/layout/SourceLink.vue";
 import { resolveNext } from "@/lib/next";
-import { fetchChallenge, solveInWorker, submitSolution } from "@/lib/pow";
+import {
+  fetchChallenge,
+  isChallengePath,
+  LOOPED,
+  passedRecently,
+  rememberPass,
+  solveInWorker,
+  submitSolution,
+  tabStorage,
+} from "@/lib/pow";
 
 const route = useRoute();
 const router = useRouter();
 const error = ref("");
 const busy = ref(false);
+const nextParam = typeof route.query.next === "string" ? route.query.next : "";
 
-onMounted(run);
+onMounted(() => {
+  // Back here for the same page right after a pass: the relay did not take the cookie, so solving again would loop.
+  if (passedRecently(tabStorage(), nextParam)) {
+    error.value = LOOPED;
+    return;
+  }
+  void run();
+});
 
 async function run() {
   error.value = "";
@@ -24,6 +40,7 @@ async function run() {
     const challenge = await fetchChallenge();
     const nonce = await solveInWorker(challenge);
     await submitSolution({ challenge: challenge.challenge, nonce });
+    rememberPass(tabStorage(), nextParam);
     goNext();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "The check did not go through. Reload the page to try again.";
@@ -33,12 +50,12 @@ async function run() {
 
 /** Replaces this entry, so Back from the page skips the check instead of running it again. */
 function goNext() {
-  const next = resolveNext(typeof route.query.next === "string" ? route.query.next : "");
+  const next = resolveNext(nextParam);
   if (next.kind === "proxy") {
     window.location.replace(next.path);
     return;
   }
-  const own = next.kind === "route" && new URL(next.path, window.location.origin).pathname !== CHALLENGE_PATH;
+  const own = next.kind === "route" && !isChallengePath(new URL(next.path, window.location.origin).pathname);
   void router.replace(own ? next.path : "/");
 }
 </script>

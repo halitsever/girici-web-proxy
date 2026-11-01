@@ -21,3 +21,13 @@ test("the relay refuses a browser without the visitor cookie", async ({ request 
   expect(res.status()).toBe(403);
   expect(res.headers()["x-girici-error"]).toBe("challenge");
 });
+
+test("a tab sent back to the check right after passing stops and explains", async ({ page }) => {
+  await page.goto(`${GATES}/~/https/site-a.test/`);
+  await expect(page.locator("#title")).toHaveText("Site A", { timeout: 20_000 });
+  // As if the relay never got the cookie, for example from the other address of a dual-stack network.
+  await page.context().clearCookies();
+  await page.goto(`${GATES}/~/https/site-a.test/`);
+  await expect(page.getByText("This browser passed the check a moment ago")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+});

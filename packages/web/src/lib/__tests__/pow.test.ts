@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { fetchChallenge, leadingZeroBits, solve, submitSolution } from "../pow";
+import {
+  fetchChallenge,
+  isChallengePath,
+  leadingZeroBits,
+  passedRecently,
+  rememberPass,
+  solve,
+  submitSolution,
+} from "../pow";
 
 function answering(status: number, body: unknown = null): typeof fetch {
   return (async () =>
@@ -43,5 +51,44 @@ describe("proof-of-work solver", () => {
       "The check did not go through. Reload the page to try again.",
     );
     await expect(submitSolution(answer, answering(204))).resolves.toBeUndefined();
+  });
+});
+
+function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
+  const values = new Map<string, string>();
+  return { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => void values.set(key, value) };
+}
+
+describe("challenge loop guard", () => {
+  it("notices a return for the same page within half a minute of a pass", () => {
+    const storage = memoryStorage();
+    expect(passedRecently(storage, "/~/https/a.test/", 1_000)).toBe(false);
+    rememberPass(storage, "/~/https/a.test/", 1_000);
+    expect(passedRecently(storage, "/~/https/a.test/", 30_999)).toBe(true);
+    expect(passedRecently(storage, "/~/https/b.test/", 2_000)).toBe(false);
+    expect(passedRecently(storage, "/~/https/a.test/", 31_000)).toBe(false);
+  });
+
+  it("treats storage that fails or holds junk as no pass", () => {
+    const broken = {
+      getItem: () => {
+        throw new Error("denied");
+      },
+      setItem: () => {
+        throw new Error("denied");
+      },
+    };
+    expect(() => rememberPass(broken, "/", 0)).not.toThrow();
+    expect(passedRecently(broken, "/", 0)).toBe(false);
+    const junk = memoryStorage();
+    junk.setItem("girici:challenge-pass", "{");
+    expect(passedRecently(junk, "/", 0)).toBe(false);
+  });
+
+  it("knows the challenge page in any letter case and with a trailing slash", () => {
+    for (const path of ["/_g/challenge", "/_g/challenge/", "/_G/Challenge", "/_g/challenge//"]) {
+      expect(isChallengePath(path), path).toBe(true);
+    }
+    for (const path of ["/", "/_g/challenges", "/_g/login"]) expect(isChallengePath(path), path).toBe(false);
   });
 });
