@@ -17,9 +17,10 @@ import { installAttributes } from "./attributes.ts";
 import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
+import { readConfig } from "./config.ts";
 import { createChildConfig, installFrames, type FrameAdopter } from "./frames.ts";
 import { createHelpers, type HelperEnv } from "./helpers.ts";
-import { createInvoker, type Invoke } from "./invoke.ts";
+import { createHrefAssigner, createInvoker, type AssignHref, type Invoke } from "./invoke.ts";
 import { createFakeLocation, type LocationEnv } from "./location.ts";
 import { installHtmlSinks } from "./html-sinks.ts";
 import { captureCurrentScript, createRenew, DocumentSteps, renewExisting, type DocumentListeners } from "./renewal.ts";
@@ -54,6 +55,7 @@ const mapSet = WeakMap.prototype.set;
 /**
  * `announce` is the worker announcer of the window this one inherits from: a blank window's own client has no page
  * address for the service worker to bind its workers to. `navigating` marks a blank popup already headed elsewhere.
+ * `resend` assigns an address from the realm of the window that adopted this one.
  */
 export function install(
   win: Realm,
@@ -61,19 +63,16 @@ export function install(
   clientUrl: string,
   announce?: Announce,
   navigating = false,
+  resend?: AssignHref,
 ): void {
   const existing = ownDescriptor(win, "__g$");
   if (existing) {
-    // The browser reused this window for a new document, which renews the runtime from its own engine script. A
-    // renewal keeps the origin the window was given first, and other sites reach the window only through a wrapper.
-    renewExisting(existing.value, () => {
-      const location = win.location;
-      apply(location.reload, location, []);
-    });
+    renewIn(win, existing.value);
     return;
   }
   // Compiled before script exec replaces win.Function.
   const invoke = createInvoker(win);
+  const assignHref = createHrefAssigner(win);
   // Taken before the network hooks wrap it.
   const nativeFetch = win.fetch;
   const ctx = createUrlContext(win, config.inherit, config.seal);
@@ -84,8 +83,11 @@ export function install(
     invoke,
   );
   // Before the messaging and window hooks, whose natives it takes.
-  const guard = createWindowGuard(win, ctx, invoke, blobs.swap);
+  const guard = createWindowGuard(win, ctx, invoke, blobs.swap, assignHref);
   const currentScript = captureCurrentScript(win);
+  const stop = win.stop;
+  const topOf = ownDescriptor(win, "top")?.get;
+  const isTop = () => !topOf || apply(topOf, win, []) === win;
   const toolbarNatives = captureToolbarNatives(win);
   const readContainer = serviceWorkerContainer(win);
   // Chromium gives the page that reuses a blank window the container the blank document read, without a controller,
@@ -147,7 +149,7 @@ export function install(
   const standIn = (location: Location): object => {
     let fake = apply(mapGet, standIns, [location]) as object | undefined;
     if (!fake) {
-      const calls = locationCalls(location, invoke, blobs.swap);
+      const calls = locationCalls(location, invoke, blobs.swap, assignHref);
       fake = createFakeLocation(
         {
           __proto__: null,
@@ -186,6 +188,17 @@ export function install(
       topSite: top === win ? undefined : engineSiteOf(top),
     } as Parameters<typeof partitionFor>[0]);
   };
+  let resent = false;
+  const renew = createRenew(currentScript, ctx.origin, steps, (next) => {
+    if (!ctx.accepts(next.inherit, next.seal)) return false;
+    if (!isTop() || ctx.keepsOrigin(next.inherit, next.seal)) return true;
+    // Another origin's page must not run on this realm's hooks. Loaded again from the adopter's realm, it keeps its
+    // referrer and initiator, and gets a fresh window.
+    if (typeof stop === "function") apply(stop, win, []);
+    const location = win.location;
+    resent = resend !== undefined && resend(location, location.href);
+    return false;
+  });
   const helpers = createHelpers({
     __proto__: null,
     nativeLocation,
@@ -206,7 +219,11 @@ export function install(
     wrapWindow: guard.wrap,
     realOrigin: () => originOf(ctx.realUrl()),
     site: () => current.site,
-    renew: createRenew(currentScript, ctx.origin, steps, (next) => ctx.accepts(next.inherit, next.seal)),
+    renew: () => {
+      resent = false;
+      // A page sent off to load again in a window of its own needs nothing more from its engine script.
+      return renew() || resent;
+    },
   } as HelperEnv);
   // Rewritten scripts call __g$, so it exists before anything else is attempted. Frozen so no page swaps a helper.
   define(win, "__g$", { value: freeze(helpers), enumerable: false });
@@ -223,10 +240,11 @@ export function install(
           win,
           ctx,
           childConfig,
-          (child, next, url, navigating) => install(child, next, url, ownAnnounce, navigating),
+          (child, next, url, navigating) => install(child, next, url, ownAnnounce, navigating, assignHref),
           clientUrl,
           steps,
           guard,
+          assignHref,
         )),
     ],
     [
@@ -323,15 +341,48 @@ export function install(
   steps.run(config);
 }
 
+/** The engine script's entry point. */
+export function start(win: Realm): void {
+  const existing = ownDescriptor(win, "__g$");
+  if (existing) {
+    // The tag is touched only once renewed: a refused page stops before anything else in it runs.
+    if (renewIn(win, existing.value)) (win.document.currentScript as HTMLScriptElement | null)?.remove();
+    return;
+  }
+  const script = win.document.currentScript as HTMLScriptElement | null;
+  install(win, readConfig(script?.getAttribute("data-girici") ?? null), script?.src ?? "");
+  // The tag would otherwise show up in the page's own DOM queries.
+  script?.remove();
+}
+
+/**
+ * The browser reused this window for a new document, which renews the runtime from its own engine script. A page the
+ * runtime refuses stops and loads again, and a reload gets a window of its own.
+ */
+function renewIn(win: Realm, helpers: unknown): boolean {
+  return renewExisting(helpers, () => {
+    const stop = win.stop;
+    if (typeof stop === "function") apply(stop, win, []);
+    const location = win.location;
+    apply(location.reload, location, []);
+  });
+}
+
 /** Location calls take their source document from the calling realm, so they go through the invoker. */
 function locationCalls(
   location: Location,
   invoke: Invoke,
   swapBlob: (url: string) => string,
+  assignHref?: AssignHref,
 ): Pick<LocationEnv, "navigate" | "reload" | "setHash"> {
   return {
     __proto__: null,
-    navigate: (url, mode) => invoke(mode === "replace" ? location.replace : location.assign, location, [swapBlob(url)]),
+    navigate: (url, mode) => {
+      const address = swapBlob(url);
+      // Another window's assign() would make that window the referrer in WebKit.
+      if (mode !== "replace" && assignHref?.(location, address)) return;
+      invoke(mode === "replace" ? location.replace : location.assign, location, [address]);
+    },
     reload: () => invoke(location.reload, location, []),
     setHash: (hash) => {
       // Location members are own properties of each instance, not of Location.prototype.

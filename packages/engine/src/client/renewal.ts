@@ -61,7 +61,7 @@ export function createRenew(
  * (another engine version, a broken config), a reload gives the document a fresh window instead of the old state.
  * Chromium, Firefox and WebKit reuse only a window's initial blank document, so a reloaded page gets its own window.
  */
-export function renewExisting(helpers: unknown, reload: () => void): void {
+export function renewExisting(helpers: unknown, reload: () => void): boolean {
   let renewed = false;
   try {
     const renew = (helpers as { renew?: unknown } | null | undefined)?.renew;
@@ -70,6 +70,7 @@ export function renewExisting(helpers: unknown, reload: () => void): void {
     // A runtime that fails to renew is treated like one that cannot.
   }
   if (!renewed) reload();
+  return renewed;
 }
 
 /** Engines differ on whether a reused window keeps its listeners, so they are added again; the browser drops repeats. */

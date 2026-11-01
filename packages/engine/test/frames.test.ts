@@ -140,11 +140,18 @@ function setup(
   guard: WindowGuard = { wrap: (value) => value, isWrapper: () => false, reset: () => {} },
   toProxy = (raw: string) => `/~/${raw}`,
   around: <T>(install: () => T) => T = (install) => install(),
+  open?: (...args: unknown[]) => unknown,
 ) {
   const realm = fakeRealm();
+  if (open) (realm.top as unknown as { open: unknown }).open = open;
   const installed: Array<{ child: unknown; navigating: boolean | undefined }> = [];
   const steps = new DocumentSteps();
-  const ctx = { origin: "http://proxy.test", toProxy } as unknown as UrlContext;
+  const assigned: string[] = [];
+  const ctx = {
+    origin: "http://proxy.test",
+    toProxy,
+    realUrl: () => new URL("https://a.test/page"),
+  } as unknown as UrlContext;
   const adopter = around(() =>
     installFrames(
       realm.win,
@@ -157,9 +164,31 @@ function setup(
       "",
       steps,
       guard,
+      (location, url) => {
+        assigned.push(url);
+        (location as { href: string }).href = url;
+        return true;
+      },
     ),
   );
-  return { ...realm, installed, adopter, steps };
+  return { ...realm, installed, adopter, steps, assigned };
+}
+
+/** A window.open that records its calls and hands out windows whose location records where it was sent. */
+function recordingOpen(shows = "about:blank") {
+  const calls: unknown[][] = [];
+  const sent: string[] = [];
+  const location = {};
+  Object.defineProperty(location, "href", {
+    get: () => shows,
+    set: (url: string) => sent.push(url),
+  });
+  const opened = { location };
+  const open = (...args: unknown[]) => {
+    calls.push(args);
+    return opened;
+  };
+  return { open, calls, sent };
 }
 
 describe("installFrames", () => {
@@ -225,6 +254,55 @@ describe("installFrames", () => {
     win.open("https://x.test/");
     win.open();
     expect(installed.map((entry) => entry.navigating)).toEqual([true, false]);
+  });
+
+  it("sends another origin's page to a blank popup, whose first page gets a window of its own", () => {
+    const { open, calls, sent } = recordingOpen();
+    const { win, installed, assigned } = setup(undefined, undefined, undefined, open);
+    const opened = win.open("/~/https/b.test/x", "named", "popup");
+    expect(calls).toEqual([["", "named", "popup"]]);
+    // Assigned from the page's own realm, which makes it the navigation's source.
+    expect(assigned).toEqual(["/~/https/b.test/x"]);
+    expect(sent).toEqual(["/~/https/b.test/x"]);
+    expect(installed).toEqual([{ child: opened, navigating: true }]);
+  });
+
+  it("keeps the browser's own open for this origin's pages, the page's own window and severed popups", () => {
+    const { open, calls, sent } = recordingOpen();
+    const { win } = setup(undefined, undefined, undefined, open);
+    win.open("/~/https/a.test/next");
+    win.open("/~/https/b.test/x", "_SELF");
+    win.open("/~/https/b.test/x", "_top");
+    win.open("/~/https/b.test/x", "_blank", "noopener");
+    win.open("/~/https/b.test/x", "", "width=200,NoReferrer");
+    win.open("");
+    expect(calls).toEqual([
+      ["/~/https/a.test/next"],
+      ["/~/https/b.test/x", "_SELF"],
+      ["/~/https/b.test/x", "_top"],
+      ["/~/https/b.test/x", "_blank", "noopener"],
+      ["/~/https/b.test/x", "", "width=200,NoReferrer"],
+      [""],
+    ]);
+    expect(sent).toEqual([]);
+  });
+
+  it("leaves a named window that already shows a page to the browser's own open, which keeps its history", () => {
+    const { open, calls, sent } = recordingOpen("http://proxy.test/~/https/a.test/idle");
+    const { win, installed } = setup(undefined, undefined, undefined, open);
+    win.open("/~/https/b.test/x", "named");
+    expect(calls).toEqual([
+      ["", "named", undefined],
+      ["/~/https/b.test/x", "named"],
+    ]);
+    expect(sent).toEqual([]);
+    expect(installed).toEqual([]);
+  });
+
+  it("returns what a blocked popup returns without sending anything", () => {
+    const { win, installed } = setup(undefined, undefined, undefined, () => null);
+    expect(win.open("/~/https/b.test/x")).toBeNull();
+    expect(installed).toEqual([]);
   });
 
   it("opens a window for document.open with three arguments, through the proxy", () => {
