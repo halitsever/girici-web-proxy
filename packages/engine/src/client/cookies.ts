@@ -32,11 +32,14 @@ const NativePromise = Promise;
 /** A batch goes out as a promise job on this, so a page's queueMicrotask or then never decides when. */
 const loaded = unsteered(NativePromise.resolve());
 
+/** How long a navigation waits for cookie writes, so a worker that never answers cannot hold a click forever. */
+export const NAVIGATION_COOKIE_WAIT_MS = 1000;
+
 /** The per-realm cookie mirror state the network and navigation hooks read. */
 export interface CookieBridge extends DocumentListeners {
   /** The sequence number of the latest document.cookie write, sent along so the worker can wait for it. */
   currentSeq(): number;
-  /** Settles once every cookie write still on its way to the worker has landed; null when none is. */
+  /** Settles once every write on its way has landed or NAVIGATION_COOKIE_WAIT_MS has passed; null when none is. */
   pendingWrites(): Promise<void> | null;
   applySync(header: string | null): void;
   /** A reused window starts over from the new document's config; the service worker sees a new client. */
@@ -66,6 +69,7 @@ export function installCookies(
   let waiters: Array<() => void> = [];
   // Captured before the network hooks and storage partitioning wrap these.
   const nativeFetch = win.fetch;
+  const nativeSetTimeout = win.setTimeout;
   const responses = win.Response?.prototype;
   const statusOf = responses && (ownDescriptor(responses, "status")?.get as (this: Response) => number);
   const jsonOf = responses && (ownDescriptor(responses, "json")?.value as (this: Response) => Promise<unknown>);
@@ -188,7 +192,12 @@ export function installCookies(
     currentSeq: () => seq,
     pendingWrites: () => {
       if (!inflight && head >= queue.length) return null;
-      return unsteered(new NativePromise<void>((resolve) => append(waiters, resolve)));
+      return unsteered(
+        new NativePromise<void>((resolve) => {
+          append(waiters, resolve);
+          apply(nativeSetTimeout, win, [resolve, NAVIGATION_COOKIE_WAIT_MS]);
+        }),
+      );
     },
     applySync: (header) => {
       if (!header) return;

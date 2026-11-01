@@ -57,6 +57,8 @@ function makeRealm() {
     fetch: () => answer(200),
     sessionStorage: { getItem: () => null, setItem: () => undefined },
     location: { reload: () => undefined },
+    // Looked up when called, so fake timers a test installs later still drive it.
+    setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
     BroadcastChannel: class {
       constructor() {
         constructed.push(this);
@@ -226,6 +228,49 @@ describe("installCookies", () => {
     await flushMicrotasks();
     expect(released).toBe(true);
     expect(bridge.pendingWrites()).toBeNull();
+  });
+
+  it("lets a navigation go after a second when a cookie write never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = holdingRealm();
+      const never = installCookies(
+        stuck.win,
+        stuck.ctx,
+        { v: 2, cookies: [] },
+        () => stuck.container,
+        () => {},
+      );
+      // A page's own timer that never fires must not stretch the wait.
+      (stuck.win as unknown as { setTimeout: unknown }).setTimeout = () => 0;
+      stuck.win.document.cookie = "a=1";
+      let released = false;
+      void never.pendingWrites()!.then(() => (released = true));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stuck.requests).toHaveLength(1);
+      expect(released).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(released).toBe(true);
+
+      const quick = holdingRealm();
+      const answered = installCookies(
+        quick.win,
+        quick.ctx,
+        { v: 2, cookies: [] },
+        () => quick.container,
+        () => {},
+      );
+      quick.win.document.cookie = "a=1";
+      const start = Date.now();
+      let after = -1;
+      void answered.pendingWrites()!.then(() => (after = Date.now() - start));
+      setTimeout(() => quick.requests[0]!.answer(), 10);
+      await vi.advanceTimersByTimeAsync(10);
+      await flushMicrotasks();
+      expect(after).toBe(10);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("batches with natives taken at load", async () => {
