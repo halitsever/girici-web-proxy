@@ -1,3 +1,4 @@
+import type { SiteDomain } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
 import { issueSession } from "../auth/cookie.ts";
 import { sessionAdmin } from "../auth/gate.ts";
@@ -20,7 +21,12 @@ export interface AdminSettings {
 }
 
 /** Account and operator settings for the signed-in admin; changes need same origin, a session and the password. */
-export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: BrandStore): Router {
+export function adminRouter(
+  store: AuthStore,
+  blocklist: HostBlocklist,
+  brand: BrandStore,
+  siteDomain?: SiteDomain,
+): Router {
   // Exact paths only: the service worker guards these by name, so a variant such as /_g/Logout/ must miss too.
   const router = Router({ caseSensitive: true, strict: true });
   const json = express.json({ limit: "8kb" });
@@ -49,7 +55,7 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: B
     if (changingPassword) {
       // Rotates the session secret, so re-issue a cookie to keep this device signed in.
       store.changePassword(admin.id, body.password as string);
-      issueSession(req, res, admin.id, store.sessionSecret());
+      issueSession(req, res, admin.id, store.sessionSecret(), siteDomain);
     }
     res.json({ admin: store.admin() });
   });

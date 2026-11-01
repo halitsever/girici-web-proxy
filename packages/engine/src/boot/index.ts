@@ -1,4 +1,4 @@
-import { nextBootAttempt, type BootState } from "./attempts.ts";
+import { nextBootAttempt, nextStep, REPLAY_FORM_ID, type BootState } from "./attempts.ts";
 
 const STATE_KEY = "girici:boot";
 const status = document.getElementById("girici-boot");
@@ -46,7 +46,8 @@ async function boot(): Promise<void> {
     registration.active?.postMessage({ type: "girici:claim" });
     await claimed;
   }
-  location.reload();
+  if (nextStep(document) === "replay") (document.getElementById(REPLAY_FORM_ID) as HTMLFormElement).submit();
+  else location.reload();
 }
 
 boot().catch((error: unknown) => {

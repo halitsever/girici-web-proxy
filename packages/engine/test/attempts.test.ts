@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { nextBootAttempt, type BootState } from "../src/boot/attempts.ts";
+import { nextBootAttempt, nextStep, type BootState } from "../src/boot/attempts.ts";
+
+describe("nextStep", () => {
+  it("replays a form the server kept, else reloads", () => {
+    const ids: string[] = [];
+    const page = (form: unknown) => ({
+      getElementById(id: string): unknown {
+        ids.push(id);
+        return form;
+      },
+    });
+    expect(nextStep(page({}))).toBe("replay");
+    expect(nextStep(page(null))).toBe("reload");
+    expect(ids).toEqual(["girici-replay", "girici-replay"]);
+  });
+});
 
 describe("nextBootAttempt", () => {
   it("allows three boots within 30 seconds, then stops", () => {

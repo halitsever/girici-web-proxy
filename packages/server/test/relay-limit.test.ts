@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { compileTrust, type TrustFn } from "../src/http/client-ip.ts";
@@ -35,7 +35,12 @@ async function limited(perMinute: number | null, trust: TrustFn = compileTrust(f
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { base, store, adminCookie: `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}` };
+  return {
+    base,
+    store,
+    adminCookie: `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`,
+    siteCookie: `girici-site=${createSiteSessionToken(admin.id, store.sessionSecret())}`,
+  };
 }
 
 function hit(base: string, options: { cookie?: string; xff?: string } = {}): Promise<Response> {
@@ -60,6 +65,12 @@ describe("relayLimit", () => {
     const { base, adminCookie } = await limited(1);
     await hit(base);
     expect((await hit(base, { cookie: adminCookie })).status).toBe(204);
+  });
+
+  it("never limits the admin's site session", async () => {
+    const { base, siteCookie } = await limited(1);
+    await hit(base);
+    expect((await hit(base, { cookie: siteCookie })).status).toBe(204);
   });
 
   it("does not exempt a session signed with a rotated secret", async () => {

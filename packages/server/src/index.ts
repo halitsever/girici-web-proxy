@@ -12,6 +12,7 @@ import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { deriveSiteKeys, type SiteSetup } from "./sites/keys.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
@@ -35,7 +36,9 @@ if (trustWarning) createLogger("warn").warn(trustWarning);
 let authStore: AuthStore;
 try {
   mkdirSync(config.dataDir, { recursive: true });
-  authStore = new AuthStore(openDb(join(config.dataDir, "girici.db")), config.sessionSecret);
+  authStore = new AuthStore(openDb(join(config.dataDir, "girici.db")), config.sessionSecret, {
+    siteSecret: config.siteSecret,
+  });
 } catch (error) {
   logger.error(
     `Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`,
@@ -54,6 +57,11 @@ if (config.upstreamProxy) {
 if (config.testUpstreams.size > 0) {
   logger.warn(`Test mode: upstream mapping active for ${[...config.testUpstreams.keys()].join(", ")}`);
 }
+
+const sites: SiteSetup | undefined = config.siteDomain
+  ? { domain: config.siteDomain, keys: deriveSiteKeys(authStore.siteSecret()) }
+  : undefined;
+if (sites) logger.info(`Subdomain mode: sites open on *.${sites.domain.value}`);
 
 // One trust function and one bucket serve both relays, so a client cannot double its budget over WebSockets.
 const trust = compileTrust(config.trustProxy);
@@ -78,11 +86,13 @@ const server = createHttpServer(
     limiter,
     blocklist,
     setupToken: setupCode,
+    sites,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
       maxRequestBody: 50 * 1024 * 1024,
       blocklist,
+      siteDomain: sites?.domain.host,
     },
     // Minting leaves through the relay's agent so tokens and media share one egress IP, with or without a proxy.
     poToken: config.youtubePoToken
@@ -113,6 +123,7 @@ const wsRelay = attachWsRelay(server, {
   trust,
   limiter,
   blocklist,
+  siteDomain: sites?.domain,
 });
 server.on("error", (error) => {
   logger.error(error.message);

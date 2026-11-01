@@ -39,10 +39,12 @@ function dummyHash(): { hash: string; salt: string } {
 export class AuthStore {
   readonly #db: DatabaseSync;
   readonly #secretOverride: string | undefined;
+  readonly #siteSecretOverride: string | undefined;
 
-  constructor(db: DatabaseSync, secretOverride?: string) {
+  constructor(db: DatabaseSync, secretOverride?: string, options: { siteSecret?: string } = {}) {
     this.#db = db;
     this.#secretOverride = secretOverride;
+    this.#siteSecretOverride = options.siteSecret;
   }
 
   close(): void {
@@ -133,6 +135,18 @@ export class AuthStore {
     const secret = randomBytes(32).toString("hex");
     this.#setSetting("session_secret", secret);
     return secret;
+  }
+
+  /** Names every site's host, so it never rotates: a new one would strand each site's data on its old host. */
+  siteSecret(): string {
+    if (this.#siteSecretOverride) return this.#siteSecretOverride;
+    const existing = this.#setting("site_secret");
+    if (existing) return existing;
+    // Another process on the same database may have written one first; the stored value wins.
+    this.#db
+      .prepare("INSERT INTO settings (key, value) VALUES ('site_secret', ?) ON CONFLICT(key) DO NOTHING")
+      .run(randomBytes(32).toString("hex"));
+    return this.#setting("site_secret") as string;
   }
 
   publicAccess(): boolean {
