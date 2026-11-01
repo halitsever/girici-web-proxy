@@ -24,6 +24,7 @@ import { installWebSocket } from "./websocket.ts";
 import { installStorage, partitionFor } from "./storage.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import { createMessageSender, installMessaging } from "./messaging.ts";
+import { createSiteMessaging } from "./site-messages.ts";
 import { installPermissions } from "./permissions.ts";
 import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
@@ -73,8 +74,10 @@ export function install(
     (inherit) => clientTag(clientUrl, { __proto__: null, ...childConfig(), inherit } as ClientConfig),
     invoke,
   );
+  // Takes the window's own fetch, postMessage and setTimeout, before any hook replaces them.
+  const siteMessaging = createSiteMessaging(win, ctx, invoke, config.sites);
   // Before the messaging and window hooks, whose natives it takes.
-  const guard = createWindowGuard(win, ctx, invoke, blobs.swap);
+  const guard = createWindowGuard(win, ctx, invoke, blobs.swap, siteMessaging?.post);
   const currentScript = captureCurrentScript(win);
   const toolbarNatives = captureToolbarNatives(win);
   const readContainer = serviceWorkerContainer(win);
@@ -192,7 +195,7 @@ export function install(
     navigationUrl: (raw) => blobs.swap(ctx.toProxy(raw)),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
-    messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper),
+    messageTarget: createMessageSender(win, ctx, invoke, guard.isWrapper, siteMessaging?.post),
     wrapWindow: guard.wrap,
     realOrigin: () => originOf(ctx.realUrl()),
     site: () => current.site,
@@ -255,7 +258,13 @@ export function install(
     ["network", () => installNetwork(win, ctx, cookies)],
     ["storage", () => append(listeners, installStorage(win, partition))],
     ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
-    ["messaging", () => installMessaging(win, ctx, invoke, guard)],
+    [
+      "messaging",
+      () => {
+        const screen = installMessaging(win, ctx, invoke, guard, siteMessaging?.labels);
+        if (screen) append(listeners, screen);
+      },
+    ],
     ["windows", () => installWindowLinks(win, ctx, guard)],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
