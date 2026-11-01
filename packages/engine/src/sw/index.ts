@@ -30,7 +30,7 @@ import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
-import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
+import { buildWsPrep, sealWsPrep, wsCaller } from "./ws-prep.ts";
 import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
@@ -386,10 +386,11 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await Promise.all([cookies.ready(), sealing.ready()]);
   const client = await clientOf(event);
   const identity = await identityOf(event, client);
-  const pageUrl =
-    client?.type === "window"
-      ? realUrlOf(client.url, self.location.origin, sealing.open)
-      : identity && new URL(identity.page);
+  const caller = wsCaller(
+    client?.type,
+    client?.type === "window" ? realUrlOf(client.url, self.location.origin, sealing.open) : null,
+    identity,
+  );
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -400,7 +401,7 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   const prep = await buildWsPrep(
     cookies,
     rawUrl,
-    pageUrl,
+    caller,
     async (target) => !(await cookiesBlocked(event, client, target)),
   );
   if (!prep) return new Response(null, { status: 400 });
