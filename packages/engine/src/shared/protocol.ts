@@ -135,7 +135,7 @@ const BASE64URL = /^[A-Za-z0-9_-]*$/;
 const URL_SAFE_CHARS = /[-_]/g;
 const NativeTypeError = TypeError;
 
-/** Natives taken at load only: a page's runtime decodes another site's cookies with this in a reused window. */
+/** Natives taken at load only, since this runs inside page calls. */
 export function decodeHeaderValue(value: string): string {
   if (exec(BASE64URL, value) === null) throw new NativeTypeError("Header value is not base64url");
   let base64 = replaceAll(value, URL_SAFE_CHARS, (char) => (char === "-" ? "+" : "/"));
