@@ -1749,9 +1749,15 @@ const REUSE = page(
   const frame = document.createElement("iframe");
   frame.src = "https://site-b.test/reuse-child";
   document.body.appendChild(frame);
-  frame.contentWindow.mark = "reused";
+  let contentWindow = "open";
+  try {
+    frame.contentWindow.mark = "reused";
+  } catch (error) {
+    contentWindow = error.name;
+  }
+  frames[0].mark = "reused";
   window.addEventListener("message", (event) => {
-    const out = { ...event.data, fromChild: event.source === frame.contentWindow };
+    const out = { ...event.data, fromChild: event.source === frame.contentWindow, contentWindow };
     document.getElementById("results").textContent = JSON.stringify(out);
   });
 </script>`,
@@ -2265,6 +2271,296 @@ const INERT = page(
 </script>`,
 );
 
+// Wraps its own built-ins, then hands the realm victim a window by the "via" path. "check" lists each value with the
+// victim's marker that reached a wrapper, and the messages the victim sent.
+const XS_REALM_OPENER = page(
+  "Realm opener",
+  `<button id="go">go</button><button id="check">check</button><a id="link">link</a>
+<form id="form" method="get"><input name="via" id="form-via"></form>
+<pre id="results"></pre>
+<script>
+  window.__xsRealmA = "site-a";
+  const spy = (() => {
+    "use strict";
+    const mark = "xs" + "r_";
+    const found = [];
+    const R = Reflect;
+    const apply = R.apply;
+    const construct = R.construct;
+    const getDesc = R.getOwnPropertyDescriptor;
+    const define = R.defineProperty;
+    const ownKeys = R.ownKeys;
+    const includes = String.prototype.includes;
+    const toTag = Object.prototype.toString;
+    const stringValue = String.prototype.valueOf;
+    const stringify = JSON.stringify;
+    let busy = false;
+    const note = (where, text) => {
+      if (found.length < 50) define(found, found.length, { __proto__: null, value: where + ": " + text, writable: true, enumerable: true, configurable: true });
+    };
+    const scan = (where, value, depth) => {
+      if (typeof value === "string") {
+        if (apply(includes, value, [mark])) note(where, value);
+        return;
+      }
+      if (typeof value !== "object" || value === null || depth > 2) return;
+      let tag;
+      try {
+        tag = apply(toTag, value, []);
+      } catch {
+        return;
+      }
+      if (tag === "[object String]") return scan(where, apply(stringValue, value, []), depth);
+      if (tag !== "[object Array]" && tag !== "[object Object]") return;
+      let keys;
+      try {
+        keys = ownKeys(value);
+      } catch {
+        return;
+      }
+      for (let i = 0; i < keys.length && i < 64; i++) {
+        try {
+          const d = getDesc(value, keys[i]);
+          if (d && "value" in d) scan(where, d.value, depth + 1);
+        } catch {}
+      }
+    };
+    const watch = (label, self, args) => {
+      if (busy) return;
+      busy = true;
+      try {
+        scan(label, self, 0);
+        for (let i = 0; i < args.length; i++) scan(label, args[i], 0);
+      } finally {
+        busy = false;
+      }
+    };
+    const wrapAll = (owner, label) => {
+      const keys = ownKeys(owner);
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        const d = getDesc(owner, key);
+        if (key === "constructor" || !d || !d.configurable) continue;
+        const name = label + "." + (typeof key === "symbol" ? key.description : key);
+        if (typeof d.value === "function") {
+          const original = d.value;
+          const wrapped = function (...args) {
+            watch(name, this, args);
+            return new.target ? construct(original, args, new.target) : apply(original, this, args);
+          };
+          define(owner, key, { __proto__: null, value: wrapped, writable: true, enumerable: d.enumerable, configurable: true });
+        } else if (typeof d.get === "function") {
+          const get = d.get;
+          const wrapped = function () {
+            watch(name, this, []);
+            return apply(get, this, []);
+          };
+          define(owner, key, { __proto__: null, get: wrapped, set: d.set, enumerable: d.enumerable, configurable: true });
+        }
+      }
+    };
+    const owners = [
+      [String.prototype, "String.prototype"], [String, "String"], [Array.prototype, "Array.prototype"], [Array, "Array"],
+      [RegExp.prototype, "RegExp.prototype"], [Object, "Object"], [JSON, "JSON"], [Reflect, "Reflect"],
+      [Map.prototype, "Map.prototype"], [Set.prototype, "Set.prototype"], [WeakMap.prototype, "WeakMap.prototype"],
+      [WeakSet.prototype, "WeakSet.prototype"], [Function.prototype, "Function.prototype"], [Number, "Number"],
+      [Promise.prototype, "Promise.prototype"], [URL.prototype, "URL.prototype"], [Symbol, "Symbol"],
+    ];
+    for (let i = 0; i < owners.length; i++) wrapAll(owners[i][0], owners[i][1]);
+    const globals = ["atob", "btoa", "encodeURIComponent", "decodeURIComponent", "escape", "unescape", "parseInt"];
+    for (let i = 0; i < globals.length; i++) {
+      const name = globals[i];
+      const original = window[name];
+      window[name] = function (...args) {
+        watch(name, undefined, args);
+        return apply(original, this, args);
+      };
+    }
+    return () => {
+      busy = true;
+      return stringify(found);
+    };
+  })();
+  const via = new URLSearchParams(location.search).get("via");
+  const victim = (path) => "https://site-b.test/xs-realm-victim?via=" + path;
+  const idle = "https://site-a.test/xs-realm-idle";
+  const messages = [];
+  let w = null;
+  const submit = (target, path) => {
+    const form = document.getElementById("form");
+    document.getElementById("form-via").value = path;
+    form.target = target;
+    form.action = "https://site-b.test/xs-realm-victim";
+    form.submit();
+  };
+  addEventListener("message", (event) => {
+    if (event.data === "idle" && via === "existing") open(victim("existing"), "xsr-existing");
+    if (!event.data || !event.data.via) return;
+    messages.push({ via: event.data.via, origin: event.origin, fromHandle: w !== null && event.source === w });
+    event.source.postMessage("pong", event.origin);
+  });
+  const paths = {
+    open: () => (w = open(victim("open"))),
+    blank: () => (w = open(victim("blank"), "_blank")),
+    named: () => (w = open(victim("named"), "xsr-named")),
+    "doc-open": () => (w = document.open(victim("doc-open"), "xsr-doc", "")),
+    existing: () => (w = open(idle, "xsr-existing")),
+    pending: () => {
+      w = open(idle, "xsr-pending");
+      open(victim("pending"), "xsr-pending");
+    },
+    link: () => {
+      w = open("", "xsr-link");
+      const link = document.getElementById("link");
+      link.target = "xsr-link";
+      link.href = victim("link");
+      link.click();
+    },
+    form: () => {
+      w = open("", "xsr-form");
+      submit("xsr-form", "form");
+    },
+    "form-opened": () => {
+      w = open(idle, "xsr-opened");
+      submit("xsr-opened", "form-opened");
+    },
+    redirect: () => (w = open("https://site-a.test/xs-realm-away?to=" + encodeURIComponent(victim("redirect")))),
+    away: () => {
+      w = open();
+      w.location = victim("away");
+    },
+    noopener: () => open(victim("noopener"), "_blank", "noopener"),
+  };
+  document.getElementById("go").onclick = () => paths[via]();
+  document.getElementById("check").onclick = () => {
+    document.getElementById("results").textContent = JSON.stringify({ spy: JSON.parse(spy()), messages });
+  };
+</script>`,
+);
+
+const XS_REALM_IDLE = page("Realm idle", `<script>if (opener) opener.postMessage("idle", "*");</script>`);
+
+// Compiles location reads through the generator and async constructors of a blank frame's own realm.
+const XS_REALM_EXEC = page(
+  "Realm exec",
+  `<pre id="results"></pre>
+<script>
+  document.body.appendChild(document.createElement("iframe"));
+  const child = frames[0];
+  const make = (source) => child.Function("return " + source)().constructor;
+  const generator = make("function* () {}")("return location.href")().next().value;
+  Promise.all([
+    make("async function () {}")("return location.href")(),
+    make("async function* () {}")("return location.href")().next(),
+  ]).then(([plain, asyncGenerator]) => {
+    document.getElementById("results").textContent = JSON.stringify({ generator, async: plain, asyncGenerator: asyncGenerator.value });
+  });
+</script>`,
+);
+
+// Lists every hook in its realm whose functions come from another realm, tries to compile code through each one's
+// constructor, then runs code, markup and cookies with a fresh marker through whatever hooks it has.
+const XS_REALM_VICTIM = page(
+  "Realm victim",
+  `<pre id="results"></pre>
+<script>
+  ${FAILURE}
+  const via = new URLSearchParams(location.search).get("via");
+  const ownFunction = Object.getPrototypeOf(function () {});
+  const getProto = Object.getPrototypeOf;
+  const getDesc = Object.getOwnPropertyDescriptor;
+  const ownKeys = Reflect.ownKeys;
+  const foreign = [];
+  const seen = new Set();
+  // A subclass constructor such as EvalError reaches this realm's Function.prototype further up its chain.
+  const own = (fn) => {
+    for (let proto = getProto(fn); proto !== null; proto = getProto(proto)) if (proto === ownFunction) return true;
+    return false;
+  };
+  const check = (label, fn) => {
+    if (typeof fn !== "function" || seen.has(fn)) return;
+    seen.add(fn);
+    if (!own(fn)) foreign.push([label, fn]);
+  };
+  const scan = (label, object) => {
+    let keys;
+    try {
+      keys = ownKeys(object);
+    } catch {
+      return;
+    }
+    for (const key of keys) {
+      let d;
+      try {
+        d = getDesc(object, key);
+      } catch {
+        continue;
+      }
+      if (!d) continue;
+      const name = label + "." + String(key);
+      check(name, d.value);
+      check(name + " get", d.get);
+      check(name + " set", d.set);
+    }
+  };
+  const windows = new Set(["window", "self", "frames", "parent", "top", "opener", "globalThis"]);
+  scan("window", window);
+  for (const key of Object.getOwnPropertyNames(window)) {
+    if (windows.has(key)) continue;
+    const value = getDesc(window, key)?.value;
+    if (typeof value === "function" && value.prototype && typeof value.prototype === "object") scan(key + ".prototype", value.prototype);
+    else if (typeof value === "object" && value !== null) scan(key, value);
+  }
+  for (const sample of [function* () {}, async function () {}, async function* () {}]) scan("sample", getProto(sample));
+  const compiled = [];
+  const tried = new Set();
+  const attempt = (label, fn) => {
+    try {
+      const make = fn.constructor;
+      if (typeof make !== "function" || tried.has(make)) return;
+      tried.add(make);
+      if (make("return typeof __xsRealmA")() === "string") compiled.push(label);
+    } catch {}
+  };
+  attempt("cookie getter", getDesc(Document.prototype, "cookie")?.get);
+  if (window.__g$) attempt("__g$.renew", window.__g$.renew);
+  for (const [label, fn] of foreign) attempt(label, fn);
+
+  const mark = "xs" + "r" + "_";
+  const fresh = (kind) => mark + kind + Math.random().toString(36).slice(2, 10);
+  eval("void '" + fresh("e") + "'");
+  new Function("return '" + fresh("f") + "'")();
+  document.createElement("div").innerHTML = '<a href="/' + fresh("h") + '">x</a>';
+  document.cookie = fresh("n") + "=" + fresh("v") + "; path=/";
+  void document.cookie;
+  history.replaceState(null, "", location.pathname + location.search + "&at=" + fresh("u"));
+  setTimeout("void '" + fresh("t") + "'", 0);
+
+  const report = (pong) => {
+    document.getElementById("results").textContent = JSON.stringify({
+      via,
+      foreign: foreign.length,
+      sample: foreign.slice(0, 5).map((entry) => entry[0]),
+      compiled,
+      history: history.length,
+      referrer: document.referrer,
+      name: window.name,
+      opener: opener !== null,
+      openerDocument: opener ? failure(() => opener.document) : "none",
+      pong,
+    });
+  };
+  if (opener) {
+    addEventListener("message", (event) => {
+      if (event.data === "pong") report(event.origin);
+    });
+    opener.postMessage({ via }, "https://site-a.test");
+  } else {
+    report(null);
+  }
+</script>`,
+);
+
 const typed =
   (type: string | null, body: string): Route =>
   (_req, res) => {
@@ -2528,6 +2824,13 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/sealed/spa": sealedCookie(SEALED_SPA),
     "/sealed/next": html(page("Sealed next", SEALED_ECHO)),
     "/sealed/search": sealedSearch,
+    "/xs-realm": html(XS_REALM_OPENER),
+    "/xs-realm-idle": html(XS_REALM_IDLE),
+    "/xs-realm-exec": html(XS_REALM_EXEC),
+    "/xs-realm-away": (req, res) => {
+      res.writeHead(302, { location: new URL(req.url ?? "/", "http://fixture").searchParams.get("to") ?? "/" });
+      res.end();
+    },
   },
   "www.site-a.test": {
     "/landing": html(page("Landing", "<h1>Landing</h1>")),
@@ -2569,6 +2872,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
         `<script>const channel = new BroadcastChannel("probe"); setInterval(() => channel.postMessage("x"), 200);</script>`,
       ),
     ),
+    "/xs-realm-victim": html(XS_REALM_VICTIM),
   },
   "site-c.test": { "/": html(page("Site C", "<h1>Site C</h1>")) },
 };

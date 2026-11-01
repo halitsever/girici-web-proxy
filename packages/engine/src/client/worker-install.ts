@@ -113,6 +113,7 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
     // A worker never loads a second document.
     inherit: () => {},
     accepts: () => false,
+    keepsOrigin: () => false,
   };
 }
 
