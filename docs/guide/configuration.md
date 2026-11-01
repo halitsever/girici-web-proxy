@@ -19,8 +19,8 @@ stops the server with a message naming the variable.
 | `GIRICI_SESSION_SECRET` | unset | Overrides the database-stored session secret; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica so sessions validate across them. |
 | `GIRICI_SETUP_TOKEN` | unset | A fixed setup code (8 or more characters, not counting spaces and dashes) instead of the random one printed at startup. |
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
-| `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may move per minute, such as `50MB`, with bursts up to one minute's worth. A response that starts under the limit finishes. The signed-in admin is never limited. |
-| `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may move per day, such as `2GB`. Counts reset at midnight UTC and when Girici restarts. |
+| `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may start moving per minute, such as `50MB`. A response that starts under the limit finishes, so a visitor can go over it (see [Bandwidth limits](#bandwidth-limits)). The signed-in admin is never limited. |
+| `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may start moving per day, such as `2GB`, checked the same way. Counts reset at midnight UTC and when Girici restarts. |
 | `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more characters. |
 | `GIRICI_POW_DIFFICULTY` | `16` | How hard the browser check is, 1 to 24; each step doubles the work. The check itself is switched on in Settings. |
 
@@ -57,7 +57,7 @@ proxy as the video traffic.
 
 ## Bandwidth limits
 
-`GIRICI_BANDWIDTH_LIMIT` and `GIRICI_DAILY_QUOTA` cap how much traffic each visitor moves through a public
+`GIRICI_BANDWIDTH_LIMIT` and `GIRICI_DAILY_QUOTA` limit how much traffic each visitor moves through a public
 instance. A visitor is a client address, the same key the rate limit uses, so behind a reverse proxy set
 [`GIRICI_TRUST_PROXY`](#trust-proxy) first. IPv6 clients share a budget per /64.
 
@@ -68,6 +68,10 @@ The per-minute limit is a bucket that holds one minute's worth and refills conti
 any budget is left, and a response that has started always finishes, even when it takes the bucket below zero.
 The visitor then waits until the bucket climbs back above zero. A video that started under the limit keeps
 playing; the limit bites on the next request.
+
+Both budgets are checked only when a request or WebSocket starts, so a visitor can go over them by whatever they
+start at once or by one long response. An open WebSocket is the exception: it is checked on every message and closed
+once the budget runs out.
 
 The daily quota counts from midnight UTC and starts over at the next one.
 
