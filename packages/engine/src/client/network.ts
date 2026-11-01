@@ -1,4 +1,4 @@
-import { define, joined } from "../shared/primordials.ts";
+import { define, joined, NativeWeakSet } from "../shared/primordials.ts";
 import { HEADER } from "../shared/protocol.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { CookieBridge } from "./cookies.ts";
@@ -8,6 +8,9 @@ import type { Realm, UrlContext } from "./url-context.ts";
 // Taken at load, so a replaced Function.prototype.call or String never receives a native or the URL.
 const apply = Reflect.apply;
 const toText = String;
+// A frame's requests pass through these in the realm of the page that made the frame.
+const weakHas = WeakSet.prototype.has;
+const weakAdd = WeakSet.prototype.add;
 
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
 export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
@@ -54,12 +57,12 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
   } as typeof xhr.open;
   maskNative(xhr.open, nativeOpen);
   const { send: nativeSend, setRequestHeader: nativeSetRequestHeader } = xhr;
-  const syncing = new WeakSet<XMLHttpRequest>();
+  const syncing = new NativeWeakSet<XMLHttpRequest>();
   xhr.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const seq = cookies.currentSeq();
     if (seq > 0) apply(nativeSetRequestHeader, this, [HEADER.cookieSeq, toText(seq)]);
-    if (!syncing.has(this)) {
-      syncing.add(this);
+    if (!apply(weakHas, syncing, [this])) {
+      apply(weakAdd, syncing, [this]);
       // Headers arrive before load, so cookies are in place by the time the page's handlers run.
       this.addEventListener("readystatechange", () => {
         if (this.readyState === this.HEADERS_RECEIVED) cookies.applySync(this.getResponseHeader(HEADER.cookieSync));

@@ -1,4 +1,16 @@
-import { apply, joined, sliceOf, startsWith, toText } from "../shared/primordials.ts";
+import {
+  append,
+  apply,
+  createObject,
+  define,
+  indexOf,
+  joined,
+  pathnameOf,
+  sliceOf,
+  splitText,
+  startsWith,
+  toText,
+} from "../shared/primordials.ts";
 import { hookConstructor } from "./constructors.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
@@ -121,31 +133,66 @@ function wrap(proto: object | undefined, name: string, make: (native: Method) =>
   target[name] = make(native as Method);
 }
 
-/** cookieStore is a typed view of document.cookie, so it reuses the mirror the cookie hooks maintain. */
+interface CookieItem {
+  name: string;
+  value: string;
+}
+
+/**
+ * cookieStore is a typed view of document.cookie, so it reuses the mirror the cookie hooks maintain. Answers use the
+ * window's own Promise, Object and Array, taken at install: in a window reused for another site, this realm's
+ * built-ins belong to the page that made the window.
+ */
 function installCookieStore(win: Realm, ctx: UrlContext): void {
-  const store = (win as unknown as { cookieStore?: Record<string, unknown> }).cookieStore;
-  if (!store) return;
-  const parse = (text: string) =>
-    text
-      .split("; ")
-      .filter(Boolean)
-      .map((pair) => {
-        const index = pair.indexOf("=");
-        return { name: pair.slice(0, index), value: pair.slice(index + 1) };
-      });
+  const instance = (win as unknown as { cookieStore?: Record<string, unknown> }).cookieStore;
+  if (!instance) return;
+  // WebKit gives the next document of a reused window a new cookieStore, which still inherits from this prototype.
+  const CookieStore = (win as unknown as { CookieStore?: { prototype: Record<string, unknown> } }).CookieStore;
+  const store = CookieStore?.prototype ?? instance;
+  const PagePromise = win.Promise;
+  const pageObject = win.Object.prototype;
+  const PageArray = win.Array;
+  const answer = <T>(run: () => T): Promise<T> => new PagePromise<T>((resolve) => resolve(run()));
+  const item = (name: string, value: string): CookieItem => {
+    const made = createObject<CookieItem>(pageObject);
+    define(made, "name", { value: name, writable: true, enumerable: true, configurable: true });
+    define(made, "value", { value, writable: true, enumerable: true, configurable: true });
+    return made;
+  };
+  const parse = (text: string): CookieItem[] => {
+    const pairs = splitText(text, "; ");
+    const items = new PageArray<CookieItem>();
+    for (let index = 0; index < pairs.length; index++) {
+      const pair = pairs[index] as string;
+      if (!pair) continue;
+      const at = indexOf(pair, "=");
+      append(items, item(sliceOf(pair, 0, at), sliceOf(pair, at + 1)));
+    }
+    return items;
+  };
   // get/delete accept both a bare name and the { name } object form the native API allows.
   const nameOf = (input: unknown) =>
-    typeof input === "object" && input ? String((input as { name?: unknown }).name) : String(input);
-  store.get = async (name: unknown) => parse(win.document.cookie).find((c) => c.name === nameOf(name)) ?? null;
-  store.getAll = async () => parse(win.document.cookie);
-  store.set = async (name: unknown, value?: unknown) => {
-    const cookie =
-      typeof name === "object" && name
-        ? (name as { name: string; value: string })
-        : { name: String(name), value: String(value) };
-    win.document.cookie = `${cookie.name}=${cookie.value}; path=${new URL(ctx.realUrl().href).pathname}`;
-  };
-  store.delete = async (name: unknown) => {
-    win.document.cookie = `${nameOf(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  };
+    typeof input === "object" && input ? toText((input as { name?: unknown }).name) : toText(input);
+  store.get = (name: unknown) =>
+    answer(() => {
+      const items = parse(win.document.cookie);
+      for (let index = 0; index < items.length; index++) {
+        const found = items[index] as CookieItem;
+        if (found.name === nameOf(name)) return found;
+      }
+      return null;
+    });
+  store.getAll = () => answer(() => parse(win.document.cookie));
+  store.set = (name: unknown, value?: unknown) =>
+    answer(() => {
+      const cookie =
+        typeof name === "object" && name
+          ? (name as { name: string; value: string })
+          : ({ __proto__: null, name: toText(name), value: toText(value) } as CookieItem);
+      win.document.cookie = `${cookie.name}=${cookie.value}; path=${pathnameOf(ctx.realUrl())}`;
+    });
+  store.delete = (name: unknown) =>
+    answer(() => {
+      win.document.cookie = `${nameOf(name)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    });
 }

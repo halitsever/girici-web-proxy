@@ -9,6 +9,7 @@ import {
   newUrl,
   originOf,
   pathnameOf,
+  promiseThen,
   startsWith,
   toText,
 } from "../shared/primordials.ts";
@@ -205,7 +206,7 @@ export function installNavigation(
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
       // The next page must already see cookies this one has just written. The hooked Attr value is the real URL.
-      void writes.then(() => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
+      void promiseThen(writes, () => invoke(win.location.assign, win.location, [addressOf(url, ctx)]));
     },
     false,
   ]);
@@ -220,7 +221,7 @@ export function installNavigation(
       if ((formTarget && formTarget !== "_self") || overridesForm(submitter)) return;
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
-      void writes.then(() => {
+      void promiseThen(writes, () => {
         const extra = submitterField(win, submitter);
         if (extra) target.append(extra);
         fix(target, "action");

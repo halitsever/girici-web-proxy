@@ -1,5 +1,15 @@
 import { clientTag } from "../shared/client-tag.ts";
-import { append, define, hrefOf, isWebUrl, NativeWeakMap, newUrl, originOf, parseUrl } from "../shared/primordials.ts";
+import {
+  append,
+  define,
+  hrefOf,
+  isWebUrl,
+  NativeWeakMap,
+  newUrl,
+  originOf,
+  parseUrl,
+  promiseThen,
+} from "../shared/primordials.ts";
 import type { ClientConfig } from "../shared/protocol.ts";
 import type { OpenSealed } from "../shared/sealed-address.ts";
 import { UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
@@ -122,7 +132,7 @@ export function install(
       navigate: (url, mode) => {
         // The next page must already see cookies this one has just written.
         const writes = cookies.pendingWrites();
-        if (writes) void writes.then(() => ownLocation.navigate(url, mode));
+        if (writes) void promiseThen(writes, () => ownLocation.navigate(url, mode));
         else ownLocation.navigate(url, mode);
       },
       reload: ownLocation.reload,
