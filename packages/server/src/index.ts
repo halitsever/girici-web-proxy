@@ -7,26 +7,19 @@ import { AuthStore } from "./auth/store.ts";
 import { BrandStore } from "./brand/store.ts";
 import { loadConfig, trustProxyWarning, type Config } from "./config.ts";
 import { openDb } from "./db/open.ts";
-import { bandwidthGate, bandwidthUpgradeGate, ByteMeter, meterObserver } from "./http/bandwidth.ts";
 import { compileTrust } from "./http/client-ip.ts";
 import { tokenBucket } from "./http/rate-limit.ts";
-import { observeAll, type RelayObserver } from "./http/relay-observer.ts";
 import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
+import { openInstanceTools } from "./open-instance.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
-import { powGate, powUpgradeGate } from "./pow/gate.ts";
-import { metricsRouter } from "./routes/metrics.ts";
-import { powRouter } from "./routes/pow.ts";
-import { statusRouter } from "./routes/status.ts";
-import { DailyTraffic, startStatsFlush } from "./stats/daily.ts";
-import { TrafficStats } from "./stats/traffic.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
 import { describeProxy } from "./upstream/proxy-config.ts";
 import { createGuardedLookup } from "./upstream/ssrf.ts";
 import { createPoTokenMinter } from "./youtube/minter.ts";
-import { attachWsRelay, testUpstreamDial, type UpgradeGate } from "./ws/relay-ws.ts";
+import { attachWsRelay, testUpstreamDial } from "./ws/relay-ws.ts";
 
 let config: Config;
 try {
@@ -73,52 +66,9 @@ const blocklist = new HostBlocklist(config.blockedHosts, authStore.blockedHosts(
 // A fresh code at every start until setup is done, unless the operator fixed one.
 const setupCode = config.setupToken ?? generateSetupCode();
 
-// Filled by the open-instance tools below; the WebSocket relay runs its upgrade gates in this order.
-const relayObservers: RelayObserver[] = [];
-const upgradeGates: UpgradeGate[] = [];
+// The browser check, traffic statistics and bandwidth limits, wired into both relays.
+const tools = openInstanceTools({ config, store: authStore, db, logger });
 
-// The browser check: an admin switch, so it is always wired and reads the switch on each request.
-const pow = {
-  gate: powGate({ store: authStore }),
-  router: powRouter({ store: authStore, difficulty: config.powDifficulty }),
-  upgradeGate: powUpgradeGate({ store: authStore }),
-};
-upgradeGates.push(pow.upgradeGate);
-
-// Traffic counts for the admin's Status section and, with a token, for /metrics.
-const stats = new TrafficStats();
-relayObservers.push(stats);
-const daily = new DailyTraffic(db);
-const statsFlush = startStatsFlush(stats, daily, {
-  onError: (error) =>
-    logger.error(`Cannot save traffic statistics: ${error instanceof Error ? error.message : String(error)}`),
-});
-const statsRouters = {
-  metricsRouter: config.metricsToken ? metricsRouter({ token: config.metricsToken, stats }) : undefined,
-  statusRouter: statusRouter({
-    store: authStore,
-    stats,
-    daily,
-    flush: statsFlush.flush,
-    limits: {
-      bandwidthPerMinute: config.bandwidthLimit,
-      dailyQuota: config.dailyQuota,
-      metrics: config.metricsToken !== undefined,
-    },
-  }),
-};
-
-// Bandwidth limit and daily quota: off until one is set. One meter serves both relays, as the rate limit does.
-const meter =
-  config.bandwidthLimit > 0 || config.dailyQuota > 0
-    ? new ByteMeter({ perMinute: config.bandwidthLimit, perDay: config.dailyQuota })
-    : null;
-if (meter) {
-  relayObservers.push(meterObserver(meter));
-  upgradeGates.push(bandwidthUpgradeGate({ meter, store: authStore }));
-}
-
-const relayObserver = observeAll(relayObservers);
 const agent = createUpstreamAgent({
   proxy: config.upstreamProxy,
   testUpstreams: config.testUpstreams,
@@ -137,10 +87,7 @@ const server = createHttpServer(
     limiter,
     blocklist,
     setupToken: setupCode,
-    powGate: pow.gate,
-    powRouter: pow.router,
-    observer: relayObserver,
-    bandwidthGate: meter ? bandwidthGate({ meter, store: authStore }) : undefined,
+    ...tools.app,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
@@ -155,7 +102,6 @@ const server = createHttpServer(
           logger,
         )
       : undefined,
-    ...statsRouters,
   }),
 );
 const wsLookup = createGuardedLookup();
@@ -177,9 +123,7 @@ const wsRelay = attachWsRelay(server, {
   trust,
   limiter,
   blocklist,
-  observer: relayObserver,
-  upgradeGates,
-  allowFrame: meter ? (key) => meter.check(key).ok : undefined,
+  ...tools.ws,
 });
 server.on("error", (error) => {
   logger.error(error.message);
@@ -195,7 +139,7 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
     logger.info(`${signal} received, shutting down`);
     server.close(() => {
       // The statistics share the database, so they are written before it closes.
-      statsFlush.stop();
+      tools.statsFlush.stop();
       authStore.close();
       process.exit(0);
     });

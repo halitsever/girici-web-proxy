@@ -9,6 +9,7 @@ import { createApp, type AppOptions } from "../src/app.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { BrandStore } from "../src/brand/store.ts";
 import { openDb } from "../src/db/open.ts";
+import type { Limiter } from "../src/http/rate-limit.ts";
 import { sendRelayError } from "../src/http/relay-error.ts";
 import { NO_OBSERVER, type RelayObserver } from "../src/http/relay-observer.ts";
 import { createLogger } from "../src/log.ts";
@@ -25,15 +26,22 @@ afterEach(async () => {
 });
 afterAll(() => agent.close());
 
-/** An app whose pow gate records and passes and whose bandwidth gate records and refuses with quota. */
-async function start(options: { publicAccess?: boolean } & Partial<AppOptions> = {}) {
-  const { publicAccess = true, ...overrides } = options;
+/** An app whose pow gate and rate limit record and pass, and whose bandwidth gate records and refuses with quota. */
+async function start(options: { publicAccess?: boolean; limitOk?: boolean } & Partial<AppOptions> = {}) {
+  const { publicAccess = true, limitOk = true, ...overrides } = options;
   const store = new AuthStore(openDb(":memory:"));
   store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
   store.setPublicAccess(publicAccess);
   const record: string[] = [];
   const heard: Array<[string, string | null]> = [];
   const observer: RelayObserver = { ...NO_OBSERVER, answered: (kind, code) => heard.push([kind, code]) };
+  const limiter: Limiter = Object.assign(
+    () => {
+      record.push("limit");
+      return { ok: limitOk, retryAfter: 1 };
+    },
+    { size: () => 0 },
+  );
   const dir = mkdtempSync(join(tmpdir(), "girici-gates-"));
   const server = createServer(
     createApp({
@@ -45,6 +53,7 @@ async function start(options: { publicAccess?: boolean } & Partial<AppOptions> =
       brand: new BrandStore(join(dir, "brand"), store),
       relay: { agent, allowedTestHosts: new Set(), maxRequestBody: 1_048_576 },
       observer,
+      limiter,
       powGate: (_req, _res, next) => {
         record.push("pow");
         next();
@@ -77,7 +86,7 @@ describe("open-instance gates", () => {
     expect(res.status).toBe(429);
     expect(res.headers.get("x-girici-error")).toBe("quota");
     await heardOnce(heard);
-    expect(record).toEqual(["pow", "bandwidth"]);
+    expect(record).toEqual(["pow", "limit", "bandwidth"]);
     expect(heard).toEqual([["http", "quota"]]);
 
     for (const path of ["/_g/pot", "/_g/ws-seal"]) {
@@ -86,6 +95,16 @@ describe("open-instance gates", () => {
       expect(record, path).toEqual(["pow"]);
     }
     expect(heard).toHaveLength(1);
+  });
+
+  it("stops at the rate limit before the bandwidth gate", async () => {
+    const { base, record, heard } = await start({ limitOk: false });
+    const res = await relayGet(base);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("x-girici-error")).toBe("rate_limited");
+    await heardOnce(heard);
+    expect(record).toEqual(["pow", "limit"]);
+    expect(heard).toEqual([["http", "rate_limited"]]);
   });
 
   it("refuses at the auth gate before any other gate on a private instance", async () => {
