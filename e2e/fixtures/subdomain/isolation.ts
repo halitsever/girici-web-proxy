@@ -133,14 +133,15 @@ const POST = page(
     const form = document.createElement("form");
     form.method = "post";
     form.action = "https://site-b.test/sites/echo";
-    for (const [name, value] of [["q", "posted"], ["n", "ü"]]) {
+    for (const [name, value] of [["q", "posted"], ["n", "ü"], ["submit", "1"]]) {
       const input = document.createElement("input");
       input.name = name;
       input.value = value;
       form.append(input);
     }
     document.body.append(form);
-    form.submit();
+    // The field named submit hides the form's own method.
+    HTMLFormElement.prototype.submit.call(form);
   });
 </script>`,
 );

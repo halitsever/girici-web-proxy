@@ -86,14 +86,14 @@ test("a form built by script posts to another site with its fields", async ({ pa
   await page.goto("/~/https/site-a.test/sites/post");
   await page.click("#send");
   await page.waitForURL(`${SITE_B}/~/https/site-b.test/sites/echo`);
-  await expect(page.locator("#echo")).toHaveText("POST q=posted&n=%C3%BC");
+  await expect(page.locator("#echo")).toHaveText("POST q=posted&n=%C3%BC&submit=1");
 });
 
 test("a form built by script posts its fields to a site whose host has no worker yet", async ({ page }) => {
   await page.goto("/~/https/site-a.test/sites/post");
   await page.click("#send");
   await page.waitForURL(`${SITE_B}/~/https/site-b.test/sites/echo`);
-  await expect(page.locator("#echo")).toHaveText("POST q=posted&n=%C3%BC");
+  await expect(page.locator("#echo")).toHaveText("POST q=posted&n=%C3%BC&submit=1");
 });
 
 test("a frame of a site never opened before loads on its own host", async ({ page }) => {

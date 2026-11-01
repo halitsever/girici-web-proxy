@@ -13,6 +13,11 @@ export function nextStep(doc: { getElementById(id: string): unknown }): "replay"
   return doc.getElementById(REPLAY_FORM_ID) ? "replay" : "reload";
 }
 
+/** A field named "submit" shadows the form's own method, so the replay calls the prototype's `submit`. */
+export function replayForm(form: object, submit: () => void): void {
+  Reflect.apply(submit, form, []);
+}
+
 /** A tab that keeps landing on the bootstrap page would reload forever, so attempts are rationed per window. */
 export function nextBootAttempt(previous: BootState | null, now: number): { allowed: boolean; state: BootState } {
   if (!previous || now - previous.firstAt > WINDOW_MS) return { allowed: true, state: { count: 1, firstAt: now } };

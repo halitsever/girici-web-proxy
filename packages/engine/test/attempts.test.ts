@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { nextBootAttempt, nextStep, type BootState } from "../src/boot/attempts.ts";
+import { nextBootAttempt, nextStep, replayForm, type BootState } from "../src/boot/attempts.ts";
+
+describe("replayForm", () => {
+  it("submits through the form's own method even when a field is named submit", () => {
+    const submitted: unknown[] = [];
+    const proto = {
+      submit(this: unknown) {
+        submitted.push(this);
+      },
+    };
+    const form = Object.assign(Object.create(proto) as object, { submit: { name: "submit", value: "1" } });
+    expect(() => (form as { submit(): void }).submit()).toThrow(TypeError);
+    replayForm(form, proto.submit);
+    expect(submitted).toEqual([form]);
+  });
+});
 
 describe("nextStep", () => {
   it("replays a form the server kept, else reloads", () => {
