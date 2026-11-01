@@ -15,7 +15,9 @@ import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
+import { powGate, powUpgradeGate } from "./pow/gate.ts";
 import { metricsRouter } from "./routes/metrics.ts";
+import { powRouter } from "./routes/pow.ts";
 import { statusRouter } from "./routes/status.ts";
 import { DailyTraffic, startStatsFlush } from "./stats/daily.ts";
 import { TrafficStats } from "./stats/traffic.ts";
@@ -75,6 +77,14 @@ const setupCode = config.setupToken ?? generateSetupCode();
 const relayObservers: RelayObserver[] = [];
 const upgradeGates: UpgradeGate[] = [];
 
+// The browser check: an admin switch, so it is always wired and reads the switch on each request.
+const pow = {
+  gate: powGate({ store: authStore }),
+  router: powRouter({ store: authStore, difficulty: config.powDifficulty }),
+  upgradeGate: powUpgradeGate({ store: authStore }),
+};
+upgradeGates.push(pow.upgradeGate);
+
 // Traffic counts for the admin's Status section and, with a token, for /metrics.
 const stats = new TrafficStats();
 relayObservers.push(stats);
@@ -127,6 +137,8 @@ const server = createHttpServer(
     limiter,
     blocklist,
     setupToken: setupCode,
+    powGate: pow.gate,
+    powRouter: pow.router,
     observer: relayObserver,
     bandwidthGate: meter ? bandwidthGate({ meter, store: authStore }) : undefined,
     relay: {
