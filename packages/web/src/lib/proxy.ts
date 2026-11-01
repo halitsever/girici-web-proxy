@@ -33,6 +33,7 @@ export interface OpenEnv {
   markSeen(): Promise<void>;
   seal(path: string): Promise<string>;
   assign(url: string): void;
+  openTab(url: string): void;
 }
 
 /** The worker answers with the sealed address while sealing is on, so the plain one never reaches history. */
@@ -47,6 +48,13 @@ export async function openProxied(path: string, env?: OpenEnv): Promise<void> {
   open.assign(await open.seal(path));
 }
 
+/** In subdomain mode the root sends the new tab on to the site's host, whose own worker starts there. */
+export async function openProxiedTab(path: string, env?: OpenEnv): Promise<void> {
+  const open = env ?? (await browserOpenEnv());
+  await (open.siteMode ? open.markSeen() : open.start());
+  open.openTab(path);
+}
+
 async function browserOpenEnv(): Promise<OpenEnv> {
   const state = await getAuthState().catch(() => null);
   return {
@@ -55,6 +63,7 @@ async function browserOpenEnv(): Promise<OpenEnv> {
     markSeen: () => markSitesSeen(loadSettings()),
     seal: (path) => sealPath(path),
     assign: (url) => window.location.assign(url),
+    openTab: (url) => void window.open(url, "_blank", "noopener"),
   };
 }
 

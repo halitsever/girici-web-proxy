@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openProxied, reloadThroughEngine, serviceWorkerSupport, startEngine, type ReloadEnv } from "../proxy";
+import {
+  openProxied,
+  openProxiedTab,
+  reloadThroughEngine,
+  serviceWorkerSupport,
+  startEngine,
+  type ReloadEnv,
+} from "../proxy";
 
 describe("serviceWorkerSupport", () => {
   it.each([
@@ -123,6 +130,7 @@ describe("openProxied", () => {
         return "/~/x/L.B";
       },
       assign: (url) => void steps.push(`assign ${url}`),
+      openTab: (url) => void steps.push(`tab ${url}`),
     });
     expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
   });
@@ -143,12 +151,36 @@ describe("openProxied", () => {
         return "/~/x/L.B";
       },
       assign: (url) => void steps.push(`assign ${url}`),
+      openTab: (url) => void steps.push(`tab ${url}`),
     });
     await Promise.resolve();
     expect(steps).toEqual(["seen"]);
     release();
     await opening;
     expect(steps).toEqual(["seen", "assign /~/https/site-a.test/"]);
+  });
+});
+
+describe("openProxiedTab", () => {
+  const env = (siteMode: boolean, steps: string[]) => ({
+    siteMode,
+    start: async () => void steps.push("start"),
+    markSeen: async () => void steps.push("seen"),
+    seal: async () => "/~/x/L.B",
+    assign: (url: string) => void steps.push(`assign ${url}`),
+    openTab: (url: string) => void steps.push(`tab ${url}`),
+  });
+
+  it("starts the engine before the new tab loads the site", async () => {
+    const steps: string[] = [];
+    await openProxiedTab("/~/https/a.test/", env(false, steps));
+    expect(steps).toEqual(["start", "tab /~/https/a.test/"]);
+  });
+
+  it("tells every site host first in subdomain mode, where the tab's own host starts its worker", async () => {
+    const steps: string[] = [];
+    await openProxiedTab("/~/https/a.test/", env(true, steps));
+    expect(steps).toEqual(["seen", "tab /~/https/a.test/"]);
   });
 });
 
