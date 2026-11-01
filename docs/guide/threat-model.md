@@ -67,16 +67,23 @@ What stays open, and what the mode adds:
 - Origins of one site, such as `www.example.com` and `accounts.example.com`, share one host. Girici separates them in
   JavaScript as in single-origin mode, and `HttpOnly` is still not a boundary between them.
 - A page can still navigate its own tab out of the proxy through a computed `location` write.
-- Site labels appear in DNS lookups and the TLS handshake, so a network observer sees one stable label per site. Anyone
-  allowed to browse the instance can match labels to sites.
-- Navigations between sites arrive without a `Referer`, and a POST carries `Origin: null`.
+- Site labels appear in DNS lookups and the TLS handshake, so a network observer sees one stable label per site. Any
+  page a visitor allowed to browse opens gets the label key and can match labels to sites; a signed-out visitor of a
+  private instance learns no site's host.
+- Navigations between sites arrive cross-site, without a `Referer`, and a POST carries `Origin: null`. A form post with
+  no referrer at all counts as cross-site, so a page's `no-referrer` policy in its headers or markup becomes
+  `same-origin`, which keeps the referrer on the page's own host. A plain load without a referrer counts as direct.
 - In WebKit, a form that uploads files to another site loses its fields and files. In every browser, a multipart POST
   to a site never opened before stops at a page that explains why. WebKit gives an embedded site its own worker install
   and cookie jar for each site that embeds it.
 - Browser protections keyed to the site, such as HTTP cache partitioning, the `window.name` reset, process-per-site
   and SameSite, see one site for all Girici hosts.
-- A page can flood the shared domain with cookies until every host answers `431`, as it can in single-origin mode.
-  It cannot read or overwrite Girici's own cookies.
+- A page can set cookies for the shared domain. It cannot read Girici's own cookies, and a same-name cookie it plants
+  cannot replace them: Girici reads every value, keeps only signed ones and merges settings to the more private choice.
+  A flood can still make every host answer `431`, as in single-origin mode, or push Girici's own cookies out of the
+  browser's per-domain limit, which signs the site hosts out and resets settings.
+- Form posts moved to another site's host are sent again as UTF-8. Messages from a host under the sender's site reach
+  the page as copies with `isTrusted` false once the service worker confirms the host.
 - The first visit to each site costs a round trip and about 700 KB of engine before compression.
 - With third-party cookies allowed, subresource cookies are partitioned per embedding site.
 - `localStorage` that a site writes while embedded shares browser storage with its top-level copy in all three

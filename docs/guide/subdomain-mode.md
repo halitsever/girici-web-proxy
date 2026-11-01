@@ -20,7 +20,7 @@ A site here is a scheme plus a registrable domain:
   one of them and read it on another. Inside that host, Girici keeps them apart as it does in single-origin mode.
 - `http://example.com` and `https://example.com` are two sites with two hosts.
 - Names in the private part of the public suffix list count as sites of their own: `alice.github.io` and
-  `bob.github.io` get two hosts.
+  `bob.github.io` get two hosts, and SameSite cookies and `Sec-Fetch-Site` treat them as two sites.
 - An IP address or a single-label host name is its own site.
 
 Addresses inside pages still look like `/~/https/example.com/…`. When a page links or posts to another site, the
@@ -34,14 +34,17 @@ to ones they do. Single-origin mode stays the default because this mode has cost
 
 - **Site labels show up in DNS and TLS.** The browser looks up `<label>.proxy.example` and names it in the TLS
   handshake, so anyone who watches the network, such as the visitor's ISP or DNS resolver, sees one stable label per
-  site. The key behind the labels is not hidden from people allowed to browse: on a public instance anyone can learn it
-  and match labels to sites by trying likely ones, and on a private instance only signed-in users can. In single-origin
-  mode the site appears only in the path, inside TLS.
+  site. The key behind the labels is not hidden from the pages people browse: on a public instance any visitor and any
+  proxied page can learn it, and on a private instance every page a signed-in user opens gets it. Either way labels can
+  be matched to sites by trying likely ones. A signed-out visitor of a private instance learns neither the key nor any
+  site's host. In single-origin mode the site appears only in the path, inside TLS.
 - **The first visit to each site downloads the engine again.** Every host has its own service worker and cache, so the
   first visit to a site costs an extra round trip and about 700 KB of engine before compression.
 - **It needs a domain of its own.** Girici sets cookies for the whole domain, among them the session that lets site
   hosts use the relay on a private instance. Any other service at that name or under it would receive them. A
-  subdomain that serves only Girici, such as `girici.example.com`, works.
+  subdomain that serves only Girici, such as `girici.example.com`, works. A proxied page can also set cookies for the
+  registrable domain above it, `example.com` in that case, so when other services live under that domain, give Girici
+  a registrable domain of its own.
 
 ## Requirements
 
@@ -127,7 +130,7 @@ Then open `http://girici.localhost:3000`. With Docker, pass `-e GIRICI_SITE_DOMA
   cookies, so `github.io` is refused. Your own domain, or a name under it, is fine.
 - A port only when the address visitors open has one, as in `girici.localhost:3000` or `proxy.example:8443`. Leave
   off `:443` and `:80`. Browsers leave the default port out of the `Host` header and Girici compares `Host` with this
-  value exactly, so `proxy.example:443` would match no request at all.
+  value exactly, so `proxy.example:443` would match no request at all; startup refuses it.
 
 An empty value counts as unset. A value that breaks a rule stops startup with a message that names the variable.
 
@@ -136,6 +139,16 @@ when several replicas serve one domain, so that they all compute the same labels
 new database. `openssl rand -hex 32` makes one. Never change it: every site would move to a new host, and the data it
 kept in visitors' browsers would stay behind on the old one. Keep it private too, because it also signs the cookies
 that carry settings to the site hosts and the steps that clear site data.
+
+To add replicas to an instance that already runs subdomain mode without the variable, copy the secret its database
+keeps and set that value on every replica. Girici logs a warning at startup when `GIRICI_SITE_SECRET` differs from the
+stored one. With the compose file:
+
+```bash
+docker compose exec girici node -e 'const { DatabaseSync } = require("node:sqlite");
+console.log(new DatabaseSync("/data/girici.db", { readOnly: true })
+  .prepare("SELECT value FROM settings WHERE key = ?").get("site_secret").value)'
+```
 
 Every other setting works as in single-origin mode. `GIRICI_TRUST_PROXY` and the rate limits are unchanged, and one
 visitor's requests to all hosts count against one limit. With public access off, signing in on `proxy.example` covers
@@ -172,21 +185,39 @@ back to the site afterwards.
 - **A page can still send its own tab out of the proxy.** A page that writes its own `location` through a key built at
   run time navigates the tab to the real site, outside Girici. No browser setting stops a document from navigating
   itself.
-- **Navigations between sites lose their initiator.** The receiving site gets no `Referer`, and a POST carries
-  `Origin: null`, as browsers send under `no-referrer`. Embeds that insist on a referrer, such as maps with
-  referrer-restricted API keys or some video players, may refuse to load.
+- **Navigations between sites lose their initiator.** A navigation from another site's host is cross-site: the
+  receiving site gets no `Referer`, SameSite cookies follow the cross-site rules, and a POST carries `Origin: null`, as
+  browsers send under `no-referrer`. Embeds that insist on a referrer, such as maps with referrer-restricted API keys
+  or some video players, may refuse to load.
+- **A form post without a referrer counts as cross-site.** To keep a site's own forms working, Girici turns a page's
+  `no-referrer` policy (from the `Referrer-Policy` header, `<meta name="referrer">`, a `referrerpolicy` attribute or
+  `rel="noreferrer"` in the page's markup) into `same-origin`. The referrer then reaches only the page's own host, and
+  the real site may see a `Referer` for its own pages where the page asked for none. A policy a script sets later stays
+  as written. A plain load without a referrer, such as a typed address or a link from a page that hides its referrer,
+  counts as a direct visit, since the service worker cannot tell those apart.
 - **Some cross-site form posts lose their body or stop.** In Safari, a form that uploads files to another site arrives
   without its fields and files. In every browser, a `multipart/form-data` POST to a site never opened before in that
   browser stops at a page that asks to open the site once first.
+- **Form posts to another site are sent again as UTF-8.** Girici rebuilds such a form on the other host, reading and
+  writing its fields as UTF-8, so a page that posts in another encoding, such as Shift_JIS or windows-1252, sends its
+  non-ASCII values garbled.
+- **Some messages between sites arrive as copies.** A message whose sender names a host under its site, such as
+  `www.example.com` on `example.com`'s host, waits until the service worker confirms that host, and the page then
+  receives a copy whose `isTrusted` is false. Messages that arrive while one waits come the same way, to keep their
+  order.
 - **Safari installs an embedded site again per embedder.** Each site that embeds another gets its own worker install
   and cookie jar for it.
 - **Browser protections keyed to the site treat all Girici hosts as one.** Every host sits under one registrable
   domain, so features that browsers key to the site rather than the origin do not separate Girici sites: HTTP cache
   partitioning, the `window.name` reset on cross-site navigation, process-per-site and SameSite cookies. Girici sends
   `Origin-Agent-Cluster: ?1`, which asks Chromium to give each host its own agent cluster.
-- **Cookie flooding.** A hostile page can set many large cookies for the whole domain until requests fail with `431`
-  on every host, the UI's included. It cannot read or overwrite Girici's own cookies, and the same flood works in
-  single-origin mode. Clearing the cookies for `proxy.example` in the browser fixes it.
+- **Cookies for the whole domain.** A page can set cookies for `proxy.example`, which every host receives. It cannot
+  read Girici's own cookies. It can add cookies under their names, so Girici checks every value it receives, keeps only
+  values it signed, and merges settings to the more private choice: such a cookie can turn third-party blocking or
+  address sealing on, never off. What is left is flooding: a page can set enough cookies that requests fail with `431`
+  on every host, the UI's included, or that the browser drops Girici's own cookies to stay under its per-domain limit,
+  which signs the site hosts out and resets the settings and the list of visited sites until the UI writes them again.
+  The same flood works in single-origin mode. Clearing the cookies for `proxy.example` in the browser fixes it.
 - **The first visit to each site costs more.** An extra round trip and about 700 KB of engine before compression, and
   in Safari once more for each site that embeds it.
 - **Third-party cookies, when allowed, are partitioned per embedding site.** See
