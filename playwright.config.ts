@@ -29,6 +29,11 @@ export default defineConfig({
   projects: [
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
-    { name: "webkit", use: { ...devices["Desktop Safari"] } },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+      /** Linux WebKit sometimes never commits a navigation that switches browsing context groups (WebKit bug 327297). */
+      retries: process.env.CI ? 1 : 0,
+    },
   ],
 });
