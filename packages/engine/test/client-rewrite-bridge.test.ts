@@ -23,6 +23,14 @@ describe("createRewriteBridge", () => {
     expect(bridge.metaUrl("/~/https/site.test/a/b")).toBe("https://site.test/a/b");
   });
 
+  it("rewrites function bodies of every kind", () => {
+    const bridge = createRewriteBridge(ctx, frameTag, CLIENT);
+    expect(bridge.jsBody("return location.href")).toBe("return __g$.L(location).href");
+    expect(bridge.jsBody("yield location.href", "generator")).toBe("yield __g$.L(location).href");
+    expect(bridge.jsBody("await 0; return location.href", "async")).toBe("await 0; return __g$.L(location).href");
+    expect(bridge.jsBody("yield await location.href", "asyncGenerator")).toBe("yield await __g$.L(location).href");
+  });
+
   it("restores real urls in html the page reads back", () => {
     const bridge = createRewriteBridge(ctx, frameTag, CLIENT);
     expect(bridge.unhtml('<a href="/~/https/site.test/x">y</a>')).toBe('<a href="https://site.test/x">y</a>');

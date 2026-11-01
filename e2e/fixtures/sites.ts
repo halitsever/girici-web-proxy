@@ -860,9 +860,28 @@ const EXEC = page(
   out.nested = dyn;
   out.toString = /\\[native code\\]/.test(Function.prototype.toString.call(setTimeout));
   out.evalDirect = eval("location.href");
+  const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
+  const generator = new GeneratorFunction("yield 1; return location.href")();
+  generator.next();
+  out.generator = generator.next().value;
+  const later = Promise.all([
+    new AsyncFunction("await 0; return location.href")(),
+    (async () => {
+      const steps = new AsyncGeneratorFunction("yield 1; await 0; return location.href")();
+      await steps.next();
+      return (await steps.next()).value;
+    })(),
+  ]).then((values) => {
+    out.async = values[0];
+    out.asyncGenerator = values[1];
+  });
   setTimeout(() => {
     out.timer = window.__t;
-    document.getElementById("results").textContent = JSON.stringify(out);
+    later.then(() => {
+      document.getElementById("results").textContent = JSON.stringify(out);
+    });
   }, 50);
 </script>`,
 );
@@ -1574,7 +1593,9 @@ const XS_COOKIE_SPY = page(
       return stringify(found);
     };
   })();
-  const victim = "https://site-b.test/xs-cookie-victim" + location.search;
+  // "host" picks the victim's site: another site, or another origin of this one.
+  const victimHost = new URLSearchParams(location.search).get("host") || "site-b.test";
+  const victim = "https://" + victimHost + "/xs-cookie-victim" + location.search;
   document.getElementById("open").onclick = () => {
     open(victim);
   };
@@ -2837,6 +2858,9 @@ const ROUTES: Record<string, Record<string, Route>> = {
     "/cookie/whoami": whoami,
     "/storage": html(STORAGE),
     "/sealed/cookie-echo": cookieEcho,
+    "/xs-cookie-victim": html(XS_COOKIE_VICTIM),
+    "/cookie/xs-sync": xsSync,
+    "/cookie/echo": cookieEcho,
   },
   "cdn.site-a.test": { "/b.png": png, "/style.css": css("#external { background-image: url(/b.png); }") },
   "site-b.test": {

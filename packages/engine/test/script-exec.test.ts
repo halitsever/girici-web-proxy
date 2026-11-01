@@ -28,6 +28,22 @@ describe("installScriptExec", () => {
     expect(bodies).toEqual(["return 0", "return 1", "return 2"]);
   });
 
+  it("tells the rewriter which kind of body each constructor compiles", () => {
+    const { realm, run } = childRealm();
+    const kinds: unknown[] = [];
+    installScriptExec(
+      realm,
+      (code) => code,
+      (code, kind) => {
+        kinds.push(kind);
+        return code;
+      },
+    );
+    run(`Function("return 1")`);
+    SAMPLES.forEach((sample) => run(`${sample}.constructor("return 1")`));
+    expect(kinds).toEqual(["handler", "generator", "async", "asyncGenerator"]);
+  });
+
   it("leaves the constructors of the realm that adopts the window alone", () => {
     const constructors = () =>
       SAMPLES.map(

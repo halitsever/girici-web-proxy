@@ -176,6 +176,22 @@ describe("rewriteJs", () => {
     expect(rewriteJs("return location.href", { kind: "handler" })).toBe("return __g$.L(location).href");
   });
 
+  it("parses generator and async bodies as the bodies of their own kind", () => {
+    expect(rewriteJs("yield 1; return location.href", { kind: "generator" })).toBe(
+      "yield 1; return __g$.L(location).href",
+    );
+    expect(rewriteJs("await 0; return location.href", { kind: "async" })).toBe("await 0; return __g$.L(location).href");
+    expect(rewriteJs("yield await 0; location.assign(x)", { kind: "asyncGenerator" })).toBe(
+      "yield await 0; __g$.L(location).assign(x)",
+    );
+    // A body ending in a line comment still ends where the native puts it.
+    expect(rewriteJs("yield location.href // done", { kind: "generator" })).toBe("yield __g$.L(location).href // done");
+    // Only the body is parsed: a body that would close the wrapper early is left as the native would refuse it.
+    expect(rewriteJs("}); location.href; (function* () {", { kind: "generator" })).toBe(
+      "}); location.href; (function* () {",
+    );
+  });
+
   it("returns the source untouched when it cannot or need not rewrite", () => {
     const plain = "const a = 1;";
     expect(rewriteJs(plain)).toBe(plain);
