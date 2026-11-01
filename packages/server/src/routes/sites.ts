@@ -17,7 +17,7 @@ import {
   type SitePlanAnswer,
 } from "@girici/engine/shared";
 import express, { Router, type NextFunction, type Request, type Response } from "express";
-import { addSiteSession, isSessionCookie, siteSessionAdmin } from "../auth/gate.ts";
+import { addSiteSession, isAdminCookie, siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { isOwnHost } from "../http/origin.ts";
 import { clearPage, openPlan, PLAN_TTL_MS, signPlan, type ClearPlan } from "../sites/clear.ts";
@@ -59,7 +59,7 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
       return;
     }
     // Signed-out visitors of a private instance learn no site hosts from here.
-    if (!store.publicAccess() && !isSessionCookie(store, req.headers.cookie)) {
+    if (!store.publicAccess() && !isAdminCookie(store, req.headers.cookie)) {
       res.redirect(302, `${LOGIN_PATH}?next=${encodeURIComponent(target.href)}`);
       return;
     }

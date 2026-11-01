@@ -1,6 +1,8 @@
 import { labelSiteOf } from "@girici/engine/label-site";
 import { decodeUrl, escapeAttribute, siteLabel, type SiteDomain } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
+import { siteSessionAdmin } from "../auth/gate.ts";
+import type { AuthStore } from "../auth/store.ts";
 import { requestHost, siteHostFor } from "../sites/hosts.ts";
 import type { SiteSetup } from "../sites/keys.ts";
 
@@ -51,12 +53,14 @@ export function replayPage(fields: Array<[string, string]>, enctype: string): st
 }
 
 /** Proxy URLs only reach the server when no service worker controls the tab, so this page installs one. */
-export function bootstrapRouter(setup?: SiteSetup): Router {
+export function bootstrapRouter(setup?: SiteSetup, store?: AuthStore): Router {
   const router = Router();
   const replayBody = express.raw({ type: () => true, limit: REPLAY_LIMIT });
   router.use("/~", (req, res, next) => {
     res.setHeader("Cache-Control", "no-store");
-    if (setup && moveToSiteHost(req, res, setup)) return;
+    // The move names the target's host, which a private instance tells only those the gate lets browse.
+    const mayMove = !!store && (store.publicAccess() || siteSessionAdmin(store, req.headers.cookie) !== null);
+    if (setup && mayMove && moveToSiteHost(req, res, setup)) return;
     if ((req.method === "GET" || req.method === "HEAD") && isDocumentRequest(req, setup)) {
       res.setHeader("Content-Security-Policy", setup ? bootCsp(setup.domain) : BOOT_CSP);
       // A popup that lands here before its service worker runs keeps its opener.

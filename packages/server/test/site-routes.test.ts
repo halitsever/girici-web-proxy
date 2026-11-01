@@ -35,12 +35,12 @@ describe("the root in subdomain mode", () => {
     expect(res.headers.location).toBe(`/_g/login?next=${encodeURIComponent("https://www.site-a.test/x?y=1")}`);
   });
 
-  it("lets a site session through the root redirect on a private instance", async () => {
+  it("asks for the admin session on the root redirect of a private instance", async () => {
     store.setPublicAccess(false);
     const token = createSiteSessionToken(store.admin()!.id, store.sessionSecret());
     for (const cookie of [`girici-site=${token}`, `__Secure-girici-site=${token}`]) {
       const res = await send("/~/https/www.site-a.test/x", { host: "proxy.test", headers: { cookie } });
-      expect(res.headers.location, cookie).toBe(`//${siteA}/~/https/www.site-a.test/x`);
+      expect(res.headers.location, cookie).toMatch(/^\/_g\/login\?next=/);
     }
   });
 
@@ -94,6 +94,18 @@ describe("site hosts", () => {
     const res = await send("/~/https/site-a.test/p", { host: siteB, headers: { "sec-fetch-dest": "document" } });
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe(`//${siteA}/~/https/site-a.test/p`);
+  });
+
+  it("moves nothing for a private instance's signed-out visitor, whose worker sends them to sign in", async () => {
+    store.setPublicAccess(false);
+    const document = { "sec-fetch-dest": "document" };
+    const res = await send("/~/https/site-a.test/p", { host: siteB, headers: document });
+    expect(res.status).toBe(200);
+    expect(res.headers.location).toBeUndefined();
+    expect(await res.text()).toContain("/_g/boot.js");
+    const site = `girici-site=${createSiteSessionToken(store.admin()!.id, store.sessionSecret())}`;
+    const signedIn = await send("/~/https/site-a.test/p", { host: siteB, headers: { ...document, cookie: site } });
+    expect(signedIn.headers.location).toBe(`//${siteA}/~/https/site-a.test/p`);
   });
 
   it("keeps a form post's method when it moves to the right host", async () => {

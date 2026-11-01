@@ -96,7 +96,7 @@ export function createApp({
   app.use(root(uiRouter(webDistDir, authStore)));
   if (sites) app.use(onHosts(["site"], siteHostRouter(sites, authStore)));
   app.use(site(engineRouter(engineBundlesDir)));
-  app.use(site(bootstrapRouter(sites)));
+  app.use(site(bootstrapRouter(sites, authStore)));
   app.use(root(legacyRouter()));
   // Express's own 404 page swaps in a CSP without frame-ancestors.
   app.use((_req, res) => {
