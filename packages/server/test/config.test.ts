@@ -159,6 +159,15 @@ describe("loadConfig", () => {
     );
   });
 
+  it("refuses a default port, which browsers leave out of Host", () => {
+    for (const value of ["proxy.example:443", "proxy.example:80"]) {
+      expect(() => loadConfig({ GIRICI_SITE_DOMAIN: value }), value).toThrow(
+        `GIRICI_SITE_DOMAIN must leave off the default port: browsers never send :443 or :80 in Host, so use "proxy.example", got "${value}"`,
+      );
+    }
+    expect(loadConfig({ GIRICI_SITE_DOMAIN: "proxy.example:8443" }).siteDomain?.value).toBe("proxy.example:8443");
+  });
+
   it("wants a site secret of 32 or more characters", () => {
     expect(() => loadConfig({ GIRICI_SITE_SECRET: "short" })).toThrow(/GIRICI_SITE_SECRET.*32/);
     expect(() => loadConfig({ GIRICI_SITE_SECRET: "short" })).not.toThrow(/short"/);

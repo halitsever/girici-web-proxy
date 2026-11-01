@@ -149,6 +149,12 @@ export class AuthStore {
     return this.#setting("site_secret") as string;
   }
 
+  /** A GIRICI_SITE_SECRET set after the database made its own moves every site to a new host. */
+  siteSecretDiffers(): boolean {
+    const stored = this.#setting("site_secret");
+    return !!this.#siteSecretOverride && !!stored && stored !== this.#siteSecretOverride;
+  }
+
   publicAccess(): boolean {
     return this.#setting("public_access") === "1";
   }

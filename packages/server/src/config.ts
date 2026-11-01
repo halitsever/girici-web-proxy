@@ -78,6 +78,13 @@ function readSiteDomain(raw: string | undefined): SiteDomain | undefined {
       `GIRICI_SITE_DOMAIN must be a domain you control, not a public suffix such as github.io, got "${raw}"`,
     );
   }
+  // Host is compared as written, so a default port here would match no request at all.
+  if (domain.port === "443" || domain.port === "80") {
+    throw new Error(
+      `GIRICI_SITE_DOMAIN must leave off the default port: browsers never send :443 or :80 in Host, ` +
+        `so use "${domain.host}", got "${raw}"`,
+    );
+  }
   return domain;
 }
 

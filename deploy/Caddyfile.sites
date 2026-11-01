@@ -5,6 +5,6 @@
 		dns cloudflare {env.CLOUDFLARE_API_TOKEN}
 	}
 	encode zstd gzip
-	header Strict-Transport-Security "max-age=31536000"
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	reverse_proxy girici:3000
 }

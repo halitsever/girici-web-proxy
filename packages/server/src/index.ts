@@ -62,6 +62,14 @@ const sites: SiteSetup | undefined = config.siteDomain
   ? { domain: config.siteDomain, keys: deriveSiteKeys(authStore.siteSecret()) }
   : undefined;
 if (sites) logger.info(`Subdomain mode: sites open on *.${sites.domain.value}`);
+if (sites && authStore.siteSecretDiffers()) {
+  // Its own warn-level logger, as above: the change strands every visitor's site data.
+  createLogger("warn").warn(
+    "GIRICI_SITE_SECRET differs from the site secret in the database, so every site opens on a new host and data " +
+      "visitors' browsers kept for the old hosts stays behind. To keep the old hosts, set GIRICI_SITE_SECRET to the " +
+      "stored value (see the subdomain mode guide).",
+  );
+}
 
 // One trust function and one bucket serve both relays, so a client cannot double its budget over WebSockets.
 const trust = compileTrust(config.trustProxy);

@@ -117,6 +117,15 @@ describe("AuthStore sessions", () => {
     expect(fixed.siteSecret()).toBe("e".repeat(32));
   });
 
+  it("tells when the environment's site secret differs from the one the database kept", () => {
+    const db = openDb(":memory:");
+    expect(new AuthStore(db, undefined, { siteSecret: "e".repeat(32) }).siteSecretDiffers()).toBe(false);
+    const stored = new AuthStore(db).siteSecret();
+    expect(new AuthStore(db).siteSecretDiffers()).toBe(false);
+    expect(new AuthStore(db, undefined, { siteSecret: stored }).siteSecretDiffers()).toBe(false);
+    expect(new AuthStore(db, undefined, { siteSecret: "e".repeat(32) }).siteSecretDiffers()).toBe(true);
+  });
+
   it("checks an admin's current password", () => {
     const s = store();
     const info = s.createAdmin(admin);
