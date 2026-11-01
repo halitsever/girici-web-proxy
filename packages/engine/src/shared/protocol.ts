@@ -18,6 +18,8 @@ export const HEADER = {
 /** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
 export const PROTOCOL_VERSION = 2;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
+/** The most script cookie writes one RPC carries; the worker refuses a longer batch. */
+export const COOKIE_BATCH_LIMIT = 50;
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
 /** A page announces each worker it starts here; the worker names the same nonce when it loads the runtime. */

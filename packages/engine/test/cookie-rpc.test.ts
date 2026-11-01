@@ -72,6 +72,46 @@ describe("CookieRpc", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(15);
   });
 
+  it("applies a batch in order", async () => {
+    const cookies = await service();
+    const rpc = new CookieRpc(cookies, { maxWait: 1000 });
+    const waiting = rpc.waitFor("client-1", 2);
+    const res = await rpc.handle(
+      post({ v: PROTOCOL_VERSION, seq: 2, cookies: ["a=1; path=/", "a=2; path=/"] }),
+      "client-1",
+      page,
+    );
+    expect(res.status).toBe(200);
+    await waiting;
+    expect(
+      await cookies.header(page, { initiator: page, credentials: "include", topLevel: false, method: "GET" }),
+    ).toBe("a=2");
+    expect(((await res.json()) as { cookies: Array<{ value: string }> }).cookies.map((c) => c.value)).toEqual(["2"]);
+  });
+
+  it("still takes a single cookie", async () => {
+    const cookies = await service();
+    const res = await new CookieRpc(cookies).handle(post({ v: PROTOCOL_VERSION, seq: 1, cookie: "a=1" }), "c", page);
+    expect(res.status).toBe(200);
+    expect(
+      await cookies.header(page, { initiator: page, credentials: "include", topLevel: false, method: "GET" }),
+    ).toBe("a=1");
+  });
+
+  it("refuses a batch that is empty, too long or not all strings", async () => {
+    const cookies = await service();
+    const rpc = new CookieRpc(cookies);
+    const status = async (body: Record<string, unknown>) =>
+      (await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 1, ...body }), "c", page)).status;
+    expect(await status({ cookies: [] })).toBe(400);
+    expect(await status({ cookies: Array.from({ length: 51 }, (_, i) => `n${i}=1`) })).toBe(400);
+    expect(await status({ cookies: ["a=1", 5] })).toBe(400);
+    expect(await status({ cookies: "a=1" })).toBe(400);
+    expect(await status({ cookies: ["a=1"], cookie: "b=1" })).toBe(400);
+    expect(await cookies.snapshot(page)).toEqual([]);
+    expect(await status({ cookies: Array.from({ length: 50 }, (_, i) => `n${i}=1`) })).toBe(200);
+  });
+
   it("ignores a blocked script write but still releases requests waiting on it", async () => {
     const cookies = await service();
     const rpc = new CookieRpc(cookies);
