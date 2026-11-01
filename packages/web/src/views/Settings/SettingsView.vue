@@ -1,21 +1,43 @@
 <script setup lang="ts">
-import type { SiteSummary } from "@girici/engine/shared";
+import { captureSiteDataEnv, SITES_CLEARED_PARAM, type SiteListAnswer, type SiteSummary } from "@girici/engine/shared";
 import { computed, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { brand, DEFAULT_BRAND_NAME, readLogoFile, saveBrand } from "@/lib/brand";
-import { getAdminSettings, getAuthState, saveBlockedHosts, setPublicAccess, setSealAddresses } from "@/lib/auth";
+import {
+  getAdminSettings,
+  getAuthState,
+  saveBlockedHosts,
+  setPublicAccess,
+  setSealAddresses,
+  type AuthState,
+} from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
-import { clearSiteData, listSiteData } from "@/lib/site-data";
+import {
+  clearedNote,
+  clearLegacyRootData,
+  clearSiteData,
+  clearSites,
+  hasLegacyRootData,
+  listSiteData,
+  listVisitedSites,
+  siteName,
+} from "@/lib/site-data";
 import { loadSettings, saveSettings } from "@/lib/settings";
+import { isSiteMode, syncSettings } from "@/lib/sites";
 import { SEARCH_ENGINES, toProxyPath, type SearchEngine } from "@/lib/target";
 
+const route = useRoute();
+const router = useRouter();
 const engines = Object.keys(SEARCH_ENGINES) as SearchEngine[];
 const settings = ref(loadSettings());
 const history = ref<HistoryEntry[]>([]);
+const authState = ref<AuthState | null>(null);
+const siteMode = computed(() => isSiteMode(authState.value));
 const authed = ref(false);
 const publicAccess = ref(false);
 const publicError = ref("");
@@ -42,19 +64,29 @@ const sites = ref<SiteSummary[]>([]);
 const sitesLoaded = ref(false);
 const siteBusy = ref(false);
 const siteError = ref("");
+// Subdomain mode: the sites the root remembers, data from before it, and the count the clearing chain returns with.
+const visited = ref<SiteListAnswer["sites"]>([]);
+const legacyData = ref(false);
+const clearedStatus = ref(clearedNote(route.query[SITES_CLEARED_PARAM]));
 const siteSupport = serviceWorkerSupport({
   isSecureContext: window.isSecureContext,
   hasServiceWorker: "serviceWorker" in navigator,
 });
 const siteNote = computed(() => {
   if (siteSupport !== "ok") return "Site data needs HTTPS (or localhost).";
-  return sitesLoaded.value && !sites.value.length ? "No site data yet." : "";
+  if (!sitesLoaded.value) return "";
+  if (siteMode.value) return visited.value.length || legacyData.value ? "" : "No site data yet.";
+  return sites.value.length ? "" : "No site data yet.";
 });
 
 watch(settings, (value) => saveSettings(value), { deep: true });
+// Site hosts also read the toolbar and search engine, from the cookie the root keeps for them.
 watch(
-  () => [settings.value.blockCookies, settings.value.sealAddresses],
-  () => void syncEnginePrefs(settings.value),
+  () =>
+    siteMode.value
+      ? [settings.value.blockCookies, settings.value.sealAddresses, settings.value.toolbar, settings.value.engine]
+      : [settings.value.blockCookies, settings.value.sealAddresses],
+  () => void syncSettings(settings.value, authState.value),
 );
 
 async function onToggleInstanceSeal(on: boolean) {
@@ -165,7 +197,15 @@ function siteDetail(entry: SiteSummary): string {
 async function loadSites() {
   if (siteSupport !== "ok") return;
   try {
-    sites.value = await listSiteData();
+    // A root worker registered here would only retire again, so subdomain mode lists without one.
+    if (siteMode.value) {
+      [visited.value, legacyData.value] = await Promise.all([
+        listVisitedSites(),
+        hasLegacyRootData(captureSiteDataEnv(window)),
+      ]);
+    } else {
+      sites.value = await listSiteData();
+    }
     siteError.value = "";
   } catch (e) {
     siteError.value = e instanceof Error ? e.message : "Could not load site data.";
@@ -185,6 +225,33 @@ async function onClearSite(site: string | null) {
     siteBusy.value = false;
   }
   await loadSites();
+}
+
+/** The page leaves for the clearing chain, so it stays busy unless the chain could not start. */
+async function onClearSites(target: string[] | "all") {
+  siteBusy.value = true;
+  siteError.value = "";
+  clearedStatus.value = "";
+  try {
+    await clearSites(target);
+  } catch (e) {
+    siteError.value = e instanceof Error ? e.message : "Could not clear site data.";
+    siteBusy.value = false;
+  }
+}
+
+async function onRemoveLegacy() {
+  siteBusy.value = true;
+  siteError.value = "";
+  try {
+    const env = captureSiteDataEnv(window);
+    await clearLegacyRootData(env);
+    legacyData.value = await hasLegacyRootData(env);
+  } catch (e) {
+    siteError.value = e instanceof Error ? e.message : "Could not remove the old site data.";
+  } finally {
+    siteBusy.value = false;
+  }
 }
 
 async function openEntry(name: string) {
@@ -209,8 +276,15 @@ function onClearHistory() {
 onMounted(async () => {
   settings.value = loadSettings();
   history.value = loadHistory();
+  // The router guard read the state already, so the mode comes from its cache before the site list loads.
+  authState.value = await getAuthState().catch(() => null);
   void loadSites();
+  // A reload would otherwise report the same clearing again.
+  if (route.query[SITES_CLEARED_PARAM] !== undefined) {
+    void router.replace({ query: { ...route.query, [SITES_CLEARED_PARAM]: undefined } });
+  }
   const state = await getAuthState(true);
+  authState.value = state;
   authed.value = state.authed;
   publicAccess.value = state.public;
   instanceSeal.value = state.sealAddresses;
@@ -411,7 +485,61 @@ onMounted(async () => {
       </div>
     </div>
 
-    <section class="overflow-hidden rounded-xl border border-border bg-gi-panel">
+    <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
+      <div class="flex items-center justify-between px-5 py-4">
+        <div>
+          <p class="text-[15px] font-semibold">Site data</p>
+          <p class="mt-1 text-[13px] text-muted-foreground">
+            Cookies and storage of the sites you opened through Girici, on this device. Each site keeps its own.
+          </p>
+        </div>
+        <button
+          type="button"
+          class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+          :disabled="!visited.length || siteBusy"
+          @click="onClearSites('all')"
+        >
+          Clear all
+        </button>
+      </div>
+      <p v-if="clearedStatus" role="status" class="border-t border-border px-5 py-3 text-[13px] text-gi-success">
+        {{ clearedStatus }}
+      </p>
+      <div v-for="entry in visited" :key="entry.site" class="flex items-center gap-3 border-t border-border px-5 py-3">
+        <span
+          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
+        >
+          {{ siteName(entry.site).charAt(0).toUpperCase() }}
+        </span>
+        <p class="min-w-0 flex-1 truncate text-[14px]">{{ siteName(entry.site) }}</p>
+        <button
+          type="button"
+          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          :aria-label="`Clear ${siteName(entry.site)}`"
+          :disabled="siteBusy"
+          @click="onClearSites([entry.site])"
+        >
+          Clear
+        </button>
+      </div>
+      <div v-if="legacyData" class="flex items-center justify-between gap-4 border-t border-border px-5 py-3">
+        <p class="text-[13px] text-muted-foreground">
+          Sites you opened before each site got its own address left data here. No site can reach it any more.
+        </p>
+        <button
+          type="button"
+          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+          :disabled="siteBusy"
+          @click="onRemoveLegacy"
+        >
+          Remove data from before subdomain mode
+        </button>
+      </div>
+      <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">{{ siteNote }}</p>
+      <p v-if="siteError" class="border-t border-border px-5 py-3 text-[13px] text-gi-danger">{{ siteError }}</p>
+    </section>
+
+    <section v-else class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">
         <div>
           <p class="text-[15px] font-semibold">Site data</p>
