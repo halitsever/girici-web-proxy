@@ -76,6 +76,34 @@ describe("installWebSocket", () => {
     expect(inner.protocols).toEqual(["girici.v1"]);
   });
 
+  it("reads its address as the browser does: relative to the base, http as ws, no other scheme or fragment", async () => {
+    const win = makeWin();
+    (win as unknown as { DOMException: unknown }).DOMException = DOMException;
+    installWebSocket(win, { ...ctx, realBase: () => new URL("https://discord.com/app/") } as UrlContext);
+    expect(new win.WebSocket("socket?x=1").url).toBe("wss://discord.com/app/socket?x=1");
+    expect(new win.WebSocket("https://gateway.discord.gg/").url).toBe("wss://gateway.discord.gg/");
+    expect(new win.WebSocket(new URL("http://gateway.discord.gg/a")).url).toBe("ws://gateway.discord.gg/a");
+    await flush();
+    MockWs.instances.length = 0;
+    for (const bad of [
+      "ftp://gateway.discord.gg/",
+      "wss://gateway.discord.gg/#x",
+      "wss://gateway.discord.gg/#",
+      "http://[",
+    ]) {
+      let thrown: unknown = null;
+      try {
+        new win.WebSocket(bad);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, bad).toBeInstanceOf(DOMException);
+      expect((thrown as DOMException).name, bad).toBe("SyntaxError");
+    }
+    await flush();
+    expect(MockWs.instances).toHaveLength(0);
+  });
+
   it("installs on a worker scope's globals, without a window", async () => {
     const realm: WebSocketRealm = {
       WebSocket: MockWs as unknown as typeof WebSocket,

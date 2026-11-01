@@ -2,11 +2,14 @@ import {
   append,
   apply,
   hrefOf,
+  includes,
   isArray,
   mapOf,
   newUrl,
   ownValue,
   parseJson,
+  parseUrl,
+  protocolOf,
   quoteJson,
   sliceOf,
   startsWith,
@@ -16,6 +19,8 @@ import { WS_PREP_PATH } from "../shared/protocol.ts";
 import type { UrlContext } from "./url-context.ts";
 
 const SUBPROTOCOL = "girici.v1";
+/** Taken at load, for a realm that has no DOMException to throw. */
+const NativeSyntaxError = SyntaxError;
 
 /** Reflect the upstream close code the browser refuses to send in close(). */
 function mapIncomingClose(code: number): number {
@@ -52,13 +57,37 @@ export interface WebSocketRealm {
   MessageEvent: typeof MessageEvent;
   CloseEvent: typeof CloseEvent;
   Blob: typeof Blob;
+  DOMException?: typeof DOMException;
 }
 
 /** Route page and worker WebSockets through the server relay while keeping the browser API intact. */
-export function installWebSocket(realm: WebSocketRealm, ctx: Pick<UrlContext, "origin" | "realUrl">): void {
+export function installWebSocket(
+  realm: WebSocketRealm,
+  ctx: Pick<UrlContext, "origin" | "realUrl"> & Partial<Pick<UrlContext, "realBase">>,
+): void {
   const Native = realm.WebSocket;
   const nativeFetch = realm.fetch;
+  const Exception = realm.DOMException;
   const relayUrl = (startsWith(ctx.origin, "http") ? `ws${sliceOf(ctx.origin, 4)}` : ctx.origin) + "/_g/ws";
+
+  const syntaxError = (message: string): Error =>
+    Exception ? new Exception(message, "SyntaxError") : new NativeSyntaxError(message);
+  /** As the browser reads a socket address: against the base, http(s) as ws(s), and no other scheme or fragment. */
+  const socketUrl = (raw: string): URL => {
+    const parsed = parseUrl(raw, ctx.realBase ? ctx.realBase() : ctx.realUrl());
+    if (!parsed) throw syntaxError(`The URL '${raw}' is invalid.`);
+    const href = hrefOf(parsed);
+    const protocol = protocolOf(parsed);
+    let url = parsed;
+    if (protocol === "http:") url = newUrl(`ws${sliceOf(href, 4)}`);
+    else if (protocol === "https:") url = newUrl(`wss${sliceOf(href, 5)}`);
+    else if (protocol !== "ws:" && protocol !== "wss:")
+      throw syntaxError(
+        `The URL's scheme must be either 'http', 'https', 'ws', or 'wss'. '${protocol}' is not allowed.`,
+      );
+    if (includes(href, "#")) throw syntaxError("Fragment identifiers are not allowed in WebSocket URLs.");
+    return url;
+  };
 
   class GiriciWebSocket extends realm.EventTarget {
     static readonly CONNECTING = 0;
@@ -84,8 +113,8 @@ export function installWebSocket(realm: WebSocketRealm, ctx: Pick<UrlContext, "o
     #bufferedBeforeOpen = 0;
 
     constructor(url: string | URL, protocols?: string | string[]) {
+      const real = socketUrl(toText(url));
       super();
-      const real = newUrl(toText(url), ctx.realUrl());
       this.url = hrefOf(real);
       void this.#connect(real, protocolList(protocols));
     }
