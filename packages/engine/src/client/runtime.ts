@@ -171,6 +171,7 @@ export function install(
       const inherit = { __proto__: null, origin: ctx.origin, base: hrefOf(base) };
       return clientTag(clientUrl, { __proto__: null, ...child, inherit } as ClientConfig);
     },
+    clientUrl,
     blobs,
   );
   const partition = () => {

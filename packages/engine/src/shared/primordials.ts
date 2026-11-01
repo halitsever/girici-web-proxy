@@ -29,6 +29,8 @@ const nativeDateParse = Date.parse;
 const nativeAtob = atob;
 const nativeThen = Promise.prototype.then;
 const objectCreate = Object.create;
+const ownKeys = Reflect.ownKeys;
+const isEnumerable = Object.prototype.propertyIsEnumerable;
 const NativeJson = JSON;
 const jsonStringify = JSON.stringify;
 const jsonParse = JSON.parse;
@@ -135,7 +137,7 @@ export function strictUtf8(bytes: Uint8Array): string {
   return apply(nativeDecode, strictUtf8Decoder, [bytes]);
 }
 
-/** Promise.prototype.then of this realm, so a page's replacement never gets the callbacks or the promise. */
+/** Captured then; it still reads `constructor` and @@species on the promise, so pass only the window's own promises. */
 export function promiseThen<T, U>(
   promise: PromiseLike<T>,
   onFulfilled: (value: T) => U | PromiseLike<U>,
@@ -147,6 +149,28 @@ export function promiseThen<T, U>(
 /** Object.create(proto), for objects that belong to another realm's prototypes. */
 export function createObject<T extends object>(proto: object | null): T {
   return objectCreate(proto) as T;
+}
+
+/** A data property made as an object literal makes it, past any setter on the target's prototypes. */
+export function defineData(target: object, key: PropertyKey, value: unknown): void {
+  defineProperty(target, key, {
+    __proto__: null,
+    value,
+    writable: true,
+    enumerable: true,
+    configurable: true,
+  } as PropertyDescriptor);
+}
+
+/** `{ ...source }` into `target`: own enumerable keys, read in order, with natives taken at load. */
+export function assignOwn<T extends object>(target: T, source: unknown): T {
+  if ((typeof source !== "object" && typeof source !== "function") || source === null) return target;
+  const keys = ownKeys(source);
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index] as PropertyKey;
+    if (apply(isEnumerable, source, [key])) defineData(target, key, (source as Record<PropertyKey, unknown>)[key]);
+  }
+  return target;
 }
 
 export function exec(pattern: RegExp, text: string): RegExpExecArray | null {

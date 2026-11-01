@@ -11,13 +11,15 @@ const toText = String;
 // A frame's requests pass through these in the realm of the page that made the frame.
 const weakHas = WeakSet.prototype.has;
 const weakAdd = WeakSet.prototype.add;
+// Install runs inside the page call that adopts a frame.
+const ownDescriptor = Object.getOwnPropertyDescriptor;
 
 /** Requests go out on proxy URLs, while the page keeps reading the real ones back. */
 export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridge): void {
   const nativeFetch = win.fetch;
   const Request = win.Request;
   // The native getter, taken before the masking below wraps it, reads the address the request will really use.
-  const requestUrl = Object.getOwnPropertyDescriptor(Request.prototype, "url")?.get as (this: Request) => string;
+  const requestUrl = ownDescriptor(Request.prototype, "url")?.get as (this: Request) => string;
   win.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
     const seq = cookies.currentSeq();
     let request: RequestInfo = proxiedInput(input);
@@ -83,7 +85,7 @@ export function installNetwork(win: Realm, ctx: UrlContext, cookies: CookieBridg
 }
 
 function wrapGetter(proto: object, name: string, read: (value: string) => string): void {
-  const descriptor = Object.getOwnPropertyDescriptor(proto, name);
+  const descriptor = ownDescriptor(proto, name);
   const get = descriptor?.get;
   if (!get) return;
   define(proto, name, {

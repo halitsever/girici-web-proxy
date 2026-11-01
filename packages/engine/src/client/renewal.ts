@@ -9,6 +9,9 @@ export interface EngineScript {
 }
 
 const CLIENT_FILE = /^\/_g\/client\.[A-Za-z0-9]+\.js$/;
+// Taken at load: steps run on renewals, inside another site's page calls.
+const warn = console.warn;
+const nativeConsole = console;
 
 /** Only the engine's own file on our origin may renew a window: every way a page inserts a script rewrites its src. */
 export function engineScriptConfig(script: EngineScript | null, origin: string): ClientConfig | null {
@@ -113,7 +116,7 @@ export class DocumentSteps {
       step(config);
     } catch (error) {
       // One browser difference should cost one step, not the whole document.
-      console.warn("Girici:", name, error);
+      apply(warn, nativeConsole, ["Girici:", name, error]);
     }
   }
 }

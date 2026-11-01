@@ -28,6 +28,7 @@ const LINK_EVENTS = ["click", "auxclick", "contextmenu", "dragstart"];
 /** A context menu or drag reads the link after these end, so its blob swap lasts until the next interaction. */
 const LATER_EVENTS = ["contextmenu", "dragstart"];
 const INTERACTIONS = ["pointerdown", "keydown", "dragend"];
+const FORM_OVERRIDES = ["formaction", "formmethod", "formenctype", "formtarget"];
 
 // Taken at load: these hooks run on page calls, after page code may have replaced them.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
@@ -218,7 +219,7 @@ export function installNavigation(
       if (!writes || read(preventedOf, event, "defaultPrevented") || kindOf(target) !== "form") return;
       const submitter = read(submitterOf, event, "submitter") as HTMLElement | null;
       const formTarget = attributeOf(target, "target");
-      if ((formTarget && formTarget !== "_self") || overridesForm(submitter)) return;
+      if ((formTarget && formTarget !== "_self") || overridesForm(submitter, hasAttribute)) return;
       if (preventDefault) apply(preventDefault, event, []);
       else event.preventDefault();
       void promiseThen(writes, () => {
@@ -286,11 +287,13 @@ function addressOf(url: string, ctx: UrlContext): string {
 }
 
 /** A submitter that redirects the form elsewhere is left to the browser rather than replayed without its overrides. */
-function overridesForm(submitter: HTMLElement | null): boolean {
-  return (
-    !!submitter &&
-    ["formaction", "formmethod", "formenctype", "formtarget"].some((name) => submitter.hasAttribute(name))
-  );
+function overridesForm(submitter: HTMLElement | null, hasAttribute: Element["hasAttribute"]): boolean {
+  if (!submitter) return false;
+  // Indexed, with the window's own hasAttribute: this runs on the page's submits.
+  for (let index = 0; index < FORM_OVERRIDES.length; index++) {
+    if (apply(hasAttribute, submitter, [FORM_OVERRIDES[index]])) return true;
+  }
+  return false;
 }
 
 /** form.submit() leaves out the clicked button, so its name and value travel in a hidden field instead. */
