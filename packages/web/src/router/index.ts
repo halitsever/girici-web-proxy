@@ -1,3 +1,4 @@
+import { CHALLENGE_PATH } from "@girici/engine/shared";
 import { createRouter, createWebHistory } from "vue-router";
 import { getAuthState } from "@/lib/auth";
 
@@ -25,6 +26,12 @@ const router = createRouter({
       path: LOGIN_PATH,
       name: "login",
       component: () => import("@/views/Login/LoginView.vue"),
+      meta: { chromeless: true },
+    },
+    {
+      path: CHALLENGE_PATH,
+      name: "challenge",
+      component: () => import("@/views/Challenge/ChallengeView.vue"),
       meta: { chromeless: true },
     },
     { path: "/:pathMatch(.*)*", redirect: "/" },
