@@ -2,15 +2,14 @@ import { PREFS_MESSAGE, PROTOCOL_VERSION } from "@girici/engine/shared";
 import type { Settings } from "./settings";
 
 const ANSWER_MS = 1000;
-/** Pages a shared link cannot send onward, so loading one shows that the visitor has seen Girici. */
-const SEEN_PAGES = new Set(["/", "/settings", "/account"]);
 
 /** The service worker cannot read localStorage, so the UI tells it the switches it needs. */
 export async function syncEnginePrefs(
   settings: Pick<Settings, "blockCookies" | "sealAddresses">,
   container: ServiceWorkerContainer | undefined = navigator.serviceWorker,
   instanceSeal?: boolean,
-  page: string = globalThis.location?.pathname ?? "",
+  /** Only for a site opened from the UI: a page can load the UI in a popup, which proves nothing. */
+  seen = false,
 ): Promise<void> {
   if (!container) return;
   const registration = await container.getRegistration("/");
@@ -23,7 +22,7 @@ export async function syncEnginePrefs(
     sealAddresses: settings.sealAddresses,
   };
   if (instanceSeal !== undefined) message.instanceSeal = instanceSeal;
-  if (SEEN_PAGES.has(page)) message.seen = true;
+  if (seen) message.seen = true;
   const channel = new MessageChannel();
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ANSWER_MS);

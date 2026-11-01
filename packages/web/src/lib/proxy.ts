@@ -20,7 +20,8 @@ export async function startEngine(): Promise<void> {
   await navigator.serviceWorker.ready;
   // A worker that just installed may not have read the admin's switch yet.
   const state = await getAuthState().catch(() => null);
-  await syncEnginePrefs(loadSettings(), undefined, state?.sealAddresses);
+  // Only a visitor who opens a site from Girici's own pages has seen what it is.
+  await syncEnginePrefs(loadSettings(), undefined, state?.sealAddresses, true);
 }
 
 export interface OpenEnv {

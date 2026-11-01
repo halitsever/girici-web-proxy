@@ -76,7 +76,7 @@ export class PrefsService {
 }
 
 const PREF_NAMES = ["blockThirdPartyCookies", "sealAddresses", "instanceSeal", "seen"] as const;
-/** Pages a shared link cannot send onward, so loading one shows that the visitor has seen Girici. */
+/** UI pages allowed to say seen. The UI says it only when the visitor opens a site, never when a page loads. */
 const SEEN_PAGES = new Set(["/", "/settings", "/account"]);
 
 function booleanPrefs(value: Record<string, unknown>): Partial<EnginePrefs> {

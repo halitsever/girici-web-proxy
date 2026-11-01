@@ -23,6 +23,16 @@ test("a browser that opened Girici first never sees the warning", async ({ brows
   }
 });
 
+test("loading Girici's home page without opening a site does not skip the warning", async ({ page }) => {
+  await page.goto(`${INSTANCE}/~/https/site-a.test/`);
+  await expect(page.getByRole("heading", { name: "This page opens through Girici" })).toBeVisible();
+  await page.goto(`${INSTANCE}/`);
+  await expect(page.getByLabel("URL or search")).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.goto(`${INSTANCE}/~/https/site-a.test/`);
+  await expect(page.getByRole("heading", { name: "This page opens through Girici" })).toBeVisible();
+});
+
 test("a shared link to the sign-in page does not skip the warning", async ({ page }) => {
   await page.goto(`${INSTANCE}/_g/login?next=/~/https/site-a.test/`);
   await expect(page.getByLabel("Username")).toBeVisible();

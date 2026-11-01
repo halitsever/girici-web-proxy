@@ -34,7 +34,7 @@ const SWITCH_ROWS: ReadonlyArray<{ name: InstanceSwitch; label: string; help: st
   {
     name: "deepLinkWarning",
     label: "Warn before shared links",
-    help: "Someone who opens a proxied page from a link, before ever seeing Girici's home page, first sees a notice that the page comes through this proxy. Applies while public access is on.",
+    help: "Someone who opens a proxied page from a link, before ever opening a site from Girici's home page, first sees a notice that the page comes through this proxy. Applies while public access is on.",
   },
   {
     name: "proofOfWork",

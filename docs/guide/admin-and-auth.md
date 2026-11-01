@@ -50,9 +50,9 @@ sees a notice. It says that the page comes from another site through this proxy,
 server, and shows the real address with a **Continue** button. It is meant for links passed around in chats and
 emails, where the visitor may not know what Girici is.
 
-Each browser sees it once. It stops after the visitor presses **Continue**, or after they open Girici's home page,
-**Settings** or **Account**. Landing on the sign-in page from a link does not count. Pages inside frames and the
-requests a page makes never get the notice.
+Each browser sees it once. It stops after the visitor presses **Continue**, or after they open a site from Girici's
+home page or **Settings**. Only loading one of Girici's own pages does not count, so a link or popup that lands
+there cannot skip the notice. Pages inside frames and the requests a page makes never get the notice.
 
 **Settings → Admin → Warn before shared links** turns it off for everyone. It is on by default and asks for the
 current password like the other admin settings. It applies only while **Public access** is on: a private instance
