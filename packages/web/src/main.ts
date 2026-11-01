@@ -11,9 +11,12 @@ import { isSiteMode, retireRootEngine, syncSettings } from "./lib/sites";
 import router from "./router";
 
 async function start(): Promise<void> {
+  // Started before the mode is known, so a single-origin tab reloads as early as it always did; a root with no worker
+  // in subdomain mode never reloads here.
+  const engine = reloadThroughEngine().catch(() => false);
   // The router guard reuses this cached read.
   const state = await getAuthState().catch(() => null);
-  const reloading = await (isSiteMode(state) ? retireRootEngine() : reloadThroughEngine()).catch(() => false);
+  const reloading = await (isSiteMode(state) ? retireRootEngine().catch(() => false) : engine);
   if (reloading) return;
   await loadBrand();
   // BrandDocument is the narrow structural view the unit test fakes; the real Document satisfies it at run time.
