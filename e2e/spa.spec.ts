@@ -85,8 +85,7 @@ test("keeps blob worker subresources inside the proxy", async ({ page }) => {
   await expect(page.locator("#results")).toHaveText("done");
 });
 
-test("proxies Navigation API navigations", async ({ page, browserName }) => {
-  test.skip(browserName === "webkit", "WebKit has no Navigation API");
+test("proxies Navigation API navigations", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/nav-api");
   await page.click("#go");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\//);

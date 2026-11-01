@@ -12,6 +12,7 @@ import {
 } from "../shared/primordials.ts";
 import { applyCookieChanges, cookieString, domainMatches, parseScriptCookie } from "../shared/cookie-mirror.ts";
 import {
+  COOKIE_BATCH_LIMIT,
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   decodeHeaderValue,
@@ -27,12 +28,18 @@ import { allowVersionReload } from "./version.ts";
 // Taken at load: a window reused for another site keeps these hooks, which then serve that site's cookie calls in the
 // realm of the page that made the window.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
+const NativePromise = Promise;
+/** A batch goes out as a promise job on this, so a page's queueMicrotask or then never decides when. */
+const loaded = unsteered(NativePromise.resolve());
+
+/** How long a navigation waits for cookie writes, so a worker that never answers cannot hold a click forever. */
+export const NAVIGATION_COOKIE_WAIT_MS = 1000;
 
 /** The per-realm cookie mirror state the network and navigation hooks read. */
 export interface CookieBridge extends DocumentListeners {
   /** The sequence number of the latest document.cookie write, sent along so the worker can wait for it. */
   currentSeq(): number;
-  /** Settles once every cookie write still on its way to the worker has landed; null when none is. */
+  /** Settles once every write on its way has landed or NAVIGATION_COOKIE_WAIT_MS has passed; null when none is. */
   pendingWrites(): Promise<void> | null;
   applySync(header: string | null): void;
   /** A reused window starts over from the new document's config; the service worker sees a new client. */
@@ -53,10 +60,17 @@ export function installCookies(
   let seq = 0;
   // Answers to the previous document's writes must not land in the renewed document's mirror.
   let generation = 0;
-  let inflight = 0;
-  let pending: Promise<void> | null = null;
+  // Writes not sent yet start at `head`; the worker has been sent every seq up to `sentSeq`.
+  let queue: string[] = [];
+  let head = 0;
+  let sentSeq = 0;
+  // Batches sent and not answered yet; the worker applies them in seq order.
+  let outstanding = 0;
+  let scheduled = false;
+  let waiters: Array<() => void> = [];
   // Captured before the network hooks and storage partitioning wrap these.
   const nativeFetch = win.fetch;
+  const nativeSetTimeout = win.setTimeout;
   const responses = win.Response?.prototype;
   const statusOf = responses && (ownDescriptor(responses, "status")?.get as (this: Response) => number);
   const jsonOf = responses && (ownDescriptor(responses, "json")?.value as (this: Response) => Promise<unknown>);
@@ -78,9 +92,69 @@ export function installCookies(
     mirror = applyCookieChanges(mirror, mine, now());
   };
 
-  const settle = () => {
-    inflight--;
-    if (inflight === 0) pending = null;
+  const release = () => {
+    const released = waiters;
+    waiters = [];
+    for (let index = 0; index < released.length; index++) (released[index] as () => void)();
+  };
+
+  /** Sends every queued write, in order; the worker applies each page's batches by seq, whatever order they land in. */
+  const flush = () => {
+    scheduled = false;
+    while (head < queue.length) {
+      const end = queue.length - head > COOKIE_BATCH_LIMIT ? head + COOKIE_BATCH_LIMIT : queue.length;
+      // Written out from strings, so a page's JSON.stringify or toJSON never sees the cookie.
+      let list = "";
+      for (let index = head; index < end; index++)
+        list += (index > head ? "," : "") + quoteJson(queue[index] as string);
+      sentSeq += end - head;
+      if (end === queue.length) {
+        queue = [];
+        head = 0;
+      } else {
+        head = end;
+      }
+      send(`{"v":${PROTOCOL_VERSION},"seq":${sentSeq},"cookies":[${list}]}`, sentSeq);
+    }
+  };
+
+  const send = (body: string, batchSeq: number) => {
+    outstanding++;
+    const batchGeneration = generation;
+    const take = (answer: unknown) => {
+      const cookies = typeof answer === "object" && answer !== null ? readCookies(ownValue(answer, "cookies")) : null;
+      // Writes queued after this batch are already in the mirror, so only the newest batch's answer replaces it.
+      if (cookies && batchSeq === seq && batchGeneration === generation) mirror = cookies;
+    };
+    // Runs once, on an answer and on a failure alike.
+    let settled = false;
+    const done = () => {
+      if (settled || batchGeneration !== generation) return;
+      settled = true;
+      outstanding--;
+      if (outstanding === 0 && head >= queue.length) release();
+    };
+    // Each promise is unsteered first, since the captured then still asks the promise for its species.
+    try {
+      const sent = unsteered(
+        apply(nativeFetch, win, [
+          ctx.origin + COOKIE_RPC_PATH,
+          { __proto__: null, method: "POST", body } as RequestInit,
+        ]) as Promise<Response>,
+      );
+      const answered = promiseThen(sent, (response): Promise<void> | undefined => {
+        if (apply(statusOf as (this: Response) => number, response, []) === 409) {
+          // The worker updated under this page; one reload brings a matching runtime.
+          if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
+          return undefined;
+        }
+        const json = unsteered(apply(jsonOf as (this: Response) => Promise<unknown>, response, []));
+        return unsteered(promiseThen(json, take));
+      });
+      promiseThen(unsteered(answered), done, done);
+    } catch {
+      done();
+    }
   };
 
   const write = (text: string) => {
@@ -88,35 +162,12 @@ export function installCookies(
     if (!cookie) return;
     // The worker drops a blocked frame's writes, so the mirror must not show them either.
     if (!blocked) mirror = applyCookieChanges(mirror, [cookie], now());
-    const mySeq = ++seq;
-    const myGeneration = generation;
-    inflight++;
-    const take = (body: unknown) => {
-      const cookies = typeof body === "object" && body !== null ? readCookies(ownValue(body, "cookies")) : null;
-      // A newer write may already be in the mirror, so only the latest answer replaces it.
-      if (cookies && mySeq === seq && myGeneration === generation) mirror = cookies;
-    };
-    // Written out from strings, so a page's JSON.stringify or toJSON never sees the cookie.
-    const sent = apply(nativeFetch, win, [
-      ctx.origin + COOKIE_RPC_PATH,
-      {
-        __proto__: null,
-        method: "POST",
-        body: `{"v":${PROTOCOL_VERSION},"seq":${mySeq},"cookie":${quoteJson(text)}}`,
-      } as RequestInit,
-    ]) as Promise<Response>;
-    const answered = promiseThen(sent, (response): Promise<void> | undefined => {
-      if (apply(statusOf as (this: Response) => number, response, []) === 409) {
-        // The worker updated under this page; one reload brings a matching runtime.
-        if (nativeSession && allowVersionReload(nativeSession, PROTOCOL_VERSION)) reload();
-        return undefined;
-      }
-      return promiseThen(apply(jsonOf as (this: Response) => Promise<unknown>, response, []), take);
-    });
-    // Settles on an answer and on a failure alike.
-    const request = promiseThen(answered, settle, settle);
-    // Both writes settle without rejecting, so waiting on one after the other waits for both.
-    pending = pending ? promiseThen(pending, () => request) : request;
+    seq++;
+    append(queue, text);
+    // Writes made in one task go out together, unless a request that names them goes out first.
+    if (scheduled) return;
+    scheduled = true;
+    promiseThen(loaded, flush);
   };
 
   define(win.Document.prototype, "cookie", {
@@ -144,8 +195,20 @@ export function installCookies(
 
   return {
     listen,
-    currentSeq: () => seq,
-    pendingWrites: () => pending,
+    currentSeq: () => {
+      // The request carrying this seq must not reach the worker before the writes it names.
+      if (head < queue.length) flush();
+      return seq;
+    },
+    pendingWrites: () => {
+      if (outstanding === 0 && head >= queue.length) return null;
+      return unsteered(
+        new NativePromise<void>((resolve) => {
+          append(waiters, resolve);
+          apply(nativeSetTimeout, win, [resolve, NAVIGATION_COOKIE_WAIT_MS]);
+        }),
+      );
+    },
     applySync: (header) => {
       if (!header) return;
       try {
@@ -160,9 +223,21 @@ export function installCookies(
       blocked = next.cookiesBlocked === true;
       seq = 0;
       generation++;
+      // Unsent writes are dropped: the worker would take them as the new document's.
+      queue = [];
+      head = 0;
+      sentSeq = 0;
+      outstanding = 0;
+      release();
     },
     snapshot: () => copyCookies(mirror),
   };
+}
+
+/** An own `constructor` of undefined makes the captured then build its promise from natives, not the page's species. */
+function unsteered<T>(promise: Promise<T>): Promise<T> {
+  define(promise, "constructor", { __proto__: null, value: undefined } as PropertyDescriptor);
+  return promise;
 }
 
 /** Indexed copies with null prototypes: snapshots go into frames' configs, which page code must not steer. */

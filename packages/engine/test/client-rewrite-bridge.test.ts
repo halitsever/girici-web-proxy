@@ -31,6 +31,17 @@ describe("createRewriteBridge", () => {
     expect(bridge.jsBody("yield await location.href", "asyncGenerator")).toBe("yield await __g$.L(location).href");
   });
 
+  it("rewrites module code and import maps for run-time scripts", () => {
+    const bridge = createRewriteBridge(ctx, frameTag, CLIENT);
+    expect(bridge.module("import x from './a.js'; location.href")).toBe(
+      "import x from './a.js'; __g$.L(location).href",
+    );
+    expect(JSON.parse(bridge.importMap('{"imports":{"a":"https://cdn.test/a.js"}}'))).toEqual({
+      imports: { a: "/~/https/cdn.test/a.js" },
+    });
+    expect(bridge.importMap("not json")).toBe("not json");
+  });
+
   it("restores real urls in html the page reads back", () => {
     const bridge = createRewriteBridge(ctx, frameTag, CLIENT);
     expect(bridge.unhtml('<a href="/~/https/site.test/x">y</a>')).toBe('<a href="https://site.test/x">y</a>');

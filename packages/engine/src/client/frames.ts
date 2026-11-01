@@ -1,4 +1,13 @@
-import { append, define, hrefOf, listIncludes, lowerCase, NativeWeakSet, originOf } from "../shared/primordials.ts";
+import {
+  append,
+  define,
+  hrefOf,
+  inheritedGetter,
+  listIncludes,
+  lowerCase,
+  NativeWeakSet,
+  originOf,
+} from "../shared/primordials.ts";
 import { PROTOCOL_VERSION, type ClientConfig, type CookieSnapshot } from "../shared/protocol.ts";
 import type { AssignHref } from "./invoke.ts";
 import { maskNative } from "./native-mask.ts";
@@ -25,8 +34,11 @@ export interface FrameAdopter {
   reopened(doc: unknown): void;
   /** The window.open that three-argument document.open calls, so one function proxies, swaps and wraps. */
   useOpen(open: (this: unknown, ...args: unknown[]) => unknown): void;
-  /** Called with each inserted node first, so frames another parser made get their values rewritten. */
-  useBackstop(check: (node: unknown) => void): void;
+  /**
+   * Adds a check that runs before each insertion with the inserted nodes and the node they go into, so frames another
+   * parser made get their values rewritten. The list is the call's own, so a check may replace a string in it.
+   */
+  addBackstop(check: (nodes: unknown[], target: unknown) => void): void;
   /**
    * Readies the window a link or form aimed at `target` loads into: a new one is opened blank, and a blank one the
    * browser could keep for a page of another origin than `destination` is replaced.
@@ -58,6 +70,14 @@ const SETTER_HOOKS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["HTMLTableElement", ["caption", "tHead", "tFoot"]],
 ];
 
+/** Methods that insert beside `this`, so what they add lands in its parent. */
+const BESIDE = ["before", "after", "replaceWith"];
+/** Methods whose first argument is the one node they insert; the rest name nodes already in place. */
+const ONE_NODE = ["appendChild", "insertBefore", "replaceChild", "insertNode"];
+/** insertAdjacentElement positions outside the element. */
+const OUTSIDE = ["beforebegin", "afterend"];
+/** Node types a range inserts into rather than splits. */
+const CONTAINERS = [1, 9, 11];
 const FRAME_ELEMENTS = ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement"];
 const SVG_DOCUMENT_ELEMENTS = ["HTMLIFrameElement", "HTMLObjectElement", "HTMLEmbedElement"];
 const NO_CHILDREN: readonly unknown[] = [];
@@ -156,7 +176,7 @@ export function installFrames(
   const lengthOf = ownDescriptor(win, "length")?.get;
   const ownerDocument = ownDescriptor(win.Node.prototype, "ownerDocument")?.get;
   const defaultView = ownDescriptor(win.Document.prototype, "defaultView")?.get;
-  const startContainer = win.Range ? ownDescriptor(win.Range.prototype, "startContainer")?.get : undefined;
+  const startContainer = win.Range ? inheritedGetter(win.Range.prototype, "startContainer") : undefined;
   const addListener = win.EventTarget.prototype.addEventListener;
   // Cross-origin windows throw on every check, so walks skip them until the next frame load may have changed that.
   let crossOrigin = new NativeWeakSet<object>();
@@ -229,8 +249,28 @@ export function installFrames(
   const protoOf = (name: string) =>
     (win as unknown as Record<string, { prototype?: object } | undefined>)[name]?.prototype;
 
+  const parentOf = ownDescriptor(win.Node.prototype, "parentNode")?.get;
+  const nodeTypeOf = ownDescriptor(win.Node.prototype, "nodeType")?.get;
+  const read = (getter: (() => unknown) | undefined, node: unknown): unknown => {
+    try {
+      return getter ? apply(getter, node, []) : null;
+    } catch {
+      // Not a node or a range: the insertion that follows reports it.
+      return null;
+    }
+  };
+  /** A range inserts into its start container, or into the parent of a text node it splits. */
+  const rangeTarget = (range: unknown): unknown => {
+    const start = read(startContainer, range);
+    return listIncludes(CONTAINERS, read(nodeTypeOf, start)) ? start : read(parentOf, start);
+  };
+
   // Markup from XML parsers and XHR documents never went through the HTML sinks; the attribute hooks check it here.
-  let backstop: (node: unknown) => void = () => {};
+  const backstops: Array<(nodes: unknown[], target: unknown) => void> = [];
+  const backstop = (nodes: unknown[], target: unknown) => {
+    for (let index = 0; index < backstops.length; index++)
+      (backstops[index] as (nodes: unknown[], target: unknown) => void)(nodes, target);
+  };
   // Indexed, without destructuring: adopting a frame runs this inside a page call, after the page may have replaced
   // the array iterator.
   for (let hook = 0; hook < MUTATION_HOOKS.length; hook++) {
@@ -239,14 +279,25 @@ export function installFrames(
     const methods = entry[1];
     const proto = protoOf(name);
     if (!proto) continue;
-    const targetView = name === "Range" ? viewOfRange : viewOf;
+    const range = name === "Range";
+    const targetView = range ? viewOfRange : viewOf;
     for (let index = 0; index < methods.length; index++) {
       const method = methods[index] as string;
       const descriptor = ownDescriptor(proto, method);
       const native = descriptor?.value as ((...args: unknown[]) => unknown) | undefined;
       if (typeof native !== "function") continue;
+      const beside = listIncludes(BESIDE, method);
+      const oneNode = listIncludes(ONE_NODE, method);
+      const adjacent = method === "insertAdjacentElement";
       const hooked = function (this: unknown, ...args: unknown[]): unknown {
-        for (let index = 0; index < args.length; index++) backstop(args[index]);
+        if (adjacent) {
+          const where = args[0];
+          const outside = typeof where === "string" && listIncludes(OUTSIDE, lowerCase(where));
+          backstop([args[1]], outside ? read(parentOf, this) : this);
+        } else {
+          const target = range ? rangeTarget(this) : beside ? read(parentOf, this) : this;
+          backstop(oneNode ? [args[0]] : args, target);
+        }
         return mutateIn(targetView(this), () => apply(native, this, args));
       };
       define(proto, method, { ...descriptor, value: maskNative(hooked, native) });
@@ -263,7 +314,7 @@ export function installFrames(
       const set = descriptor?.set;
       if (!set) continue;
       const hooked = function (this: unknown, value: unknown): void {
-        backstop(value);
+        backstop([value], this);
         mutateIn(viewOf(this), () => apply(set, this, [value]));
       };
       define(proto, property, { ...descriptor, set: maskNative(hooked, set) });
@@ -488,9 +539,7 @@ export function installFrames(
     useOpen: (open) => {
       windowOpen = open;
     },
-    useBackstop: (check) => {
-      backstop = check;
-    },
+    addBackstop: (check) => append(backstops, check),
     prepareTarget: (target, destination) => {
       if (listIncludes(UNNAMED, lowerCase(target))) return;
       const blank = blankFor(win, target, undefined);

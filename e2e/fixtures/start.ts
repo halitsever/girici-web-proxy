@@ -4,7 +4,6 @@ import { createServer, type Server } from "node:http";
 import { createServer as createSecureServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { WebSocketServer } from "ws";
 import { AuthStore } from "../../packages/server/src/auth/store.ts";
 import { BrandStore } from "../../packages/server/src/brand/store.ts";
 import { openDb } from "../../packages/server/src/db/open.ts";
@@ -13,6 +12,7 @@ import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
 import { handleFixture } from "./sites.ts";
 import { GATES_PORT, METRICS_TOKEN, QUOTA_PORT } from "./servers.ts";
+import { handleSocketUpgrade } from "./sockets.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 
@@ -53,16 +53,8 @@ function listen(server: Server, port: number): Promise<void> {
 }
 
 const cert = await fixtureCert();
-// One socket that sends a binary frame, so pages can check the type it reaches them as.
-const sockets = new WebSocketServer({ noServer: true });
 const secure = createSecureServer(cert, handleFixture);
-secure.on("upgrade", (req, socket, head) => {
-  if (req.url !== "/binary-socket") {
-    socket.destroy();
-    return;
-  }
-  sockets.handleUpgrade(req, socket, head, (ws) => ws.send(Buffer.from([1, 2, 3])));
-});
+secure.on("upgrade", handleSocketUpgrade);
 await listen(secure, 41443);
 await listen(createServer(handleFixture), 41080);
 await startTrapProxy();

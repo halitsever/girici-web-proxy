@@ -25,6 +25,7 @@ import { installHtmlSinks } from "./html-sinks.ts";
 import { captureCurrentScript, createRenew, DocumentSteps, renewExisting, type DocumentListeners } from "./renewal.ts";
 import { createRewriteBridge } from "./rewrite-bridge.ts";
 import { installScriptExec } from "./script-exec.ts";
+import { installScriptText, NO_SCRIPT_TEXT, type ScriptRewriters } from "./script-text.ts";
 import { installToStringMask } from "./native-mask.ts";
 import { installWorkers, type Announce } from "./workers.ts";
 import { installNavigation } from "./navigation.ts";
@@ -123,6 +124,7 @@ export function install(
   const ownAnnounce: Announce = (url, init) =>
     inheritedAnnounce ? inheritedAnnounce(url, init) : apply(nativeFetch, win, [url, init]);
   let frames: FrameAdopter | null = null;
+  let scripts = NO_SCRIPT_TEXT;
   let resetDomain = () => {};
   // Replaced by the real bridge once the cookies step runs; navigation reads it lazily.
   let cookies: CookieBridge = {
@@ -257,11 +259,26 @@ export function install(
           assignHref,
         )),
     ],
+    // Before the attribute hooks, so it takes the browser's getAttribute.
+    [
+      "script text",
+      () => {
+        scripts = installScriptText(win, {
+          __proto__: null,
+          classic: rewrite.js,
+          module: rewrite.module,
+          importMap: rewrite.importMap,
+        } as ScriptRewriters);
+        frames?.addBackstop(scripts.check);
+      },
+    ],
     [
       "attributes",
       () => {
-        const attributes = installAttributes(win, ctx, rewrite, blobs);
-        frames?.useBackstop(attributes.normalize);
+        const normalize = installAttributes(win, ctx, rewrite, blobs).normalize;
+        frames?.addBackstop((nodes) => {
+          for (let index = 0; index < nodes.length; index++) normalize(nodes[index]);
+        });
       },
     ],
     [
@@ -273,6 +290,7 @@ export function install(
           rewrite.unhtml,
           (at) => frames?.walkFor(at),
           (doc) => frames?.reopened(doc),
+          scripts,
         ),
     ],
     ["script exec", () => installScriptExec(win, rewrite.js, rewrite.jsFunction)],

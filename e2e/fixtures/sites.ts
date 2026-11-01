@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { COMPAT_ROUTES } from "./compat/index.ts";
 import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
 import { SUBDOMAIN_ROUTES } from "./subdomain/index.ts";
 
@@ -35,7 +36,7 @@ const PNG = Buffer.from(
   "base64",
 );
 
-function page(title: string, body: string, head = ""): string {
+export function page(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title>${head}</head><body>${body}</body></html>`;
 }
 
@@ -230,12 +231,13 @@ const REALTIME = page(
 
 export type Route = (req: IncomingMessage, res: ServerResponse, body: string) => void;
 
-const script =
-  (body: string): Route =>
-  (_req, res) => {
+// Compat fixtures load before this module's body runs, so the helpers they use are hoisted function declarations.
+export function script(body: string): Route {
+  return (_req, res) => {
     res.writeHead(200, { "content-type": "application/javascript" });
     res.end(body);
   };
+}
 
 const cookieEcho: Route = (req, res) => {
   res.writeHead(200, { "content-type": "text/plain" });
@@ -644,12 +646,12 @@ const login: Route = (_req, res) => {
   res.end();
 };
 
-const html =
-  (body: string): Route =>
-  (_req, res) => {
+export function html(body: string): Route {
+  return (_req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(body);
   };
+}
 const png: Route = (_req, res) => {
   res.writeHead(200, { "content-type": "image/png" });
   res.end(PNG);
@@ -2647,7 +2649,7 @@ const typed =
     res.end(body);
   };
 
-const ROUTES: Record<string, Record<string, Route>> = {
+export const ROUTES: Record<string, Record<string, Route>> = {
   "site-a.test": {
     "/": html(SITE_A_HOME),
     "/style.css": css("#title { color: rgb(1, 2, 3); }"),
@@ -2996,7 +2998,7 @@ export function handleFixture(req: IncomingMessage, res: ServerResponse): void {
   req.on("end", () => {
     const host = (req.headers.host ?? "").split(":")[0] ?? "";
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
-    const route = ROUTES[host]?.[path] ?? SUBDOMAIN_ROUTES[host]?.[path];
+    const route = ROUTES[host]?.[path] ?? SUBDOMAIN_ROUTES[host]?.[path] ?? COMPAT_ROUTES[host]?.[path];
     if (route) {
       route(req, res, Buffer.concat(chunks).toString());
       return;

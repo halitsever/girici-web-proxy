@@ -8,6 +8,19 @@ export interface WsPrep {
   origin: string;
 }
 
+/** The page a socket is opened for, or "anonymous" for a worker no page vouched for. */
+export type WsCaller = URL | null | "anonymous";
+
+/** A window's own address, a worker's binding, or "anonymous" for a worker that has none. */
+export function wsCaller(
+  clientType: string | undefined,
+  windowPage: URL | null,
+  identity: { page: string } | null,
+): WsCaller {
+  if (clientType === "window") return windowPage;
+  return identity ? new URL(identity.page) : "anonymous";
+}
+
 /**
  * The cookies and Origin the upstream handshake needs. The jar is keyed on http(s), so the ws target is mapped
  * before lookup; the Origin is the page's real site, falling back to the target when the page is unknown.
@@ -15,11 +28,14 @@ export interface WsPrep {
 export async function buildWsPrep(
   cookies: Pick<CookieService, "header">,
   rawUrl: string,
-  pageUrl: URL | null,
+  caller: WsCaller,
   allowCookies: (target: URL) => boolean | Promise<boolean> = () => true,
 ): Promise<WsPrep | null> {
   const ws = parseUrl(rawUrl);
   if (!ws || (ws.protocol !== "ws:" && ws.protocol !== "wss:")) return null;
+  // Sent as a third party's socket, since no site vouches for this worker's cookies or Origin.
+  if (caller === "anonymous") return { url: ws.href, cookie: null, origin: "null" };
+  const pageUrl = caller;
   const target = new URL(ws.href);
   target.protocol = ws.protocol === "wss:" ? "https:" : "http:";
   if (!(await allowCookies(target))) return { url: ws.href, cookie: null, origin: pageUrl?.origin ?? target.origin };

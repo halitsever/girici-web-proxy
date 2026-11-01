@@ -102,13 +102,28 @@ function fakeRealm() {
       return views.get(this) ?? null;
     },
   });
-  Object.defineProperty(ctors.Range!.prototype, "startContainer", {
+  Object.defineProperty(ctors.Node!.prototype, "parentNode", {
+    get(this: { parent?: unknown }) {
+      return this.parent ?? null;
+    },
+  });
+  Object.defineProperty(ctors.Node!.prototype, "nodeType", {
+    get(this: { type?: number }) {
+      return this.type ?? 1;
+    },
+  });
+  // On AbstractRange, as browsers have it, not on Range itself.
+  const abstractRange = {};
+  Object.setPrototypeOf(ctors.Range!.prototype, abstractRange);
+  Object.defineProperty(abstractRange, "startContainer", {
     get(this: { container: unknown }) {
       return this.container;
     },
   });
   // Every hooked method and setter adds a child window to the window owning its target.
-  const insert = function (this: { owner?: object; container?: { owner: object } }) {
+  const calls: unknown[][] = [];
+  const insert = function (this: { owner?: object; container?: { owner: object } }, ...args: unknown[]) {
+    calls.push(args);
     const owner = this.owner ?? this.container?.owner;
     const view = owner ? views.get(owner) : undefined;
     const child = { name: `child${added.length}` };
@@ -142,7 +157,7 @@ function fakeRealm() {
       this.windowName = value;
     },
   });
-  return { win: top as unknown as Realm, ctors, top, make, node };
+  return { win: top as unknown as Realm, ctors, top, make, node, calls };
 }
 
 function setup(
@@ -259,21 +274,73 @@ describe("installFrames", () => {
     expect(installed.length).toBeGreaterThan(0);
   });
 
-  it("hands every inserted node to the backstop before the native insertion", () => {
+  it("hands the nodes each insertion adds to every backstop before the native insertion", () => {
     const { ctors, top, node, adopter } = setup();
     const target = node(top);
-    const seen: unknown[] = [];
-    adopter.useBackstop((value) => typeof value === "object" && seen.push(value));
+    const seen: unknown[][] = [];
+    const order: string[] = [];
+    adopter.addBackstop((nodes) => {
+      seen.push([...nodes]);
+      order.push(`first:${top.children.length}`);
+    });
+    adopter.addBackstop(() => order.push("second"));
     const inserted = { inserted: true };
-    for (const [name, methods] of MUTATION_HOOKS) {
-      for (const method of methods) {
-        const self = name === "Range" ? { container: target } : target;
-        (ctors[name]!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(self, inserted, "text");
-      }
-    }
+    const reference = { reference: true };
+    const call = (name: string, method: string, self: unknown, ...args: unknown[]) =>
+      (ctors[name]!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(self, ...args);
+    call("Node", "appendChild", target, inserted);
+    call("Node", "insertBefore", target, inserted, reference);
+    call("Node", "replaceChild", target, inserted, reference);
+    call("Element", "append", target, inserted, "text");
+    call("Element", "insertAdjacentElement", target, "beforeend", inserted);
+    call("Range", "insertNode", { container: target }, inserted);
     Reflect.set(ctors.Document!.prototype, "body", inserted, target);
-    const count = MUTATION_HOOKS.reduce((sum, [, methods]) => sum + methods.length, 0) + 1;
-    expect(seen).toEqual(Array.from({ length: count }, () => inserted));
+    expect(seen).toEqual([[inserted], [inserted], [inserted], [inserted, "text"], [inserted], [inserted], [inserted]]);
+    expect(order.slice(0, 2)).toEqual(["first:0", "second"]);
+  });
+
+  it("names the node each insertion goes into", () => {
+    const { ctors, top, node, adopter } = setup();
+    const parent = node(top);
+    const element = { ...node(top), parent };
+    const text = { ...node(top), parent: element, type: 3 };
+    const seen: unknown[] = [];
+    adopter.addBackstop((_nodes, target) => seen.push(target));
+    const call = (name: string, method: string, self: unknown, ...args: unknown[]) =>
+      (ctors[name]!.prototype[method] as (this: unknown, ...args: unknown[]) => void).call(self, ...args);
+    call("Element", "append", element, "a");
+    for (const method of ["before", "after", "replaceWith"]) {
+      call("Element", method, element, "a");
+      call("CharacterData", method, text, "a");
+    }
+    call("Element", "insertAdjacentElement", element, "beforeBegin", {});
+    call("Element", "insertAdjacentElement", element, "afterbegin", {});
+    call("Range", "insertNode", { container: element }, {});
+    call("Range", "insertNode", { container: text }, {});
+    Reflect.set(ctors.HTMLTableElement!.prototype, "caption", {}, element);
+    expect(seen).toEqual([
+      element,
+      parent,
+      element,
+      parent,
+      element,
+      parent,
+      element,
+      parent,
+      element,
+      element,
+      element,
+      element,
+    ]);
+  });
+
+  it("inserts what a backstop put in place of a string", () => {
+    const { ctors, top, node, adopter, calls } = setup();
+    adopter.addBackstop((nodes) => {
+      if (nodes[0] === "code") nodes[0] = "rewritten";
+    });
+    (ctors.Element!.prototype.replaceChildren as (this: unknown, ...args: unknown[]) => void).call(node(top), "code");
+    expect(calls.at(-1)).toEqual(["rewritten"]);
   });
 
   it("adopts the children a mutation adds to another frame's document", () => {

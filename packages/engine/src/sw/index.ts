@@ -7,6 +7,7 @@ import {
   LOGIN_PATH,
   POT_PATH,
   PROTOCOL_VERSION,
+  SHARED_WORKER_PATH,
   SITE_DATA_RPC_PATH,
   SITES_CONFIG_PATH,
   TOP_SITE_QUERY,
@@ -42,13 +43,14 @@ import {
   type SiteRouting,
 } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
+import { announceSharedStart, answerSharedWorker, SharedWorkerStarts } from "./shared-workers.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { createIdbSiteStore, SiteModeService } from "./site-mode.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
-import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
+import { buildWsPrep, sealWsPrep, wsCaller } from "./ws-prep.ts";
 import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
@@ -99,6 +101,7 @@ const ui = new UiClients(clientRecords, {
     new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
 });
 const workers = new WorkerRegistry(clientRecords);
+const sharedStarts = new SharedWorkerStarts();
 // A UI tab can message the worker before the activation that records it has finished.
 let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
@@ -244,6 +247,9 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
   if (own && url.pathname === SITE_DATA_RPC_PATH && post) return handleSiteDataRpc(event, site);
   if (site && own && url.pathname === LABEL_RPC_PATH && post) {
     return handleLabelRpc(event.request, (target) => siteMode.hostOf(target));
+  }
+  if (own && url.pathname === SHARED_WORKER_PATH) {
+    return answerSharedWorker(event.request, url, { origin, runtimePath: WORKER_PATH, starts: sharedStarts });
   }
   if (own && url.pathname === CONTINUE_PATH) {
     return sealing.ready().then(() => warning.accept(event.request, sealing.open, origin));
@@ -486,10 +492,11 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await Promise.all([cookies.ready(), sealing.ready()]);
   const client = await clientOf(event);
   const identity = await identityOf(event, client);
-  const pageUrl =
-    client?.type === "window"
-      ? realUrlOf(client.url, self.location.origin, sealing.open)
-      : identity && new URL(identity.page);
+  const caller = wsCaller(
+    client?.type,
+    client?.type === "window" ? realUrlOf(client.url, self.location.origin, sealing.open) : null,
+    identity,
+  );
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -500,7 +507,7 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   const prep = await buildWsPrep(
     cookies,
     rawUrl,
-    pageUrl,
+    caller,
     async (target) => !(await cookiesBlocked(event, client, target)),
   );
   if (!prep) return new Response(null, { status: 400 });
@@ -538,7 +545,14 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
  * never the body, decides the identity the nonce binds to.
  */
 async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
-  return answerAnnouncement(event.request, event.clientId, () => callerIdentity(event), workers);
+  const shared = { origin: self.location.origin, starts: sharedStarts };
+  return answerAnnouncement(
+    event.request,
+    event.clientId,
+    () => callerIdentity(event),
+    workers,
+    (path, nonce, identity) => announceSharedStart(path, nonce, identity, shared),
+  );
 }
 
 /** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */

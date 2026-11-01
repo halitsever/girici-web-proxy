@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { installCookies } from "../src/client/cookies.ts";
 import { COOKIE_MESSAGE, encodeHeaderValue, PROTOCOL_VERSION, type CookieSnapshot } from "../src/shared/protocol.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
-import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
+import { REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 import { spyBuiltins } from "./spied-builtins.ts";
 
 type Handler = (event: { data: unknown }) => void;
@@ -57,6 +57,8 @@ function makeRealm() {
     fetch: () => answer(200),
     sessionStorage: { getItem: () => null, setItem: () => undefined },
     location: { reload: () => undefined },
+    // Looked up when called, so fake timers a test installs later still drive it.
+    setTimeout: (handler: () => void, ms: number) => setTimeout(handler, ms),
     BroadcastChannel: class {
       constructor() {
         constructed.push(this);
@@ -68,6 +70,31 @@ function makeRealm() {
     for (const handler of handlers) handler({ data });
   };
   return { win, ctx, document, container, send, constructed };
+}
+
+interface HeldRequest {
+  body: string;
+  answer(cookies?: CookieSnapshot[]): void;
+}
+
+/** A realm whose cookie RPCs wait until the test answers each one. */
+function holdingRealm() {
+  const realm = makeRealm();
+  const requests: HeldRequest[] = [];
+  const url = new URL("https://site.test/");
+  (realm.ctx as { realUrl: () => URL }).realUrl = () => url;
+  (realm.win as unknown as { fetch: unknown }).fetch = (_url: unknown, init: { body: string }) =>
+    new PAGE.Promise((resolve) => {
+      requests.push({ body: init.body, answer: (cookies = []) => resolve(answer(200, cookies)) });
+    });
+  return { ...realm, requests };
+}
+
+const realSetTimeout = setTimeout;
+
+/** Lets every queued promise job run, including the ones a batch's answer starts. */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => realSetTimeout(resolve, 0));
 }
 
 /** A host-only cookie for the fake realm's host. */
@@ -109,7 +136,281 @@ describe("installCookies", () => {
     expect(cb.currentSeq()).toBe(0);
   });
 
-  it("posts cookie writes to an absolute RPC URL, so blob documents can reach it", () => {
+  it("sends a realm's writes in order without waiting for the previous answer", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    win.document.cookie = "a=1";
+    win.document.cookie = "a=2";
+    await flushMicrotasks();
+    expect(requests.map((r) => r.body)).toEqual(['{"v":2,"seq":2,"cookies":["a=1","a=2"]}']);
+    win.document.cookie = "a=3";
+    await flushMicrotasks();
+    expect(requests.map((r) => r.body)).toEqual([
+      '{"v":2,"seq":2,"cookies":["a=1","a=2"]}',
+      '{"v":2,"seq":3,"cookies":["a=3"]}',
+    ]);
+  });
+
+  it("sends the writes a request names before that request, while the page thread is still busy", () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    win.document.cookie = "a=1";
+    // What the fetch and XHR hooks ask for the header, with no microtask run since the write.
+    expect(bridge.currentSeq()).toBe(1);
+    expect(requests.map((r) => r.body)).toEqual(['{"v":2,"seq":1,"cookies":["a=1"]}']);
+    win.document.cookie = "a=2";
+    expect(bridge.currentSeq()).toBe(2);
+    expect(requests.map((r) => r.body)).toEqual([
+      '{"v":2,"seq":1,"cookies":["a=1"]}',
+      '{"v":2,"seq":2,"cookies":["a=2"]}',
+    ]);
+    expect(bridge.currentSeq()).toBe(2);
+    expect(requests).toHaveLength(2);
+  });
+
+  it("sends and settles its writes while the page steers promise species", async () => {
+    /** A species whose construction throws, as a page can set on its promises and their constructor. */
+    const steer = function () {
+      throw new Error("page");
+    };
+    const species = { [Symbol.species]: steer };
+    const steering: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+      ["page Promise.prototype.constructor", PAGE.Promise.prototype, "constructor", { value: species }],
+      ["page Promise[Symbol.species]", PAGE.Promise, Symbol.species, { get: () => steer }],
+      ["Promise[Symbol.species]", Promise, Symbol.species, { get: () => steer }],
+    ];
+    for (const [name, target, key, replacement] of steering) {
+      const { win, ctx, container, requests } = holdingRealm();
+      const bridge = installCookies(
+        win,
+        ctx,
+        { v: 2, cookies: [] },
+        () => container,
+        () => {},
+      );
+      await flushMicrotasks();
+      const original = Object.getOwnPropertyDescriptor(target, key) as PropertyDescriptor;
+      Object.defineProperty(target, key, { ...original, ...replacement });
+      let released = false;
+      try {
+        win.document.cookie = "a=1";
+        void bridge.pendingWrites()!.then(() => (released = true));
+        await flushMicrotasks();
+        requests[0]?.answer([cookie("a", "1")]);
+        await flushMicrotasks();
+        await flushMicrotasks();
+        win.document.cookie = "a=2";
+        await flushMicrotasks();
+      } finally {
+        Object.defineProperty(target, key, original);
+      }
+      expect(released, name).toBe(true);
+      expect(
+        requests.map((r) => r.body),
+        name,
+      ).toEqual(['{"v":2,"seq":1,"cookies":["a=1"]}', '{"v":2,"seq":2,"cookies":["a=2"]}']);
+    }
+  });
+
+  it("splits a long burst into batches of fifty", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    for (let i = 1; i <= 120; i++) win.document.cookie = `n${i}=1`;
+    await flushMicrotasks();
+    expect(requests).toHaveLength(3);
+    const sent = requests.map((request) => JSON.parse(request.body) as { seq: number; cookies: string[] });
+    expect(sent.map((body) => [body.seq, body.cookies.length])).toEqual([
+      [50, 50],
+      [100, 50],
+      [120, 20],
+    ]);
+    expect(sent.flatMap((body) => body.cookies)).toEqual(Array.from({ length: 120 }, (_, i) => `n${i + 1}=1`));
+  });
+
+  it("keeps document.cookie current while writes wait", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    win.document.cookie = "a=1";
+    win.document.cookie = "a=2";
+    await flushMicrotasks();
+    win.document.cookie = "a=3";
+    expect(win.document.cookie).toBe("a=3");
+    requests[0]!.answer([cookie("a", "2")]);
+    await flushMicrotasks();
+    expect(win.document.cookie).toBe("a=3");
+  });
+
+  it("waits for every queued write before a navigation goes", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    expect(bridge.pendingWrites()).toBeNull();
+    win.document.cookie = "a=1";
+    await flushMicrotasks();
+    win.document.cookie = "a=2";
+    let released = false;
+    void bridge.pendingWrites()!.then(() => (released = true));
+    requests[0]!.answer();
+    await flushMicrotasks();
+    expect(released).toBe(false);
+    requests[1]!.answer([cookie("a", "2")]);
+    await flushMicrotasks();
+    expect(released).toBe(true);
+    expect(bridge.pendingWrites()).toBeNull();
+  });
+
+  it("lets a navigation go after a second when a cookie write never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const stuck = holdingRealm();
+      const never = installCookies(
+        stuck.win,
+        stuck.ctx,
+        { v: 2, cookies: [] },
+        () => stuck.container,
+        () => {},
+      );
+      // A page's own timer that never fires must not stretch the wait.
+      (stuck.win as unknown as { setTimeout: unknown }).setTimeout = () => 0;
+      stuck.win.document.cookie = "a=1";
+      let released = false;
+      void never.pendingWrites()!.then(() => (released = true));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(stuck.requests).toHaveLength(1);
+      expect(released).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(released).toBe(true);
+
+      const quick = holdingRealm();
+      const answered = installCookies(
+        quick.win,
+        quick.ctx,
+        { v: 2, cookies: [] },
+        () => quick.container,
+        () => {},
+      );
+      quick.win.document.cookie = "a=1";
+      const start = Date.now();
+      let after = -1;
+      void answered.pendingWrites()!.then(() => (after = Date.now() - start));
+      setTimeout(() => quick.requests[0]!.answer(), 10);
+      await vi.advanceTimersByTimeAsync(10);
+      await flushMicrotasks();
+      expect(after).toBe(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("batches with natives taken at load", async () => {
+    const replacements: Array<[string, object, PropertyKey, PropertyDescriptor]> = [
+      ...REPLACED_BUILTINS,
+      ["Promise.prototype.then", Promise.prototype, "then", { value: () => undefined }],
+      ["Promise.prototype.constructor", Promise.prototype, "constructor", { value: "page" }],
+      ["queueMicrotask", globalThis, "queueMicrotask", { value: () => undefined }],
+    ];
+    for (const [name, target, key, replacement] of replacements) {
+      const { win, ctx, container, requests } = holdingRealm();
+      const bridge = installCookies(
+        win,
+        ctx,
+        { v: 2, cookies: [] },
+        () => container,
+        () => {},
+      );
+      let waiting: Promise<void> | null = null;
+      withReplaced(target, key, replacement, () => {
+        win.document.cookie = "a=1";
+        win.document.cookie = "a=2";
+        waiting = bridge.pendingWrites();
+      });
+      let released = false;
+      void (waiting as Promise<void> | null)?.then(() => (released = true));
+      await flushMicrotasks();
+      expect(
+        requests.map((r) => r.body),
+        name,
+      ).toEqual(['{"v":2,"seq":2,"cookies":["a=1","a=2"]}']);
+      requests[0]!.answer();
+      await flushMicrotasks();
+      expect(released, name).toBe(true);
+    }
+  });
+
+  it("drops a renewed window's unsent writes and does not wait for its old requests", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    win.document.cookie = "old=1";
+    await flushMicrotasks();
+    win.document.cookie = "old=2";
+    bridge.reset({ v: 2, cookies: [] });
+    expect(bridge.pendingWrites()).toBeNull();
+    win.document.cookie = "new=1";
+    await flushMicrotasks();
+    expect(requests.map((r) => r.body)).toEqual([
+      '{"v":2,"seq":1,"cookies":["old=1"]}',
+      '{"v":2,"seq":1,"cookies":["new=1"]}',
+    ]);
+    requests[0]!.answer();
+    await flushMicrotasks();
+    expect(requests).toHaveLength(2);
+  });
+
+  it("sends a renewed window's writes when the old document was halfway through a burst", async () => {
+    const { win, ctx, container, requests } = holdingRealm();
+    const bridge = installCookies(
+      win,
+      ctx,
+      { v: 2, cookies: [] },
+      () => container,
+      () => {},
+    );
+    for (let i = 1; i <= 60; i++) win.document.cookie = `old${i}=1`;
+    await flushMicrotasks();
+    bridge.reset({ v: 2, cookies: [] });
+    win.document.cookie = "new=1";
+    await flushMicrotasks();
+    // The old document's two batches, then the new one's.
+    expect(requests).toHaveLength(3);
+    expect(requests[2]!.body).toBe('{"v":2,"seq":1,"cookies":["new=1"]}');
+  });
+
+  it("posts cookie writes to an absolute RPC URL, so blob documents can reach it", async () => {
     const urls: unknown[] = [];
     const { win, ctx, document, container } = makeRealm();
     (win as unknown as { fetch: unknown }).fetch = (url: unknown) => {
@@ -125,6 +426,7 @@ describe("installCookies", () => {
       () => {},
     );
     document.cookie = "a=1";
+    await flushMicrotasks();
     expect(urls[0]).toBe("http://proxy.test/_g/rpc/cookie");
   });
 
@@ -183,7 +485,7 @@ describe("installCookies", () => {
     expect(document.cookie).toBe("t=1; synced=1");
   });
 
-  it("writes its RPC body without the page's JSON.stringify or toJSON", () => {
+  it("writes its RPC body without the page's JSON.stringify or toJSON", async () => {
     const bodies: unknown[] = [];
     const { win, ctx, document, container } = makeRealm();
     (win as unknown as { fetch: unknown }).fetch = (_url: unknown, init: { body: unknown }) => {
@@ -198,13 +500,19 @@ describe("installCookies", () => {
       () => {},
     );
     const seen: unknown[] = [];
-    withReplaced(JSON, "stringify", { value: (value: unknown) => (seen.push(value), "{}") }, () =>
-      withPrototypeAdditions({ toJSON: { value: () => "forged", writable: true } }, () => {
-        document.cookie = 'k="1"';
-      }),
-    );
+    const stringify = JSON.stringify;
+    // Kept through the flush, which runs as a promise job after the write.
+    JSON.stringify = ((value: unknown) => (seen.push(value), "{}")) as typeof JSON.stringify;
+    Object.defineProperty(Object.prototype, "toJSON", { value: () => "forged", writable: true, configurable: true });
+    try {
+      document.cookie = 'k="1"';
+      for (let tick = 0; tick < 20; tick++) await undefined;
+    } finally {
+      JSON.stringify = stringify;
+      delete (Object.prototype as { toJSON?: unknown }).toJSON;
+    }
     expect(seen).toEqual([]);
-    expect(JSON.parse(bodies[0] as string)).toEqual({ v: PROTOCOL_VERSION, seq: 1, cookie: 'k="1"' });
+    expect(JSON.parse(bodies[0] as string)).toEqual({ v: PROTOCOL_VERSION, seq: 1, cookies: ['k="1"'] });
   });
 
   it("constructs no BroadcastChannel", () => {
@@ -264,10 +572,11 @@ describe("installCookies", () => {
       () => {},
     );
     win.document.cookie = "old=1";
+    await flushMicrotasks();
     bridge.reset({ v: 2, cookies: [] });
     win.document.cookie = "new=1";
     answers[0]?.([cookie("old", "1")]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await flushMicrotasks();
     expect(win.document.cookie).toBe("new=1");
   });
 

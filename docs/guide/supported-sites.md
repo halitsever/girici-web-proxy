@@ -13,7 +13,7 @@ gets much further than a datacenter IP.
 | Instagram | Partly | Logged-out profiles rendered in early testing. Sign-in was not verified. |
 | Reddit | Partly | Renders, but datacenter IPs get bot challenges and redirects to sign-in. |
 | X (Twitter) | Blocked by the site | Refuses datacenter IPs with 403. |
-| Discord | Not verified | Its live updates use WebSockets, which Girici relays. Voice and video need WebRTC, which Girici turns off. |
+| Discord | Not verified | Its live updates use WebSockets, which Girici relays from pages and workers. Voice and video need WebRTC, which Girici turns off. |
 
 **Works** means the site loaded and behaved normally in testing. **Partly** means the main pages work with known
 gaps. **Blocked by the site** means the site refuses the server, not that Girici failed. **Not verified** means

@@ -276,7 +276,7 @@ describe("ws relay (integration)", () => {
     await expect(opened(upgrade("127.0.0.1"))).rejects.toThrow();
   });
 
-  it("relays text and binary frames and forwards the upstream Set-Cookie", async () => {
+  it("relays text and binary frames and keeps the upstream Set-Cookie from the page", async () => {
     const url = await relayServer(await echoUpstream());
     const client = connect(url, url.replace("ws://", "http://").replace("/_g/ws", ""));
     const got: Array<{ t?: string; sc?: string[]; text?: string; bin?: number[] }> = [];
@@ -300,7 +300,7 @@ describe("ws relay (integration)", () => {
       });
     });
     expect(got[0]?.t).toBe("open");
-    expect(got[0]?.sc).toContain("up=1");
+    expect(got[0]).toEqual({ t: "open", p: "" });
     expect(got).toContainEqual({ text: "hello" });
     expect(got).toContainEqual({ bin: [1, 2, 3] });
   });

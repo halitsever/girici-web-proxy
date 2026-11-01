@@ -8,7 +8,9 @@ import {
   encodeHeaderValue,
   HEADER,
   PROTOCOL_VERSION,
+  SHARED_WORKER_PATH,
 } from "../src/shared/protocol.ts";
+import { isReservedPath } from "../src/shared/codec.ts";
 import { spyBuiltins } from "./spied-builtins.ts";
 
 describe("cookie protocol", () => {
@@ -19,6 +21,13 @@ describe("cookie protocol", () => {
       "x-girici-cookie-sync",
     ]);
     expect([PROTOCOL_VERSION, COOKIE_RPC_PATH, COOKIE_MESSAGE]).toEqual([2, "/_g/rpc/cookie", "girici:cookies"]);
+  });
+});
+
+describe("worker protocol", () => {
+  it("keeps the shared worker address among the worker's own RPC paths", () => {
+    expect(SHARED_WORKER_PATH).toBe("/_g/rpc/shared-worker");
+    expect(isReservedPath(SHARED_WORKER_PATH)).toBe(true);
   });
 });
 

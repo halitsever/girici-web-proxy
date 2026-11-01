@@ -415,7 +415,6 @@ function connectUpstream(
     answered = true;
     options.observer.answered("ws", code);
   };
-  let setCookies: string[] = [];
   let upstream: WebSocket;
   try {
     upstream = options.dial(target, {
@@ -433,9 +432,6 @@ function connectUpstream(
   }
   track(options.live, upstream);
 
-  upstream.once("upgrade", (res: IncomingMessage) => {
-    setCookies = res.headers["set-cookie"] ?? [];
-  });
   const allowFrame = options.allowFrame;
   /** Counts first, so the frame that crosses a budget still costs its bytes, and is then dropped, not relayed. */
   const passes = (bytes: number, direction: Direction): boolean => {
@@ -447,7 +443,8 @@ function connectUpstream(
   upstream.on("open", () => {
     answer(null);
     client.once("close", () => options.observer.socketClosed());
-    client.send(JSON.stringify({ t: "open", p: upstream.protocol, sc: setCookies }));
+    // The open frame carries the protocol only; cookies from the handshake stay on the server.
+    client.send(JSON.stringify({ t: "open", p: upstream.protocol }));
     pipe(client, upstream, (bytes) => passes(bytes, "up"));
     pipe(upstream, client, (bytes) => passes(bytes, "down"));
   });
