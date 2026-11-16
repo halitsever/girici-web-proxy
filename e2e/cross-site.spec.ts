@@ -186,6 +186,10 @@ for (const { via, path, host = "site-b.test", answers, webkit, cookie } of VICTI
     context,
     browserName,
   }) => {
+    test.skip(
+      isSiteProject(test.info()) && via === "frame" && host === "site-b.test",
+      "another site's frame loads on its own host, so the browser keeps it out of the page's reach",
+    );
     // MagicString, which srcdoc markup goes through, breaks once Object.prototype has descriptor fields.
     const descriptors = path === "srcdoc" ? "&descriptors=off" : "";
     await openThroughUi(page, `https://site-a.test/xs-cookie-spy?do=${path}&host=${host}${descriptors}`);
