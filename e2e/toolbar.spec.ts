@@ -24,11 +24,11 @@ test("keeps keystrokes in the address field away from the page", async ({ page }
   await expect(page.locator("#keys")).toHaveText("0");
 });
 
-test("takes the user back to Girici", async ({ page }) => {
+test("takes the user back to Girici", async ({ page, baseURL }) => {
   await openThroughUi(page, "https://site-a.test/keys");
   await page.getByRole("button", { name: "Girici toolbar" }).click();
   await page.getByRole("button", { name: "Girici home" }).click();
-  await page.waitForURL("http://127.0.0.1:41000/");
+  await page.waitForURL(`${baseURL}/`);
 });
 
 test("comes back after the page replaces its document", async ({ page }) => {
@@ -47,6 +47,8 @@ test("stays hidden when the Settings switch is off", async ({ page }) => {
 
 test("clears the current site from the toolbar", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/storage?set=a");
+  // In subdomain mode the page's script runs only after the boot page reloads, which openThroughUi does not wait for.
+  await expect(page.locator("#value")).toHaveText("a");
   await page.goto("/~/https/site-a.test/storage");
   await expect(page.locator("#value")).toHaveText("a");
   await page.getByRole("button", { name: "Girici toolbar" }).click();

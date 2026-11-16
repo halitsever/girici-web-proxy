@@ -1,5 +1,5 @@
 import type { RequestHandler } from "express";
-import { isAdminCookie } from "../auth/gate.ts";
+import { isSessionCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import type { Logger } from "../log.ts";
 import { clientKey, type TrustFn } from "./client-ip.ts";
@@ -14,7 +14,7 @@ export function relayLimit({ limiter, store }: { limiter: Limiter | null; store:
       return;
     }
     const result = limiter(clientKey(req.ip ?? "?"));
-    if (result.ok || isAdminCookie(store, req.headers.cookie)) {
+    if (result.ok || isSessionCookie(store, req.headers.cookie)) {
       next();
       return;
     }

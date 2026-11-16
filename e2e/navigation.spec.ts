@@ -53,6 +53,8 @@ test("keeps the method across 307 and switches to GET on 303", async ({ page, br
 });
 
 test("stays in the proxy when a pushed URL is reloaded", async ({ page }) => {
+  // A frame still loading when the page pushes can take the tab's history back to the address before the push.
+  await expect(page.frameLocator("#frame").locator("h1")).toHaveText("Frame");
   await page.click("#push");
   await expect(page).toHaveURL(/\/~\/https\/site-a\.test\/pushed\?x=1$/);
   await page.reload();
@@ -63,6 +65,7 @@ test("stays in the proxy when a pushed URL is reloaded", async ({ page }) => {
 test("follows meta refresh and Refresh headers inside the proxy", async ({ page }) => {
   await page.goto("/~/https/site-a.test/meta-refresh");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\/$/);
+  await expect(page.locator("h1")).toHaveText("Site B");
   await page.goto("/~/https/site-a.test/refresh-header");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\/$/);
 });

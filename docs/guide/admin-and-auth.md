@@ -63,6 +63,11 @@ The browser remembers the notice in the service worker's own storage. Clearing s
 bring it back; wiping the browser's data for Girici does. A `#fragment` at the end of a shared link may be lost
 after **Continue**, depending on the browser.
 
+In [subdomain mode](/guide/subdomain-mode) each site has its own host. Opening a site from Girici's own pages
+marks the browser with a cookie every site host reads, so none of them shows the notice. **Continue** counts only
+for the site where it was pressed. A page reached from the root or from another site host, whose `Referer` names
+one of Girici's own hosts, never shows it either.
+
 ## Resetting the admin password
 
 If you are locked out, reset the password from the command line. It generates a fresh random password,

@@ -14,6 +14,8 @@ export class SsrfBlockedError extends Error {
 export interface TargetPolicy {
   allowedTestHosts: ReadonlySet<string>;
   selfHost?: string;
+  /** Subdomain mode's domain, without port: the root and every site host live under it. */
+  siteDomain?: string;
 }
 
 export type Resolver = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
@@ -41,6 +43,10 @@ export function validateTarget(url: URL, policy: TargetPolicy): void {
   if (!ALLOWED_PORTS.has(port)) throw new SsrfBlockedError(`Port ${port} is not allowed`);
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
+  // Checked before the test allowance, so no mapping can point the relay at Girici's own hosts.
+  if (policy.siteDomain && (hostname === policy.siteDomain || hostname.endsWith(`.${policy.siteDomain}`))) {
+    throw new SsrfBlockedError("The proxy cannot open itself");
+  }
   if (policy.allowedTestHosts.has(hostname)) return;
 
   const literal = hostname.startsWith("[") ? hostname.slice(1, -1) : hostname;

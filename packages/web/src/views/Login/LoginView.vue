@@ -17,26 +17,30 @@ const password = ref("");
 const error = ref("");
 const busy = ref(false);
 const publicAccess = ref(false);
+const siteDomain = ref<string | null>(null);
 
 onMounted(async () => {
-  publicAccess.value = (await getAuthState().catch(() => null))?.public ?? false;
+  const state = await getAuthState().catch(() => null);
+  publicAccess.value = state?.public ?? false;
+  siteDomain.value = state?.siteDomain ?? null;
 });
 
 async function onSubmit() {
   error.value = "";
   busy.value = true;
   try {
-    await login(username.value, password.value);
-    goNext();
+    const state = await login(username.value, password.value);
+    goNext(state.siteDomain ?? siteDomain.value);
   } catch (e) {
     error.value = e instanceof Error ? e.message : "Sign-in failed.";
     busy.value = false;
   }
 }
 
-function goNext() {
-  const next = resolveNext(typeof route.query.next === "string" ? route.query.next : "");
+function goNext(domain: string | null) {
+  const next = resolveNext(typeof route.query.next === "string" ? route.query.next : "", domain);
   if (next.kind === "proxy") window.location.assign(next.path);
+  else if (next.kind === "site") window.location.assign(next.url);
   else void router.replace(next.kind === "route" ? next.path : "/");
 }
 </script>

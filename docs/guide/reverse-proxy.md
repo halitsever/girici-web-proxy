@@ -158,6 +158,78 @@ zone:
 
 Cloudflare terminates TLS, so Cloudflare can see all proxied traffic. See the [threat model](/guide/threat-model).
 
+## Subdomain mode
+
+In [subdomain mode](/guide/subdomain-mode) the proxy serves `proxy.example` and every host under it to the same
+Girici. Everything above still applies, plus:
+
+- **One certificate for `proxy.example` and `*.proxy.example`.** ACME issues wildcard certificates only through the
+  DNS-01 challenge, so the certificate tool needs API access to your DNS provider.
+- **`Host` exactly as the browser sent it.** Girici picks the UI or a site from `Host` alone, never from
+  `X-Forwarded-Host`, and answers 404 on a host it does not know. Behind a proxy that rewrites `Host`, every page is a
+  404.
+
+Browsers reuse one HTTP/2 connection for hosts that share a certificate and an IP address, so many site hosts still
+cost one connection.
+
+### nginx with a wildcard certificate
+
+Get the certificate with a certbot DNS plugin, for example the one for Cloudflare (`python3-certbot-dns-cloudflare`),
+whose credentials file holds `dns_cloudflare_api_token = <token>`:
+
+```bash
+certbot certonly --dns-cloudflare --dns-cloudflare-credentials /root/.secrets/cloudflare.ini \
+  -d proxy.example -d '*.proxy.example'
+```
+
+certbot names the certificate after the first `-d`, so the `ssl_certificate` paths in the [nginx config](#nginx) stay
+the same. Add the wildcard to `server_name` there and leave the rest as it is:
+
+```nginx
+server_name proxy.example *.proxy.example;
+```
+
+### Traefik with a DNS challenge
+
+Give Traefik a resolver that answers the DNS challenge in its static configuration, here for Cloudflare, and pass the
+Traefik container a `CF_DNS_API_TOKEN` that can edit the zone's DNS:
+
+```yaml
+certificatesResolvers:
+  le:
+    acme:
+      email: you@example.com
+      storage: /letsencrypt/acme.json
+      dnsChallenge:
+        provider: cloudflare
+```
+
+Then route the root and every host under it to Girici, and ask for the wildcard. `$$` is how compose writes a literal
+`$`:
+
+```yaml
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.girici.rule=Host(`proxy.example`) || HostRegexp(`^[a-z2-7]{26}\.proxy\.example$$`)
+      - traefik.http.routers.girici.entrypoints=websecure
+      - traefik.http.routers.girici.tls.certresolver=le
+      - traefik.http.routers.girici.tls.domains[0].main=proxy.example
+      - traefik.http.routers.girici.tls.domains[0].sans=*.proxy.example
+      - traefik.http.services.girici.loadbalancer.server.port=3000
+```
+
+### Cloudflare in subdomain mode
+
+- **Proxied DNS records.** Create proxied records for `proxy.example` and `*.proxy.example`. Cloudflare's free edge
+  certificate covers the zone's own name and one level under it. That is enough when `proxy.example` is the zone. When
+  the site domain sits under the zone, such as `girici.example.com`, its site hosts are two levels down and need an
+  advanced certificate. Between Cloudflare and your server, use the "Full (strict)" mode with a certificate for both
+  names there: a Cloudflare Origin CA certificate or one from DNS-01.
+- **Tunnel.** Add two public hostnames to the tunnel, `proxy.example` and `*.proxy.example`, both pointing at
+  `http://girici:3000`. If the dashboard does not create the wildcard's DNS record, add a proxied `CNAME` named `*`
+  that points at `<tunnel ID>.cfargotunnel.com`. Leave the hostname's "HTTP Host Header" setting empty, so `Host`
+  stays the visitor's. The edge certificate note above applies here too.
+
 ## HTTP Basic auth in front of Girici
 
 Girici's own sign-in is the supported way to keep an instance private. If you add HTTP Basic auth on the reverse

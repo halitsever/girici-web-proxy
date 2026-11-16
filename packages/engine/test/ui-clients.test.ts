@@ -202,4 +202,9 @@ describe("loadsUi", () => {
     expect(loadsUi(fromPage, new URL(`${origin}/settings`), origin)).toBe(false);
     expect(loadsUi(fromPage, new URL(`${origin}/account?tab=1`), origin)).toBe(false);
   });
+
+  it("never counts a load as the UI on a site host", () => {
+    expect(loadsUi(nav, new URL(`${origin}/settings`), origin, true)).toBe(false);
+    expect(loadsUi(nav, new URL(`${origin}/`), origin, true)).toBe(false);
+  });
 });

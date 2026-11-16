@@ -19,11 +19,15 @@ export function callerOf(
   return real ? { kind: "page", url: real } : { kind: "other" };
 }
 
-/** Lists and clears site cookies; the window that called clears that site's storage partitions itself. */
+/**
+ * Lists and clears site cookies; the window that called clears that site's storage partitions itself. On a site host
+ * the jar holds only its own site and what other sites set while embedded there, so a page clears all of it.
+ */
 export async function handleSiteData(
   request: Request,
   caller: SiteDataCaller,
   cookies: CookieService,
+  siteMode = false,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -39,6 +43,7 @@ export async function handleSiteData(
     // A proxied page may only clear the site it is on, whatever its body asks for.
     if (caller.kind === "page") {
       const own = siteOf(caller.url.hostname);
+      if (siteMode) return json({ site: own, cookies: await cookies.clearSite(null), all: true });
       return json({ site: own, cookies: await cookies.clearSite(own) });
     }
     const wanted = typeof site === "string" ? site.toLowerCase() : "";

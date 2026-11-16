@@ -28,7 +28,7 @@ export function openInstanceTools({
   db,
   logger,
 }: {
-  config: Pick<Config, "bandwidthLimit" | "dailyQuota" | "metricsToken" | "powDifficulty">;
+  config: Pick<Config, "bandwidthLimit" | "dailyQuota" | "metricsToken" | "powDifficulty" | "siteDomain">;
   store: AuthStore;
   db: DatabaseSync;
   logger: Logger;
@@ -37,7 +37,7 @@ export function openInstanceTools({
   const upgradeGates: UpgradeGate[] = [];
 
   // The browser check is an admin switch, so it is always wired and reads the switch on each request.
-  upgradeGates.push(powUpgradeGate({ store }));
+  upgradeGates.push(powUpgradeGate({ store, siteDomain: config.siteDomain }));
 
   // Traffic counts for the admin's Status section and, with a token, for /metrics.
   const stats = new TrafficStats();
@@ -59,8 +59,8 @@ export function openInstanceTools({
   return {
     app: {
       observer,
-      powGate: powGate({ store }),
-      powRouter: powRouter({ store, difficulty: config.powDifficulty }),
+      powGate: powGate({ store, siteDomain: config.siteDomain }),
+      powRouter: powRouter({ store, difficulty: config.powDifficulty, siteDomain: config.siteDomain }),
       bandwidthGate: meter ? bandwidthGate({ meter, store }) : undefined,
       metricsRouter: config.metricsToken ? metricsRouter({ token: config.metricsToken, stats }) : undefined,
       statusRouter: statusRouter({

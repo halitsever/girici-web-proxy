@@ -135,6 +135,27 @@ describe("server process", () => {
     expect(await exited).toBe(0);
   }, 15_000);
 
+  it("starts in subdomain mode and keeps a site secret in the database", async () => {
+    const siteDir = mkdtempSync(join(tmpdir(), "girici-data-"));
+    const port = await freePort();
+    const child = start({
+      PORT: String(port),
+      HOST: "127.0.0.1",
+      LOG_LEVEL: "info",
+      GIRICI_DATA_DIR: siteDir,
+      GIRICI_SITE_DOMAIN: "proxy.test",
+    });
+    const exited = exitCode(child);
+    await waitForOutput(child, /Subdomain mode: sites open on \*\.proxy\.test[\s\S]*listening/);
+    child.kill("SIGTERM");
+    expect(await exited).toBe(0);
+    const db = openDb(join(siteDir, "girici.db"));
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'site_secret'").get()).toEqual({
+      value: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    db.close();
+  }, 15_000);
+
   it("exits with code 1 and names the variable when PORT is invalid", async () => {
     const child = start({ PORT: "abc" });
     let stderr = "";

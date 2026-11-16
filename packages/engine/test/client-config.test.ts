@@ -34,6 +34,45 @@ describe("readConfig", () => {
   });
 });
 
+describe("site context", () => {
+  const sites = {
+    domain: "proxy.test",
+    root: "https://proxy.test",
+    label: "k6wjalxihe6pja6woodbryo47k",
+    key: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
+    site: "https://site-a.test",
+    toolbar: false,
+    engine: "Google",
+  };
+  const read = (value: unknown) => parseConfig(JSON.stringify({ v: 2, cookies: [], sites: value }))?.sites;
+
+  it("reads the site context and drops a malformed one", () => {
+    expect(read(sites)).toEqual(sites);
+    expect(Object.getPrototypeOf(read(sites))).toBeNull();
+    for (const [field, bad] of [
+      ["domain", 5],
+      ["domain", null],
+      ["root", null],
+      ["label", 26],
+      ["key", false],
+      ["site", 1],
+      ["toolbar", "yes"],
+      ["engine", "Ask"],
+    ] as const) {
+      expect(read({ ...sites, [field]: bad }), field).toBeUndefined();
+    }
+    expect(read("x")).toBeUndefined();
+    expect(parseConfig(JSON.stringify({ v: 2, cookies: [] }))?.sites).toBeUndefined();
+  });
+
+  it("takes no site field from what the page added to Object.prototype", () => {
+    const partial: Partial<typeof sites> = { ...sites };
+    delete partial.toolbar;
+    const parsed = withPrototypeAdditions({ toolbar: { value: true, writable: true } }, () => read(partial));
+    expect(parsed).toBeUndefined();
+  });
+});
+
 describe("parseConfig", () => {
   const raw = JSON.stringify({ v: 2, cookies: [cookie], cookiesBlocked: true });
 

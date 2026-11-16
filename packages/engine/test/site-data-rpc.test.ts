@@ -57,6 +57,27 @@ describe("handleSiteData", () => {
     expect(await jar.siteCookieCounts()).toEqual(new Map([["b.test", 1]]));
   });
 
+  it("clears the whole host when a page asks in subdomain mode", async () => {
+    const jar = await jarWith();
+    const res = await handleSiteData(
+      rpc({ op: "clear", site: "b.test" }),
+      { kind: "page", url: new URL("https://www.a.test/x") },
+      jar,
+      true,
+    );
+    expect(await res.json()).toEqual({ site: "a.test", cookies: 2, all: true });
+    expect(await jar.siteCookieCounts()).toEqual(new Map());
+  });
+
+  it("still refuses listing and clearing everything to pages in subdomain mode", async () => {
+    const page = { kind: "page", url: new URL("https://a.test/") } as const;
+    expect((await handleSiteData(rpc({ op: "list", origins: [] }), page, await jarWith(), true)).status).toBe(403);
+    expect((await handleSiteData(rpc({ op: "clear-all" }), page, await jarWith(), true)).status).toBe(403);
+    expect(
+      (await handleSiteData(rpc({ op: "clear", site: "a.test" }), { kind: "other" }, await jarWith(), true)).status,
+    ).toBe(403);
+  });
+
   it("refuses listing and clearing everything to proxied pages and unknown callers", async () => {
     const page = { kind: "page", url: new URL("https://a.test/") } as const;
     expect((await handleSiteData(rpc({ op: "list", origins: [] }), page, await jarWith())).status).toBe(403);

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { AuthStore } from "../../packages/server/src/auth/store.ts";
 import { BrandStore } from "../../packages/server/src/brand/store.ts";
 import { openDb } from "../../packages/server/src/db/open.ts";
+import { PRIVATE_SITES, SITE_SECRET, SITES } from "../support/site-mode.ts";
 import { startTrapProxy } from "../trap-proxy.ts";
 import { CERT_PATH, fixtureCert, HTTPS_HOSTS } from "./cert.ts";
 import { handleFixture } from "./sites.ts";
@@ -24,6 +25,8 @@ const SEEDED_LOGO = Buffer.from(
 
 interface SeedOptions {
   brand?: boolean;
+  /** Off only where a server exists to test the auth gate. */
+  publicAccess?: boolean;
   deepLinkWarning?: boolean;
   proofOfWork?: boolean;
 }
@@ -33,7 +36,7 @@ function seedDataDir(options: SeedOptions = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "girici-e2e-"));
   const seed = new AuthStore(openDb(join(dir, "girici.db")));
   seed.createAdmin({ username: "e2e", name: "E2E", email: "e2e@test.local", password: "e2e-password" });
-  seed.setPublicAccess(true);
+  seed.setPublicAccess(options.publicAccess ?? true);
   if (options.deepLinkWarning !== undefined) seed.setDeepLinkWarning(options.deepLinkWarning);
   if (options.proofOfWork !== undefined) seed.setProofOfWork(options.proofOfWork);
   if (options.brand) {
@@ -80,7 +83,8 @@ function spawnGirici(port: number, dataDir: string, env: Record<string, string> 
 }
 
 async function waitHealthy(port: number): Promise<void> {
-  const deadline = Date.now() + 10_000;
+  // Several servers start together, which a busy CI machine can take a while over.
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     try {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`)).status === 200) return;
@@ -90,6 +94,11 @@ async function waitHealthy(port: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Server on port ${port} did not become healthy`);
+}
+
+/** Subdomain mode, where each site runs on its own host under the root. */
+function siteMode(base: string): Record<string, string> {
+  return { GIRICI_SITE_DOMAIN: new URL(base).host, GIRICI_SITE_SECRET: SITE_SECRET };
 }
 
 const children: ChildProcess[] = [];
@@ -114,6 +123,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
 start(41002, { brand: true });
 start(GATES_PORT, { deepLinkWarning: false, proofOfWork: true }, { GIRICI_POW_DIFFICULTY: "4" });
 start(QUOTA_PORT, { deepLinkWarning: false }, { GIRICI_BANDWIDTH_LIMIT: "1MB" });
-await Promise.all([41002, GATES_PORT, QUOTA_PORT].map(waitHealthy));
+start(41005, { deepLinkWarning: false }, siteMode(SITES));
+start(41006, { publicAccess: false, deepLinkWarning: false }, siteMode(PRIVATE_SITES));
+await Promise.all([41002, GATES_PORT, QUOTA_PORT, 41005, 41006].map(waitHealthy));
 // Playwright waits on this one, so it starts last. Direct /~/ loads in the specs need the warning off.
 start(41000, { deepLinkWarning: false });

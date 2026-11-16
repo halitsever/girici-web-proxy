@@ -1,3 +1,5 @@
+import { isPublicSuffix } from "@girici/engine/label-site";
+import { parseSiteDomain, type SiteDomain } from "@girici/engine/shared";
 import { normalizeSetupCode } from "./auth/setup-code.ts";
 import { compileTrust } from "./http/client-ip.ts";
 import { defaultDataDir } from "./paths.ts";
@@ -21,6 +23,9 @@ export interface Config {
   blockedHosts: string[];
   upstreamProxy: UpstreamProxy | undefined;
   setupToken: string | undefined;
+  /** Set for subdomain mode, where every proxied site gets its own host under this domain. */
+  siteDomain: SiteDomain | undefined;
+  siteSecret: string | undefined;
   /** Bytes per minute per client; 0 is off. */
   bandwidthLimit: number;
   /** Bytes per UTC day per client; 0 is off. */
@@ -60,11 +65,48 @@ export function loadConfig(env: Env): Config {
     blockedHosts: readBlockedHosts(env.GIRICI_BLOCKED_HOSTS),
     upstreamProxy: parseUpstreamProxy(env.GIRICI_UPSTREAM_PROXY),
     setupToken: readSetupToken(env.GIRICI_SETUP_TOKEN),
+    siteDomain: readSiteDomain(env.GIRICI_SITE_DOMAIN),
+    siteSecret: readSiteSecret(env.GIRICI_SITE_SECRET),
     bandwidthLimit: readByteSize("GIRICI_BANDWIDTH_LIMIT", env.GIRICI_BANDWIDTH_LIMIT),
     dailyQuota: readByteSize("GIRICI_DAILY_QUOTA", env.GIRICI_DAILY_QUOTA),
     metricsToken: readMetricsToken(env.GIRICI_METRICS_TOKEN),
     powDifficulty: readPowDifficulty(env.GIRICI_POW_DIFFICULTY),
   };
+}
+
+/** Site hosts share cookies through `Domain=`, which browsers refuse on a public suffix. */
+function readSiteDomain(raw: string | undefined): SiteDomain | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const domain = parseSiteDomain(value);
+  if (!domain) {
+    throw new Error(
+      `GIRICI_SITE_DOMAIN must be a host name such as proxy.example, optionally with :port, got "${raw}"`,
+    );
+  }
+  if (isPublicSuffix(domain.host)) {
+    throw new Error(
+      `GIRICI_SITE_DOMAIN must be a domain you control, not a public suffix such as github.io, got "${raw}"`,
+    );
+  }
+  // Host is compared as written, so a default port here would match no request at all.
+  if (domain.port === "443" || domain.port === "80") {
+    throw new Error(
+      `GIRICI_SITE_DOMAIN must leave off the default port: browsers never send :443 or :80 in Host, ` +
+        `so use "${domain.host}", got "${raw}"`,
+    );
+  }
+  return domain;
+}
+
+/** Labels every site's host and never rotates, so replicas must share it. Never echoed. */
+function readSiteSecret(raw: string | undefined): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  if (value.length < 32) {
+    throw new Error("GIRICI_SITE_SECRET must be at least 32 characters; openssl rand -hex 32 makes one");
+  }
+  return value;
 }
 
 const SIZE_UNITS: Record<string, number> = { b: 0, kb: 1, mb: 2, gb: 3, tb: 4 };

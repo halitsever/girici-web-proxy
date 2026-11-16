@@ -22,6 +22,14 @@ describe("errorPage", () => {
     expect(errorPage("sealed", null)).toContain("sealed in another browser");
   });
 
+  it("links home to the root on a site host", () => {
+    expect(errorPage("connect", null, undefined, "https://proxy.test/")).toContain('href="https://proxy.test/"');
+    expect(errorPage("connect", null)).toContain('href="/"');
+    expect(errorPage("connect", null, undefined, 'https://proxy.test/"><b>')).toContain(
+      'href="https://proxy.test/&#34;&#62;&#60;b&#62;"',
+    );
+  });
+
   it("explains a spent data allowance with the wait", () => {
     expect(errorPage("quota", new URL("https://a.test/"), 120)).toContain(
       "used up its data allowance on this Girici server. Try again in 2 minutes.",
@@ -54,6 +62,11 @@ describe("errorResponse", () => {
     expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
     expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
     expect(await res.text()).toContain("This address cannot be opened through Girici.");
+  });
+
+  it("takes the home link it is given", async () => {
+    const res = errorResponse("connect", 502, null, undefined, "https://proxy.test/");
+    expect(await res.text()).toContain('href="https://proxy.test/"');
   });
 });
 

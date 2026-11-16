@@ -22,14 +22,16 @@ export function isUiNavigation(
 /**
  * A UI navigation that loads the UI. A proxied page's load of /settings or /account is redirected into its own site
  * under the same client ID, so it does not count. Its load of / or of a /_g/ page such as /_g/challenge does: those
- * paths are never a site's, and the shell's COOP and frame-ancestors keep the page from scripting that window.
+ * paths are never a site's, and the shell's COOP and frame-ancestors keep the page from scripting that window. A site
+ * host never serves the UI.
  */
 export function loadsUi(
   request: { mode: RequestMode; destination: RequestDestination; method: string; referrer: string },
   url: URL,
   origin: string,
+  siteMode = false,
 ): boolean {
-  if (!isUiNavigation(request, url, origin)) return false;
+  if (siteMode || !isUiNavigation(request, url, origin)) return false;
   const referrer = request.referrer || null;
   return classifyRequest({ url: url.href, origin, navigation: true, clientUrl: null, referrer }).kind === "passthrough";
 }

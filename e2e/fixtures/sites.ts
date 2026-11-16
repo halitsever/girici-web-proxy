@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { COMPAT_ROUTES } from "./compat/index.ts";
 import { abortableRoutes, rangeRoute, slowStreamRoute } from "./media.ts";
+import { SUBDOMAIN_ROUTES } from "./subdomain/index.ts";
 
 const abortable = abortableRoutes();
 
@@ -3001,7 +3002,7 @@ export function handleFixture(req: IncomingMessage, res: ServerResponse): void {
   req.on("end", () => {
     const host = (req.headers.host ?? "").split(":")[0] ?? "";
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
-    const route = ROUTES[host]?.[path] ?? COMPAT_ROUTES[host]?.[path];
+    const route = ROUTES[host]?.[path] ?? SUBDOMAIN_ROUTES[host]?.[path] ?? COMPAT_ROUTES[host]?.[path];
     if (route) {
       route(req, res, Buffer.concat(chunks).toString());
       return;

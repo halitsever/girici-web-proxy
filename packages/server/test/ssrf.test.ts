@@ -96,6 +96,22 @@ describe("validateTarget", () => {
   });
 });
 
+describe("validateTarget with a site domain", () => {
+  const policy = { allowedTestHosts: new Set(["proxy.example.org"]), siteDomain: "proxy.example.org" };
+
+  it("refuses the site domain and every host under it", () => {
+    for (const href of [
+      "https://x.proxy.example.org/",
+      "https://proxy.example.org/",
+      "https://A.Proxy.Example.Org./",
+      "http://k6wjalxihe6pja6woodbryo47k.proxy.example.org:8080/",
+    ]) {
+      expect(() => validateTarget(new URL(href), policy), href).toThrow(SsrfBlockedError);
+    }
+    expect(() => validateTarget(new URL("https://otherproxy.example.org/"), policy)).not.toThrow();
+  });
+});
+
 describe("createGuardedLookup", () => {
   it("passes vetted public addresses through", async () => {
     const lookup = createGuardedLookup(async () => [{ address: "93.184.216.34", family: 4 }]);
