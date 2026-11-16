@@ -9,6 +9,9 @@ export const PLAIN_PREFS_COOKIE = "girici-prefs";
 /** The sites this browser opened, so the root can list and clear them. */
 export const SITES_COOKIE = "__Secure-girici-sites";
 export const PLAIN_SITES_COOKIE = "girici-sites";
+/** Ties a clear plan to the browser that asked for it. */
+export const CLEAR_COOKIE = "__Secure-girici-clear";
+export const PLAIN_CLEAR_COOKIE = "girici-clear";
 /** Leaves room under the browsers' 4096-byte cookie limit for the name and attributes. */
 export const VISITED_LIMIT_BYTES = 3000;
 
@@ -19,6 +22,7 @@ const COOKIE_PATH = "/_g/sites";
 const COOKIE_NAMES = {
   prefs: [PREFS_COOKIE, PLAIN_PREFS_COOKIE],
   sites: [SITES_COOKIE, PLAIN_SITES_COOKIE],
+  clear: [CLEAR_COOKIE, PLAIN_CLEAR_COOKIE],
 } as const;
 
 export function signPrefs(prefs: SitePrefs, keys: SiteKeys): string {
@@ -57,6 +61,11 @@ export function readVisited(cookieHeader: string | undefined, keys: SiteKeys): s
   return visited;
 }
 
+/** Every clear nonce the browser sent, under either name. */
+export function readClearNonces(cookieHeader: string | undefined): string[] {
+  return cookieValues(cookieHeader, COOKIE_NAMES.clear);
+}
+
 /** Newest first; the oldest sites fall off once the signed list would outgrow the cookie. */
 export function rememberSite(list: readonly string[], site: string): string[] {
   const next = [site, ...list.filter((entry) => entry !== site)];
@@ -65,8 +74,14 @@ export function rememberSite(list: readonly string[], site: string): string[] {
 }
 
 /** A `Set-Cookie` value for every host under the domain, kept off everything outside `/_g/sites`. */
-export function siteCookie(name: "prefs" | "sites", value: string, domain: SiteDomain, https: boolean): string {
+export function siteCookie(
+  name: keyof typeof COOKIE_NAMES,
+  value: string,
+  domain: SiteDomain,
+  https: boolean,
+  maxAge = MAX_AGE_SECONDS,
+): string {
   const [secureName, plainName] = COOKIE_NAMES[name];
-  const prefix = `${https ? secureName : plainName}=${value}; Max-Age=${MAX_AGE_SECONDS}; Domain=${domain.host}`;
+  const prefix = `${https ? secureName : plainName}=${value}; Max-Age=${maxAge}; Domain=${domain.host}`;
   return `${prefix}; Path=${COOKIE_PATH}; HttpOnly${https ? "; Secure" : ""}; SameSite=Lax`;
 }

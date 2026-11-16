@@ -98,5 +98,8 @@ describe("the settings cookie", () => {
     expect(siteCookie("sites", "v.s", domain, false)).toBe(
       "girici-sites=v.s; Max-Age=34560000; Domain=proxy.test; Path=/_g/sites; HttpOnly; SameSite=Lax",
     );
+    expect(siteCookie("clear", "n", domain, true, 600)).toBe(
+      "__Secure-girici-clear=n; Max-Age=600; Domain=proxy.test; Path=/_g/sites; HttpOnly; Secure; SameSite=Lax",
+    );
   });
 });

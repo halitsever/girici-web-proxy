@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from "node:crypto";
 import { escapeAttribute, isSiteLabel } from "@girici/engine/shared";
 import type { SiteKeys } from "./keys.ts";
 import { openValue, signValue } from "./signed.ts";
@@ -8,6 +9,8 @@ export interface ClearPlan {
   sites: string[];
   https: boolean;
   exp: number;
+  /** Hash of the nonce in the asking browser's clear cookie, so the link does nothing in any other browser. */
+  nonce: string;
 }
 
 export const PLAN_TTL_MS = 600_000;
@@ -23,10 +26,24 @@ export function signPlan(plan: ClearPlan, keys: SiteKeys): string {
 export function openPlan(p: string, s: string, keys: SiteKeys, now = Date.now()): ClearPlan | null {
   const value = openValue(keys.clear, PURPOSE, `${p}.${s}`);
   if (typeof value !== "object" || value === null) return null;
-  const { labels, sites, https, exp } = value as Record<string, unknown>;
+  const { labels, sites, https, exp, nonce } = value as Record<string, unknown>;
   if (!isStringList(labels) || !isStringList(sites) || labels.length !== sites.length) return null;
   if (!labels.every(isSiteLabel) || typeof https !== "boolean" || typeof exp !== "number" || exp < now) return null;
-  return { labels, sites, https, exp };
+  if (typeof nonce !== "string") return null;
+  return { labels, sites, https, exp, nonce };
+}
+
+export function newClearNonce(): string {
+  return randomBytes(16).toString("base64url");
+}
+
+export function hashClearNonce(nonce: string): string {
+  return createHash("sha256").update(nonce).digest("base64url");
+}
+
+/** True when one of the browser's clear cookies holds the plan's nonce. */
+export function planBelongsTo(plan: ClearPlan, nonces: readonly string[]): boolean {
+  return nonces.some((nonce) => hashClearNonce(nonce) === plan.nonce);
 }
 
 /** A top-level page, since WebKit ignores Clear-Site-Data on a frame; it moves on to `next` at once. */

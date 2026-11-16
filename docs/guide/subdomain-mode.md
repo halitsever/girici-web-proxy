@@ -173,10 +173,11 @@ back to the site afterwards.
   signed cookie that every site host reads. A site that is already open picks up a change on its next page load.
 - **Clearing data walks through each site.** **Settings → Site data** lists the sites opened in this browser. Clearing
   one or all of them takes the tab through each site's host in turn, where a `Clear-Site-Data` response empties it,
-  and then back to Settings. The list keeps the most recent sites that fit in about 3 KB; a site that falls off it
-  keeps its data until the browser evicts it or you clear `proxy.example` in the browser. The toolbar's **Clear site
-  data** clears the whole host of the site you are on. In Safari, the copies a site left while embedded elsewhere are
-  out of reach; Safari's own website data removal clears them.
+  and then back to Settings. The walk works only in the browser that started it, for ten minutes. The list keeps the
+  most recent sites that fit in about 3 KB; a site that falls off it keeps its data until the browser evicts it or you
+  clear `proxy.example` in the browser. The toolbar's **Clear site data** clears the whole host of the site you are on.
+  In Safari, the copies a site left while embedded elsewhere are out of reach; Safari's own website data removal clears
+  them.
 
 ## Known limits
 

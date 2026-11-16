@@ -30,7 +30,8 @@ const plan = async (sites: string[] | "all", origin = "https://proxy.test") => {
     headers: { origin, "content-type": "application/json", cookie: visited },
     body: JSON.stringify({ sites }),
   });
-  return { res, start: res.status === 200 ? ((await res.json()) as { start: string }).start : "" };
+  const nonce = res.cookies.find((value) => value.startsWith("__Secure-girici-clear="))?.split(";")[0] ?? "";
+  return { res, nonce, start: res.status === 200 ? ((await res.json()) as { start: string }).start : "" };
 };
 
 /** Splits a scheme-relative hop into the Host to send and the path. */
@@ -83,23 +84,24 @@ describe("the clearing chain", () => {
   });
 
   it("lands on each host once before it clears there", async () => {
-    const { start } = await plan(["https://site-b.test"]);
+    const { start, nonce } = await plan(["https://site-b.test"]);
     const [host, path] = hop(start);
-    const landing = await send(path, { host });
+    const landing = await send(path, { host, headers: { cookie: nonce } });
     expect(landing.status).toBe(200);
     expect(landing.headers["clear-site-data"]).toBeUndefined();
     expect(landing.headers["cache-control"]).toBe("no-store");
     expect(refreshOf(await landing.text())).toBe(`${path}&b=1`);
-    const cleared = await send(`${path}&b=1`, { host });
+    const cleared = await send(`${path}&b=1`, { host, headers: { cookie: nonce } });
     expect(cleared.headers["clear-site-data"]).toBe('"cache", "storage"');
     expect(hop(refreshOf(await cleared.text()))[0]).toBe("proxy.test");
   });
 
   it("clears each host in turn and refuses a tampered or foreign hop", async () => {
-    const { start } = await plan(["https://site-b.test", "https://site-a.test"]);
+    const { start, nonce } = await plan(["https://site-b.test", "https://site-a.test"]);
+    const headers = { cookie: nonce };
     const [host, landingPath] = hop(start);
     const path = `${landingPath}&b=1`;
-    const first = await send(path, { host });
+    const first = await send(path, { host, headers });
     expect(first.status).toBe(200);
     expect(first.headers["clear-site-data"]).toBe('"cache", "storage"');
     expect(first.headers["content-security-policy"]).toBe("default-src 'none'; frame-ancestors 'none'");
@@ -107,27 +109,64 @@ describe("the clearing chain", () => {
     const next = refreshOf(await first.text());
     expect(hop(next)[0]).toBe(siteA);
     expect(next).toMatch(/&i=1$/);
-    expect((await send(path, { host: siteA })).status).toBe(403);
-    expect((await send(tamper(path), { host })).status).toBe(403);
-    expect((await send(path.replace("i=0", "i=1"), { host })).status).toBe(403);
-    expect((await send(path.replace("i=0", "i=7"), { host })).status).toBe(403);
-    expect((await send(path.replace("&i=0", ""), { host })).status).toBe(403);
-    const second = await send(`${hop(next)[1]}&b=1`, { host: siteA });
+    expect((await send(path, { host: siteA, headers })).status).toBe(403);
+    expect((await send(tamper(path), { host, headers })).status).toBe(403);
+    expect((await send(path.replace("i=0", "i=1"), { host, headers })).status).toBe(403);
+    expect((await send(path.replace("i=0", "i=7"), { host, headers })).status).toBe(403);
+    expect((await send(path.replace("&i=0", ""), { host, headers })).status).toBe(403);
+    const second = await send(`${hop(next)[1]}&b=1`, { host: siteA, headers });
     expect(second.status).toBe(200);
     expect(hop(refreshOf(await second.text()))).toEqual(["proxy.test", expect.stringMatching(/^\/_g\/sites\/done\?/)]);
   });
 
   it("ends on the root, forgets the cleared sites and returns to Settings", async () => {
-    const { start } = await plan(["https://site-b.test", "https://site-a.test"]);
+    const { start, nonce } = await plan(["https://site-b.test", "https://site-a.test"]);
     const query = hop(start)[1].split("?")[1]!.replace(/&i=0$/, "");
-    const done = await send(`/_g/sites/done?${query}`, { host: "proxy.test", headers: { cookie: visited } });
+    const cookies = `${visited}; ${nonce}`;
+    const done = await send(`/_g/sites/done?${query}`, { host: "proxy.test", headers: { cookie: cookies } });
     expect(done.status).toBe(302);
     expect(done.headers.location).toBe("/settings?cleared=2");
     const cookie = done.cookies.find((value) => value.startsWith("__Secure-girici-sites="))!;
     expect(cookie).toMatch(/; Domain=proxy\.test; Path=\/_g\/sites;/);
     expect(readVisited(cookie.split(";")[0], setup.keys)).toEqual(["http://site-c.test"]);
-    expect((await send(`/_g/sites/done?${tamper(query)}`, { host: "proxy.test" })).status).toBe(403);
-    expect((await send(`/_g/sites/done?${query}`, { host: siteC })).status).toBe(404);
+    expect(done.cookies).toContainEqual(
+      expect.stringMatching(/^__Secure-girici-clear=; Max-Age=0; Domain=proxy\.test;/),
+    );
+    const tampered = await send(`/_g/sites/done?${tamper(query)}`, {
+      host: "proxy.test",
+      headers: { cookie: cookies },
+    });
+    expect(tampered.status).toBe(403);
+    expect((await send(`/_g/sites/done?${query}`, { host: siteC, headers: { cookie: cookies } })).status).toBe(404);
+  });
+});
+
+describe("binding a plan to its browser", () => {
+  it("sets a short-lived nonce cookie that every hop can read", async () => {
+    const { res } = await plan("all");
+    expect(res.cookies).toContainEqual(
+      expect.stringMatching(
+        /^__Secure-girici-clear=[\w-]{22}; Max-Age=600; Domain=proxy\.test; Path=\/_g\/sites; HttpOnly; Secure; SameSite=Lax$/,
+      ),
+    );
+  });
+
+  it("refuses every hop and the done page without the asking browser's nonce", async () => {
+    const mine = await plan(["https://site-b.test"]);
+    const theirs = await plan(["https://site-b.test"]);
+    const [host, path] = hop(mine.start);
+    const query = path.split("?")[1]!.replace(/&i=0$/, "");
+    const done = `/_g/sites/done?${query}`;
+    for (const cookie of [undefined, theirs.nonce, "__Secure-girici-clear=junk"]) {
+      const headers = cookie ? { cookie } : undefined;
+      expect((await send(path, { host, headers })).status).toBe(403);
+      expect((await send(`${path}&b=1`, { host, headers })).status).toBe(403);
+      expect(
+        (await send(done, { host: "proxy.test", headers: { cookie: `${visited}; ${cookie ?? ""}` } })).status,
+      ).toBe(403);
+    }
+    const cleared = await send(`${path}&b=1`, { host, headers: { cookie: `${theirs.nonce}; ${mine.nonce}` } });
+    expect(cleared.headers["clear-site-data"]).toBe('"cache", "storage"');
   });
 });
 
@@ -135,7 +174,7 @@ describe("clear plans", () => {
   it("expire after ten minutes", () => {
     const now = Date.now();
     const signed = new URLSearchParams(
-      signPlan({ labels: [], sites: [], https: false, exp: now + PLAN_TTL_MS }, setup.keys),
+      signPlan({ labels: [], sites: [], https: false, exp: now + PLAN_TTL_MS, nonce: "n" }, setup.keys),
     );
     const [p, s] = [signed.get("p")!, signed.get("s")!];
     expect(openPlan(p, s, setup.keys, now + PLAN_TTL_MS)).not.toBeNull();

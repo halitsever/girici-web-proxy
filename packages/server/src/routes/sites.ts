@@ -20,8 +20,25 @@ import express, { Router, type NextFunction, type Request, type Response } from 
 import { addSiteSession, isAdminCookie, siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { isOwnHost } from "../http/origin.ts";
-import { clearPage, openPlan, PLAN_TTL_MS, signPlan, type ClearPlan } from "../sites/clear.ts";
-import { readPrefsCookie, readVisited, rememberSite, signPrefs, signVisited, siteCookie } from "../sites/cookies.ts";
+import {
+  clearPage,
+  hashClearNonce,
+  newClearNonce,
+  openPlan,
+  planBelongsTo,
+  PLAN_TTL_MS,
+  signPlan,
+  type ClearPlan,
+} from "../sites/clear.ts";
+import {
+  readClearNonces,
+  readPrefsCookie,
+  readVisited,
+  rememberSite,
+  signPrefs,
+  signVisited,
+  siteCookie,
+} from "../sites/cookies.ts";
 import { requestHost, siteHostFor } from "../sites/hosts.ts";
 import type { SiteSetup } from "../sites/keys.ts";
 
@@ -104,14 +121,17 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
     const visited = readVisited(req.headers.cookie, keys);
     // Only listed sites: a plan names hosts this browser has used, nothing else.
     const sites = wanted === "all" ? visited : visited.filter((site) => wanted.includes(site));
+    const nonce = newClearNonce();
     const plan: ClearPlan = {
       labels: sites.map((site) => siteLabel(keys.label, site)),
       sites,
       https: isHttps(req),
       exp: Date.now() + PLAN_TTL_MS,
+      nonce: hashClearNonce(nonce),
     };
     const signed = signPlan(plan, keys);
     res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Set-Cookie", siteCookie("clear", nonce, domain, plan.https, PLAN_TTL_MS / 1000));
     res.json({ start: hopAfter(plan, signed, -1, setup) } satisfies SitePlanAnswer);
   });
 
@@ -123,7 +143,10 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
     }
     const left = readVisited(req.headers.cookie, keys).filter((site) => !plan.sites.includes(site));
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("Set-Cookie", siteCookie("sites", signVisited(left, keys), domain, plan.https));
+    res.setHeader("Set-Cookie", [
+      siteCookie("sites", signVisited(left, keys), domain, plan.https),
+      siteCookie("clear", "", domain, plan.https, 0),
+    ]);
     res.redirect(302, `/settings?${SITES_CLEARED_PARAM}=${plan.sites.length}`);
   });
 
@@ -203,9 +226,11 @@ function hopAfter(plan: ClearPlan, signed: string, index: number, setup: SiteSet
   return `//${next}.${setup.domain.value}${SITES_CLEAR_PATH}?${signed}&i=${index + 1}`;
 }
 
+/** The plan, only in the browser that asked for it: a link alone, minted by anyone, clears nothing. */
 function planOf(req: Request, setup: SiteSetup): ClearPlan | null {
   const { p, s } = req.query;
-  return typeof p === "string" && typeof s === "string" ? openPlan(p, s, setup.keys) : null;
+  const plan = typeof p === "string" && typeof s === "string" ? openPlan(p, s, setup.keys) : null;
+  return plan && planBelongsTo(plan, readClearNonces(req.headers.cookie)) ? plan : null;
 }
 
 /** The plan's own `p` and `s`, already checked, so they pass on unchanged. */
