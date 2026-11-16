@@ -41,7 +41,7 @@ to ones they do. Single-origin mode stays the default because this mode has cost
 - **The first visit to each site downloads the engine again.** Every host has its own service worker and cache, so the
   first visit to a site costs an extra round trip and about 700 KB of engine before compression.
 - **It needs a domain of its own.** Girici sets cookies for the whole domain, among them the session that lets site
-  hosts use the relay on a private instance. Any other service at that name or under it would receive them. A
+  hosts use the relay on a private instance and the pass from the browser check. Any other service at that name or under it would receive them. A
   subdomain that serves only Girici, such as `girici.example.com`, works. A proxied page can also set cookies for the
   registrable domain above it, `example.com` in that case, so when other services live under that domain, give Girici
   a registrable domain of its own.

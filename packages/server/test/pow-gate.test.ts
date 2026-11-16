@@ -2,22 +2,25 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import express from "express";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
+import { parseSiteDomain } from "@girici/engine/shared";
+import { createSessionToken, createSiteSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
-import { powGate, powUpgradeGate } from "../src/pow/gate.ts";
+import { powGate, powUpgradeGate, visitorCookieName } from "../src/pow/gate.ts";
 import { issueVisitor, powKey } from "../src/pow/tokens.ts";
 
 let server: Server;
 let base: string;
 let store: AuthStore;
 let adminCookie: string;
+let siteCookie: string;
 
 beforeAll(async () => {
   store = new AuthStore(openDb(":memory:"));
   const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
   store.setPublicAccess(true);
   adminCookie = `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`;
+  siteCookie = `girici-site=${createSiteSessionToken(admin.id, store.sessionSecret())}`;
   const app = express();
   app.set("trust proxy", 1);
   app.use("/_g/r", powGate({ store }), (_req, res) => {
@@ -82,6 +85,36 @@ describe("powGate", () => {
   });
 });
 
+describe("powGate in subdomain mode", () => {
+  const domain = parseSiteDomain("proxy.test")!;
+
+  it("names the cookie for every site host only where Domain is allowed", () => {
+    expect(visitorCookieName(true, domain)).toBe("__Secure-girici-visitor");
+    expect(visitorCookieName(true, undefined)).toBe("__Host-girici-visitor");
+    expect(visitorCookieName(false, domain)).toBe("girici-visitor");
+  });
+
+  it("takes the domain-wide cookie, renews it for the whole domain and passes the admin's site session", async () => {
+    const app = express();
+    app.use("/_g/r", powGate({ store, siteDomain: domain }), (_req, res) => {
+      res.status(204).end();
+    });
+    const site = createServer(app);
+    await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+    const at = `http://127.0.0.1:${(site.address() as AddressInfo).port}`;
+    try {
+      const old = Date.now() - 2 * 3_600_000;
+      const renewed = await hit(at, { cookie: `__Secure-girici-visitor=${visitor("127.0.0.1", old)}` });
+      expect(renewed.status).toBe(204);
+      expect(renewed.headers.get("set-cookie")).toMatch(/^__Secure-girici-visitor=[^;]+;.*Domain=proxy\.test;.*Secure/);
+      expect((await hit(at, { cookie: siteCookie })).status).toBe(204);
+      expect((await hit(at)).status).toBe(403);
+    } finally {
+      await new Promise<void>((resolve) => site.close(() => resolve()));
+    }
+  });
+});
+
 describe("powUpgradeGate", () => {
   it("refuses a WebSocket upgrade without a cookie", () => {
     const gate = powUpgradeGate({ store });
@@ -90,5 +123,6 @@ describe("powUpgradeGate", () => {
     const carrying = { headers: { cookie: `girici-visitor=${visitor("c")}` } } as IncomingMessage;
     expect(gate(carrying, "c")).toBeNull();
     expect(gate({ headers: { cookie: adminCookie } } as IncomingMessage, "c")).toBeNull();
+    expect(gate({ headers: { cookie: siteCookie } } as IncomingMessage, "c")).toBeNull();
   });
 });
