@@ -57,8 +57,9 @@ export function mimeOf(contentType: string | null): string | null {
 const CHARSET = /charset\s*=\s*["']?([^"';\s>]+)/i;
 
 export function decodeText(bytes: ArrayBuffer, contentType: string | null): string {
-  const isHtml = mimeOf(contentType) === "text/html";
-  const label = CHARSET.exec(contentType ?? "")?.[1] ?? (isHtml ? metaCharset(bytes) : undefined);
+  const mime = mimeOf(contentType) ?? "";
+  const sniffed = mime === "text/html" ? metaCharset(bytes) : isXml(mime) ? xmlCharset(bytes) : undefined;
+  const label = CHARSET.exec(contentType ?? "")?.[1] ?? sniffed;
   let decoder: TextDecoder;
   try {
     decoder = new TextDecoder(label ?? "utf-8");
@@ -66,6 +67,19 @@ export function decodeText(bytes: ArrayBuffer, contentType: string | null): stri
     decoder = new TextDecoder("utf-8");
   }
   return decoder.decode(bytes);
+}
+
+function isXml(mime: string): boolean {
+  return mime.endsWith("/xml") || mime.endsWith("+xml");
+}
+
+/** An XML document names its encoding with a byte order mark or in its declaration, and is UTF-8 otherwise. */
+function xmlCharset(bytes: ArrayBuffer): string | undefined {
+  const head = new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 256));
+  if (head[0] === 0xfe && head[1] === 0xff) return "utf-16be";
+  if (head[0] === 0xff && head[1] === 0xfe) return "utf-16le";
+  const text = new TextDecoder("latin1").decode(head);
+  return /^(?:\xef\xbb\xbf)?<\?xml[^>]*?\sencoding\s*=\s*["']([A-Za-z][\w.-]*)["']/.exec(text)?.[1];
 }
 
 /** Pages that name their encoding only in a <meta> tag must still decode right; full sniffing comes later. */

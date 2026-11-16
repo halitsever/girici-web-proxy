@@ -18,6 +18,12 @@ export function clientTag(src: string, config: ClientConfig): string {
   return `<script src="${src}" data-girici="${escapeAttribute(encode(config) ?? "null")}"></script>`;
 }
 
+/** For an XML document, where only an XHTML-namespaced script element is one the runtime can read. */
+export function xmlClientTag(src: string, config: ClientConfig): string {
+  const data = escapeAttribute(encode(config) ?? "null");
+  return `<script xmlns="http://www.w3.org/1999/xhtml" src="${escapeAttribute(src)}" data-girici="${data}"></script>`;
+}
+
 const TAG_END = '"></script>';
 
 /** Takes the runtime tag back out of a srcdoc the page reads, so it sees the markup it wrote. */

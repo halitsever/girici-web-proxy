@@ -2,7 +2,7 @@ import { extractMime, mimeOf } from "../shared/charset.ts";
 
 export { decodeText, mimeOf } from "../shared/charset.ts";
 
-export type BodyKind = "html" | "css" | "js";
+export type BodyKind = "html" | "xml" | "css" | "js";
 
 const DOCUMENT_DESTINATIONS = new Set<string>(["document", "iframe", "frame", "object", "embed"]);
 
@@ -24,6 +24,9 @@ export function sniffsHtml(bytes: ArrayBuffer): boolean {
   return HTML_START.test(new TextDecoder("latin1").decode(head));
 }
 
+/** XML documents that can run script. Other XML stays sandboxed, since nothing there needs the runtime. */
+const SCRIPTED_XML = new Set(["application/xhtml+xml", "image/svg+xml"]);
+
 /** Only bodies the browser will parse as a document, stylesheet or script need rewriting; fetch() data stays untouched. */
 export function rewriteKind(
   destination: RequestDestination,
@@ -31,7 +34,8 @@ export function rewriteKind(
   contentType: string | null,
 ): BodyKind | null {
   const type = mimeOf(contentType) ?? "";
-  if (isDocumentLoad(destination, navigation)) return type === "text/html" ? "html" : null;
+  if (isDocumentLoad(destination, navigation))
+    return type === "text/html" ? "html" : SCRIPTED_XML.has(type) ? "xml" : null;
   if (destination === "style") return type === "" || type.includes("css") ? "css" : null;
   if (destination === "script") return type === "" || /(?:java|ecma)script/.test(type) ? "js" : null;
   return null;
