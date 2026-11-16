@@ -116,7 +116,8 @@ test("reads a srcdoc Attr node back as written and runs it once", async ({ page 
   });
 });
 
-test("keeps the origin private file system apart per site", async ({ page }) => {
+test("keeps the origin private file system apart per site", async ({ page, browserName }) => {
+  test.skip(browserName === "webkit", "Playwright's WebKit fails OPFS writes with UnknownError, even on a plain page");
   const write = (value: string) =>
     page.evaluate(async (text) => {
       const root = await navigator.storage.getDirectory();
@@ -146,6 +147,9 @@ test("refuses one site's blob URLs to another", async ({ page, context }) => {
   const theirs = await page.evaluate(() => URL.createObjectURL(new Blob(["secret"])));
   const other = await context.newPage();
   await other.goto("/~/https/site-b.test/idb-store");
+  // A site host's first visit reloads past the bootstrap page, which would cut off a fetch started before it.
+  await expect(other.locator("#girici-boot")).toHaveCount(0);
+  await other.waitForLoadState("load");
   const outcome = await other.evaluate(async (url) => {
     const own = URL.createObjectURL(new Blob(["mine"]));
     const viaFetch = await fetch(url).then(
