@@ -1,5 +1,5 @@
 import { domainMatches } from "./cookie-mirror.ts";
-import { partitionOrigin, partitionTop } from "./partition.ts";
+import { opfsPartition, partitionOrigin, partitionTop } from "./partition.ts";
 
 /** The part of Storage used here; the service worker build compiles this folder without DOM types. */
 export interface KeyValueStore {
@@ -16,6 +16,13 @@ export interface StorageRealm {
   IDBFactory?: { prototype: IDBFactory };
   caches?: CacheStorage;
   CacheStorage?: { prototype: CacheStorage };
+  navigator?: { storage?: { getDirectory?(): Promise<OpfsDirectory> } };
+}
+
+/** The part of an origin private file system folder used here, typed by hand for the service worker build. */
+export interface OpfsDirectory {
+  keys(): AsyncIterable<string>;
+  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
 }
 
 /** The storage a window can reach; a proxied page captures these before its own hooks wrap them. */
@@ -26,6 +33,9 @@ export interface SiteDataEnv {
   deleteDatabase(name: string): Promise<void>;
   cacheNames(): Promise<string[]>;
   deleteCache(name: string): Promise<void>;
+  /** Names in the root of the origin private file system. */
+  folderNames?(): Promise<string[]>;
+  deleteFolder?(name: string): Promise<void>;
 }
 
 /** Binds the native functions now, so a realm can capture them before its storage isolation is installed. */
@@ -36,6 +46,10 @@ export function captureSiteDataEnv(win: StorageRealm): SiteDataEnv {
   const caches = attempt(() => win.caches);
   const cacheKeys = win.CacheStorage?.prototype.keys;
   const cacheDelete = win.CacheStorage?.prototype.delete;
+  const storage = attempt(() => win.navigator?.storage);
+  // Bound now: a page's own getDirectory is swapped for its partition's folder later.
+  const getDirectory = storage?.getDirectory;
+  const root = async () => (storage && getDirectory ? getDirectory.call(storage) : null);
   return {
     local: attempt(() => win.localStorage),
     session: attempt(() => win.sessionStorage),
@@ -59,6 +73,15 @@ export function captureSiteDataEnv(win: StorageRealm): SiteDataEnv {
     cacheNames: async () => (caches && cacheKeys ? cacheKeys.call(caches) : []),
     deleteCache: async (name) => {
       if (caches && cacheDelete) await cacheDelete.call(caches, name);
+    },
+    folderNames: async () => {
+      const folder = await root();
+      const names: string[] = [];
+      if (folder) for await (const name of folder.keys()) names.push(name);
+      return names;
+    },
+    deleteFolder: async (name) => {
+      await (await root())?.removeEntry(name, { recursive: true });
     },
   };
 }
@@ -94,12 +117,17 @@ export async function clearPartitions(env: SiteDataEnv, site: string | null): Pr
   }
   for (const name of await listOrEmpty(env.databaseNames)) if (matches(name)) await env.deleteDatabase(name);
   for (const name of await listOrEmpty(env.cacheNames)) if (matches(name)) await env.deleteCache(name);
+  for (const folder of await listOrEmpty(env.folderNames)) {
+    const name = opfsPartition(folder);
+    if (name !== null && matches(name)) await attemptAsync(() => env.deleteFolder?.(folder));
+  }
 }
 
 async function allNames(env: SiteDataEnv): Promise<{ storage: string[]; named: string[] }> {
+  const folders = (await listOrEmpty(env.folderNames)).map(opfsPartition).filter((name) => name !== null);
   return {
     storage: [...keysOf(env.local), ...keysOf(env.session)],
-    named: [...(await listOrEmpty(env.databaseNames)), ...(await listOrEmpty(env.cacheNames))],
+    named: [...(await listOrEmpty(env.databaseNames)), ...(await listOrEmpty(env.cacheNames)), ...folders],
   };
 }
 
@@ -114,11 +142,20 @@ function keysOf(storage: KeyValueStore | null): string[] {
 }
 
 /** A private window can refuse to enumerate databases; that store then has nothing to clear. */
-async function listOrEmpty(list: () => Promise<string[]>): Promise<string[]> {
+async function listOrEmpty(list: (() => Promise<string[]>) | undefined): Promise<string[]> {
   try {
-    return await list();
+    return list ? await list() : [];
   } catch {
     return [];
+  }
+}
+
+/** A file still open in a worker cannot be removed; the rest of the site's data is cleared all the same. */
+async function attemptAsync(run: () => Promise<void> | undefined): Promise<void> {
+  try {
+    await run();
+  } catch {
+    // Left for the next clear.
   }
 }
 

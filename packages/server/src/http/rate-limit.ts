@@ -1,3 +1,6 @@
+import type { RequestHandler } from "express";
+import { clientKey } from "./client-ip.ts";
+
 /** A fixed-window limiter keyed by client; returns false once a key exceeds max in the window. */
 export function rateLimiter({ windowMs, max }: { windowMs: number; max: number }): (key: string) => boolean {
   const hits = new Map<string, { count: number; reset: number }>();
@@ -48,4 +51,17 @@ export function tokenBucket({ perMinute, now = Date.now }: { perMinute: number; 
     return { ok: false, retryAfter: Math.max(1, Math.ceil((1 - bucket.tokens) / perMs / 1000)) };
   };
   return Object.assign(take, { size: () => buckets.size });
+}
+
+/** Answers 429 once the client's bucket is empty, for routes that only need a cap against floods. */
+export function limitByClient(limiter: Limiter): RequestHandler {
+  return (req, res, next) => {
+    const result = limiter(clientKey(req.ip ?? "?"));
+    if (result.ok) {
+      next();
+      return;
+    }
+    res.setHeader("Retry-After", String(result.retryAfter));
+    res.status(429).end();
+  };
 }

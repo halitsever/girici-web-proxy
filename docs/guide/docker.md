@@ -126,3 +126,13 @@ docker compose exec girici node reset-admin-password.js
 
 It prints a fresh random password and signs out other sessions. See
 [Admin and auth](/guide/admin-and-auth).
+
+## No shell in the image
+
+The image is built on distroless Node, so it has `node` and nothing else: no shell, no `npm`, no package manager.
+`docker compose exec girici sh` fails; run commands through `node` instead, as above. To look around the data
+directory, mount the volume into another container:
+
+```bash
+docker run --rm -it -v girici_data:/data alpine sh
+```

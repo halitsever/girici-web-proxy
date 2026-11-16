@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { CookieService } from "../src/sw/cookies/jar.ts";
 import { CookieRpc } from "../src/sw/rpc.ts";
@@ -104,6 +104,34 @@ describe("CookieRpc", () => {
     // A batch that turns up after the writes that followed it never puts an older value back.
     await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 2, cookies: ["a=old", "b=old"] }), "c1", page);
     expect(await header()).toBe("a=3; b=2");
+  });
+
+  describe("a batch that arrives after the next one gave up waiting for it", () => {
+    afterEach(() => vi.useRealTimers());
+
+    async function lateFirst(earlier: string, later: string) {
+      vi.useFakeTimers();
+      const cookies = await service();
+      const rpc = new CookieRpc(cookies);
+      await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 1, cookie: "x=0" }), "c1", page);
+      const next = rpc.handle(post({ v: PROTOCOL_VERSION, seq: 3, cookie: later }), "c1", page);
+      await vi.advanceTimersByTimeAsync(1000);
+      await next;
+      await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 2, cookie: earlier }), "c1", page);
+      return (await cookies.snapshot(page)).map((cookie) => `${cookie.path} ${cookie.name}=${cookie.value}`);
+    }
+
+    it("is still applied when it sets other cookies", async () => {
+      expect(await lateFirst("a=1", "b=2")).toEqual(["/ x=0", "/ b=2", "/ a=1"]);
+    });
+
+    it("does not overwrite a newer value of the same cookie", async () => {
+      expect(await lateFirst("a=1", "a=2")).toEqual(["/ x=0", "/ a=2"]);
+    });
+
+    it("still sets a cookie of the same name on another path", async () => {
+      expect(await lateFirst("a=1; path=/other", "a=2; path=/")).toEqual(["/ x=0", "/ a=2", "/other a=1"]);
+    });
   });
 
   it("applies one batch of a page at a time, even when two arrive together", async () => {

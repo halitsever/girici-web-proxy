@@ -100,7 +100,12 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
   const listLength = ownDescriptor(win.NodeList.prototype, "length")?.get;
   const elementQuery = element.querySelectorAll;
   const fragmentQuery = win.DocumentFragment?.prototype.querySelectorAll;
+  const firstElementOf = inheritedGetter(element, "firstElementChild");
+  const fragmentFirstOf = inheritedGetter(win.DocumentFragment?.prototype, "firstElementChild");
+  const nextElementOf = inheritedGetter(element, "nextElementSibling");
   const records = new NativeWeakMap<object, ScriptRecord>();
+  /** Subtrees found to hold no script. Each one and its descendants are in here until something goes into one. */
+  const scriptFree = new NativeWeakMap<object, true>();
 
   const nodeType = (value: unknown): unknown => {
     if (typeof value !== "object" || value === null || !nodeTypeOf) return 0;
@@ -208,11 +213,40 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
       else apply(data.set, holder, [value]);
     }
   };
+  /** Settles the scripts under `root` and tells whether it holds none. */
+  const settleTree = (root: unknown, firstOf: () => unknown, nextOf: () => unknown): boolean => {
+    if (apply(mapGet, scriptFree, [root])) return true;
+    let free = true;
+    if (isScript(root)) {
+      settle(root);
+      free = false;
+    }
+    const childFirstOf = firstElementOf as () => unknown;
+    for (let child = apply(firstOf, root, []); child; child = apply(nextOf, child, []))
+      if (!settleTree(child, childFirstOf, nextOf)) free = false;
+    if (free) apply(mapSet, scriptFree, [root, true]);
+    return free;
+  };
+  /** Whatever goes into a node may bring a script, so it and its ancestors need a fresh look. */
+  const touch = (target: unknown): void => {
+    if (!parentOf) return;
+    for (let node = target; node && apply(mapGet, scriptFree, [node]); node = apply(parentOf, node, []))
+      apply(mapDelete, scriptFree, [node]);
+  };
   const checkOne = (inserted: unknown): void => {
     const type = nodeType(inserted);
     if (type !== ELEMENT_NODE && type !== FRAGMENT_NODE) return;
     // A node being moved within the document holds only scripts that are connected too.
     if (type === ELEMENT_NODE && connectedOf && apply(connectedOf, inserted, [])) return;
+    // Frameworks build detached trees bottom up, so a walk that skips script-free subtrees keeps each insert cheap.
+    const firstOf = type === ELEMENT_NODE ? firstElementOf : fragmentFirstOf;
+    if (firstOf && firstElementOf && nextElementOf && parentOf)
+      try {
+        settleTree(inserted, firstOf, nextElementOf);
+        return;
+      } catch {
+        // Too deep to walk, or not a node the getters take: the query below copes.
+      }
     settle(inserted);
     const query = type === ELEMENT_NODE ? elementQuery : fragmentQuery;
     if (!query || !listLength) return;
@@ -225,6 +259,7 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
     }
   };
   const check = (nodes: unknown[], target: unknown): void => {
+    touch(target);
     textInto(nodes, target);
     for (let index = 0; index < nodes.length; index++) checkOne(nodes[index]);
   };

@@ -47,9 +47,16 @@ pages usually reach each other, but not for all of them. These gaps are known an
   opened for one of its own pages, and in Chromium one that a link or form opens in a new named window when the page
   stops the click or submit event from reaching Girici. Only per-site origin isolation, described below, separates
   these fully.
-- **The origin private file system is not partitioned.** `navigator.storage.getDirectory()` returns one folder that
-  every site shares.
-- **Blob URLs are shared.** A site that learns another site's `blob:` URL can read it.
+- **Storage buckets are not partitioned.** In Chromium, `navigator.storageBuckets` opens buckets by a name every site
+  shares, with their own databases, caches and file system.
+- **Blob URLs are only partly separated.** A page that asks for another site's `blob:` URL through `fetch` or
+  `XMLHttpRequest` gets the error a revoked URL gives, and so does a frame or window that navigates to one. Each page
+  and worker remembers the URLs it made and answers the others when they ask. Some reads still get through:
+  - an image, media, script, style or other element that loads the URL, read back through a canvas or the element
+    itself;
+  - a worker started from it, `importScripts` and a synchronous `XMLHttpRequest`, which cannot wait for an answer;
+  - a page or worker that does not answer within a moment, for example because it is busy;
+  - a page that reaches the browser's own `fetch`, as in the gaps above.
 - **`HttpOnly` is not a boundary.** Girici keeps cookies in its own store on the shared origin.
 
 In practice, a hostile site you open through Girici may be able to read or change what other sites stored through
@@ -68,6 +75,7 @@ same-origin rule separates sites. Between sites, most of the gaps listed above c
   `location`, is a real cross-origin window, and the browser refuses access to it.
 - **Rewriters in the page realm.** A page that breaks its own rewriter reaches only its own host's data.
 - **The origin private file system and blob URLs.** Both belong to one host.
+- **Shared workers.** A shared worker's address belongs to its site's host, so another site cannot reach it.
 - **Girici's own storage.** A page reaches only the cookie jar and storage of its own host.
 - **The UI.** History and settings live on the root, a different origin from every site.
 

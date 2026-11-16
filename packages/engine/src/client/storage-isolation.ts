@@ -3,6 +3,7 @@ import {
   apply,
   assignOwn,
   createObject,
+  define,
   defineData,
   indexOf,
   joined,
@@ -13,8 +14,12 @@ import {
   startsWith,
   toText,
 } from "../shared/primordials.ts";
+import { opfsFolder } from "../shared/partition.ts";
 import { hookConstructor } from "./constructors.ts";
+import { maskNative } from "./native-mask.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+
+const describe = Object.getOwnPropertyDescriptor;
 
 /** Named storage and messaging share our origin, so each partition's databases, caches, channels and locks are prefixed. */
 export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: () => string): void {
@@ -115,7 +120,48 @@ export function installStorageIsolation(win: Realm, ctx: UrlContext, partition: 
     );
   }
 
+  installOpfs(win, partition);
   installCookieStore(win, ctx);
+}
+
+interface OpfsRealm {
+  StorageManager?: { prototype: { getDirectory?: Method } };
+  FileSystemHandle?: { prototype: object };
+  FileSystemDirectoryHandle?: { prototype: { getDirectoryHandle?: Method } };
+}
+
+/**
+ * The origin private file system root is one folder for our whole origin, so getDirectory hands each partition a
+ * folder of its own. A handle has no parent, so nothing a page holds reaches the shared root.
+ */
+function installOpfs(win: Realm, partition: () => string): void {
+  const realm = win as unknown as OpfsRealm;
+  const manager = realm.StorageManager?.prototype;
+  const getDirectory = manager?.getDirectory;
+  const getDirectoryHandle = realm.FileSystemDirectoryHandle?.prototype.getDirectoryHandle;
+  if (!manager || !getDirectory || !getDirectoryHandle) return;
+  const page = pageRealm(win);
+  manager.getDirectory = maskNative(function (this: unknown) {
+    const folder = opfsFolder(partition());
+    // A null prototype: the native reads `create` through the page's Object.prototype otherwise.
+    const options = { __proto__: null, create: true };
+    return page.filter(
+      () => apply(getDirectory, this, []),
+      (root) => apply(getDirectoryHandle, root, [folder, options]),
+    );
+  }, getDirectory);
+  // A real root's name is empty, so the partition folder answers the same.
+  const proto = realm.FileSystemHandle?.prototype;
+  const descriptor = proto && describe(proto, "name");
+  const getName = descriptor?.get;
+  if (!proto || !descriptor || !getName) return;
+  define(proto, "name", {
+    ...descriptor,
+    get: maskNative(function (this: unknown) {
+      const name = apply(getName, this, []) as string;
+      return name === opfsFolder(partition()) ? "" : name;
+    }, getName),
+  });
 }
 
 interface Named {

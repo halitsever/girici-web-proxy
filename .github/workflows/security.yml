@@ -54,6 +54,8 @@ jobs:
           image-ref: girici:scan
           format: table
           severity: CRITICAL,HIGH,MEDIUM
+          # Debian lists open CVEs it has not patched yet; nothing in this repo can act on those.
+          ignore-unfixed: true
           exit-code: "0"
       - if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -61,6 +63,7 @@ jobs:
           image-ref: girici:scan
           format: sarif
           output: trivy.sarif
+          ignore-unfixed: true
           exit-code: "0"
           skip-setup-trivy: true
       - if: github.event_name != 'pull_request'

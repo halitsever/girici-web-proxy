@@ -40,7 +40,7 @@ volume at `/data`, then set up again.
 
 ### Girici exits with `Cannot open the database in /data`
 
-The data directory is not writable by the user inside the container (`node`, UID 1000). With a bind mount, run
+The data directory is not writable by the user inside the container (UID 1000). With a bind mount, run
 `sudo chown 1000:1000 <host dir>`. With a platform disk, see [Cloud platforms](/guide/cloud-platforms).
 
 ## Pages do not load

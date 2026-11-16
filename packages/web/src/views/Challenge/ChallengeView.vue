@@ -6,10 +6,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import BrandMark from "@/components/layout/BrandMark.vue";
 import SourceLink from "@/components/layout/SourceLink.vue";
-import { resolveNext } from "@/lib/next";
+import { getAuthState } from "@/lib/auth";
 import {
+  afterCheck,
   fetchChallenge,
-  isChallengePath,
   LOOPED,
   passedRecently,
   rememberPass,
@@ -41,7 +41,7 @@ async function run() {
     const nonce = await solveInWorker(challenge);
     await submitSolution({ challenge: challenge.challenge, nonce });
     rememberPass(tabStorage(), nextParam);
-    goNext();
+    await goNext();
   } catch (e) {
     error.value = e instanceof Error ? e.message : "The check did not go through. Reload the page to try again.";
     busy.value = false;
@@ -49,14 +49,12 @@ async function run() {
 }
 
 /** Replaces this entry, so Back from the page skips the check instead of running it again. */
-function goNext() {
-  const next = resolveNext(nextParam);
-  if (next.kind === "proxy") {
-    window.location.replace(next.path);
-    return;
-  }
-  const own = next.kind === "route" && !isChallengePath(new URL(next.path, window.location.origin).pathname);
-  void router.replace(own ? next.path : "/");
+async function goNext() {
+  // A site host in subdomain mode sends its own address, which only that mode's domain can vouch for.
+  const state = await getAuthState().catch(() => null);
+  const next = afterCheck(nextParam, state?.siteDomain ?? null);
+  if (next.kind === "leave") window.location.replace(next.url);
+  else void router.replace(next.path);
 }
 </script>
 

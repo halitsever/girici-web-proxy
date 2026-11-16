@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
+  afterCheck,
   fetchChallenge,
   isChallengePath,
   leadingZeroBits,
@@ -90,5 +91,21 @@ describe("challenge loop guard", () => {
       expect(isChallengePath(path), path).toBe(true);
     }
     for (const path of ["/", "/_g/challenges", "/_g/login"]) expect(isChallengePath(path), path).toBe(false);
+  });
+});
+
+describe("afterCheck", () => {
+  it("continues to a proxy address or a Girici page, never back to the check", () => {
+    expect(afterCheck("https://site-a.test/p?q=1", null)).toEqual({ kind: "leave", url: "/~/https/site-a.test/p?q=1" });
+    expect(afterCheck("/~/x/sealed", null)).toEqual({ kind: "leave", url: "/~/x/sealed" });
+    expect(afterCheck("/settings", null)).toEqual({ kind: "route", path: "/settings" });
+    expect(afterCheck("/_G/challenge/?next=x", null)).toEqual({ kind: "route", path: "/" });
+    expect(afterCheck("", null)).toEqual({ kind: "route", path: "/" });
+  });
+
+  it("returns to the site host that sent the visitor in subdomain mode", () => {
+    const site = "https://cmkprjpf6pvd57ha4qtfwpo3wp.proxy.test/~/x/sealed";
+    expect(afterCheck(site, "proxy.test")).toEqual({ kind: "leave", url: site });
+    expect(afterCheck("https://proxy.test/settings", "proxy.test")).toEqual({ kind: "route", path: "/" });
   });
 });
