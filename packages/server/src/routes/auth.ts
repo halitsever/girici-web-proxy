@@ -6,10 +6,11 @@ import { generateSetupCode, setupCodeMatches } from "../auth/setup-code.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { clientKey } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
-import { rateLimiter } from "../http/rate-limit.ts";
+import { limitByClient, rateLimiter, tokenBucket } from "../http/rate-limit.ts";
 
 export interface AuthRouterOptions {
   loginMax?: number;
+  statePerMinute?: number;
   /** The code the server printed at startup; without one, setup takes a code nobody has. */
   setupToken?: string;
   /** Subdomain mode: sign-in also issues the site session for every site host. */
@@ -33,8 +34,10 @@ export function authRouter(store: AuthStore, options: AuthRouterOptions = {}): R
   const allowSetup = rateLimiter({ windowMs: 60_000, max: 5 });
   const allowLogin = rateLimiter({ windowMs: 60_000, max: options.loginMax ?? 5 });
   const setupCode = options.setupToken ?? generateSetupCode();
+  // The UI reads the state on every load and navigation, so this sits well above what a person can click.
+  const limitState = limitByClient(tokenBucket({ perMinute: options.statePerMinute ?? 300 }));
 
-  router.get("/_g/auth/state", (req, res) => {
+  router.get("/_g/auth/state", limitState, (req, res) => {
     res.setHeader("Cache-Control", "no-store");
     // The UI reads this on every load, so an admin cookie from before subdomain mode gains its site session here.
     if (options.siteDomain) addSiteSession(req, res, store, options.siteDomain);

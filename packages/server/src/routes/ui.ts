@@ -4,12 +4,13 @@ import { CHALLENGE_PATH, LOGIN_PATH, SETUP_PATH } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
 import { sessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
+import { limitByClient, tokenBucket } from "../http/rate-limit.ts";
 import { PERMISSIONS_POLICY, UI_CSP } from "../http/security-headers.ts";
 
 // The UI is a single-page app; these client routes all load the same shell.
 const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH, CHALLENGE_PATH];
 
-export function uiRouter(webDistDir: string, store: AuthStore): Router {
+export function uiRouter(webDistDir: string, store: AuthStore, { perMinute = 300 } = {}): Router {
   const router = Router();
   router.use(
     "/_g/ui",
@@ -42,7 +43,9 @@ export function uiRouter(webDistDir: string, store: AuthStore): Router {
     });
     res.sendFile("index.html", { root: webDistDir, cacheControl: false });
   };
-  for (const route of APP_ROUTES) router.get(route, shell);
+  // Shared across app routes and generous enough for reloads from several tabs.
+  const limitShell = limitByClient(tokenBucket({ perMinute }));
+  for (const route of APP_ROUTES) router.get(route, limitShell, shell);
   return router;
 }
 
