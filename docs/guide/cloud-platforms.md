@@ -53,8 +53,8 @@ it up by hand:
 3. Add the variables:
    - `GIRICI_DATA_DIR=/data`
    - `GIRICI_TRUST_PROXY=1`
-   - `RAILWAY_RUN_UID=0`, because Railway mounts volumes as root and the image runs as the `node` user, which could
-     not write to it otherwise.
+   - `RAILWAY_RUN_UID=0`, because Railway mounts volumes as root and the image runs as UID 1000, which could not
+     write to it otherwise.
 4. Under **Networking**, generate a domain. Railway routes it to the port in `PORT`, which Girici reads.
 5. Set the health check path to `/healthz`.
 
@@ -66,7 +66,7 @@ carry over.
 Anything works that can:
 
 - run `halitsever/girici-web-proxy` (or build the `Dockerfile`);
-- mount a persistent disk at `/data`, writable by the `node` user (UID 1000);
+- mount a persistent disk at `/data`, writable by UID 1000;
 - serve it over HTTPS with WebSocket support.
 
 Serverless platforms that start a fresh instance per request, or have no disk, cannot run Girici.
