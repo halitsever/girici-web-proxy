@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clientTag, stripClientTag } from "../src/shared/client-tag.ts";
+import { spyBuiltins } from "./spied-builtins.ts";
 
 describe("clientTag", () => {
   it("embeds the config as an escaped attribute", () => {
@@ -73,5 +74,18 @@ describe("stripClientTag", () => {
     expect(stripClientTag('<script src="/other.js"></script><p>x</p>', url)).toBe(
       '<script src="/other.js"></script><p>x</p>',
     );
+  });
+
+  it("strips the tag without handing the markup or its cookies to the page's built-ins", async () => {
+    const url = "http://p.test/_g/client.T.js";
+    const cookie = { name: "s3cr3t", value: "1", domain: "a.test", path: "/" };
+    const config = { v: 1, cookies: [{ ...cookie, hostOnly: true, secure: false, expires: null, creation: 1 }] };
+    const markup = clientTag(url, config) + "<p>s3cr3t</p>";
+    let stripped = "";
+    const seen = await spyBuiltins("s3cr3t", () => {
+      stripped = stripClientTag(markup, url);
+    });
+    expect(seen).toEqual([]);
+    expect(stripped).toBe("<p>s3cr3t</p>");
   });
 });

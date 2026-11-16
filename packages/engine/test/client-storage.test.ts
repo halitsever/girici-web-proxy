@@ -1,5 +1,7 @@
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { createPartitionedStorage, installStorage, partitionFor } from "../src/client/storage.ts";
+import { spyBuiltins } from "./spied-builtins.ts";
 import type { Realm } from "../src/client/url-context.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 
@@ -54,6 +56,24 @@ describe("createPartitionedStorage", () => {
     expect(b.getItem("other")).toBe("x");
   });
 
+  it("reads the page's key index once", () => {
+    const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
+    a.setItem("k", "1");
+    let reads = 0;
+    const index = {
+      valueOf() {
+        reads++;
+        return 0;
+      },
+      toString() {
+        reads++;
+        return "0";
+      },
+    };
+    expect(a.key(index as unknown as number)).toBe("k");
+    expect(reads).toBe(1);
+  });
+
   it("stores values as strings", () => {
     const a = createPartitionedStorage(new MemoryStorage(), prefixFor("https://a.test"));
     a.setItem("n", 5 as unknown as string);
@@ -100,6 +120,44 @@ describe("createPartitionedStorage", () => {
       String.prototype.startsWith = startsWith;
     }
     expect(seen).toEqual([]);
+  });
+
+  it("keeps a window's storage away from the built-ins of the realm that made its runtime", async () => {
+    // The window's own Storage, from another realm than the runtime's, as in a window the browser reused.
+    const PageStorage = runInNewContext(`(class Storage {
+      #items = new Map();
+      get length() { return this.#items.size; }
+      key(index) { return [...this.#items.keys()][index] ?? null; }
+      getItem(key) { return this.#items.get(key) ?? null; }
+      setItem(key, value) { this.#items.set(key, String(value)); }
+      removeItem(key) { this.#items.delete(key); }
+    })`) as new () => Storage;
+    const native = new PageStorage();
+    const prefix = prefixFor("https://a.test");
+    native.setItem(`${prefix}s3cr3tk`, "s3cr3tv");
+    const ownDescriptorOf = Reflect.getOwnPropertyDescriptor;
+    const keysOf = Reflect.ownKeys;
+    const out: unknown[] = [0, 0, 0, 0, 0, 0, 0];
+    const seen = await spyBuiltins("s3cr3t", () => {
+      const storage = createPartitionedStorage(native, prefix) as Storage & Record<string, unknown>;
+      out[0] = storage.s3cr3tk;
+      out[1] = storage.getItem("s3cr3tk");
+      out[2] = ownDescriptorOf(storage, "s3cr3tk");
+      out[3] = storage.key(3);
+      out[4] = keysOf(storage);
+      out[5] = storage.length;
+      out[6] = storage.constructor === PageStorage;
+    });
+    expect(seen).toEqual([]);
+    expect(out).toEqual([
+      "s3cr3tv",
+      "s3cr3tv",
+      { value: "s3cr3tv", writable: true, enumerable: true, configurable: true },
+      null,
+      ["s3cr3tk"],
+      1,
+      true,
+    ]);
   });
 
   it("ignores proxy traps a page adds to Object.prototype", () => {

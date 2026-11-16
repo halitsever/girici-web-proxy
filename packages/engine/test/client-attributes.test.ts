@@ -191,7 +191,11 @@ describe("srcdoc through the DOM hooks", () => {
       opaque: () => false,
       openSealed: () => null,
     };
-    const bridge = createRewriteBridge(ctx, (b) => `<script src="/_g/c.js" data-girici="${b.href}"></script>`);
+    const bridge = createRewriteBridge(
+      ctx,
+      (b) => `<script src="/_g/c.js" data-girici="${b.href}"></script>`,
+      "/_g/c.js",
+    );
     const swaps = (url: string) => (url.startsWith("blob:page") ? "blob:boot" : url);
     const hooks = installAttributes(win, ctx as never, bridge, {
       swap: swaps,

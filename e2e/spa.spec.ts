@@ -30,6 +30,18 @@ test("keeps eval, Function and string timers inside the proxy", async ({ page })
   expect(out.nested).toBe("site-a.test");
   expect(out.evalDirect).toBe("https://site-a.test/exec");
   expect(out.toString).toBe(true);
+  expect([out.generator, out.async, out.asyncGenerator]).toEqual([
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+  ]);
+  // Parameters, objects that become code, and escaped names.
+  expect([out.params, out.objectBody, out.objectTimer, out.escaped]).toEqual([
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+    "https://site-a.test/exec",
+  ]);
 });
 
 test("hooked functions report native source to tamper checks", async ({ page }) => {
@@ -73,8 +85,7 @@ test("keeps blob worker subresources inside the proxy", async ({ page }) => {
   await expect(page.locator("#results")).toHaveText("done");
 });
 
-test("proxies Navigation API navigations", async ({ page, browserName }) => {
-  test.skip(browserName === "webkit", "WebKit has no Navigation API");
+test("proxies Navigation API navigations", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/nav-api");
   await page.click("#go");
   await expect(page).toHaveURL(/\/~\/https\/site-b\.test\//);

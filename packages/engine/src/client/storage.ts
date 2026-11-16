@@ -1,5 +1,5 @@
 import { prefixFor, sameSite } from "../shared/partition.ts";
-import { append, define, originOf, parseUrl } from "../shared/primordials.ts";
+import { append, define, originOf, ownValue, parseUrl, toNumber } from "../shared/primordials.ts";
 import { maskNative } from "./native-mask.ts";
 import type { DocumentListeners } from "./renewal.ts";
 import type { Realm } from "./url-context.ts";
@@ -17,6 +17,8 @@ const slice = String.prototype.slice;
 const NativeMap = Map;
 const mapGet = Map.prototype.get;
 const mapSet = Map.prototype.set;
+const NativeProxy = Proxy;
+const reflectGet = Reflect.get;
 
 /**
  * Where a window's storage lives: its own origin's, or for a frame of another site, a copy kept per top origin. The
@@ -55,12 +57,13 @@ export interface StorageMethods {
 export function storageMethods(proto: object): StorageMethods {
   const own = (name: string) => describe(proto, name);
   return {
+    __proto__: null,
     length: own("length")?.get as StorageMethods["length"],
     key: own("key")?.value as Storage["key"],
     getItem: own("getItem")?.value as Storage["getItem"],
     setItem: own("setItem")?.value as Storage["setItem"],
     removeItem: own("removeItem")?.value as Storage["removeItem"],
-  };
+  } as StorageMethods;
 }
 
 /** Every proxied site shares our origin's storage, so each real origin gets its own key prefix. */
@@ -78,11 +81,13 @@ export function createPartitionedStorage(
     const found: string[] = [];
     for (let index = 0; index < length(); index++) {
       const key = nativeKey(index);
-      if (key !== null && apply(startsWith, key, [prefix])) found.push(apply(slice, key, [prefix.length]) as string);
+      if (key !== null && apply(startsWith, key, [prefix])) append(found, apply(slice, key, [prefix.length]) as string);
     }
     return found;
   };
+  // Null prototypes: `in` and the proxy's descriptor checks must not reach the page's Object.prototype.
   const methods: Record<string, unknown> = {
+    __proto__: null,
     getItem: (key: unknown) => getItem(prefix + toText(key)),
     setItem: (key: unknown, value: unknown) => setItem(prefix + toText(key), toText(value)),
     removeItem: (key: unknown) => removeItem(prefix + toText(key)),
@@ -90,20 +95,22 @@ export function createPartitionedStorage(
       const own = keys();
       for (let index = 0; index < own.length; index++) removeItem(prefix + own[index]);
     },
-    key: (index: number) => keys()[index] ?? null,
-  };
+    // One conversion of the page's index, as the native makes one.
+    key: (index: unknown) => (ownValue(keys(), toNumber(index)) as string | undefined) ?? null,
+  } as Record<string, unknown>;
   // Sharing the native prototype keeps `instanceof Storage` true for the page.
   const target = create(protoOf(native) as object) as Storage;
   const proto = protoOf(target) as object;
 
-  // A null prototype keeps traps a page adds to Object.prototype out of this handler.
-  return new Proxy(target, {
+  // Made on the page's first access, so Proxy and Reflect.get are the ones taken at load. A null prototype keeps
+  // traps a page adds to Object.prototype out of this handler.
+  return new NativeProxy(target, {
     __proto__: null,
     get: (_target, property, receiver) => {
-      if (typeof property === "symbol") return Reflect.get(target, property, receiver);
+      if (typeof property === "symbol") return reflectGet(target, property, receiver);
       if (property === "length") return keys().length;
       if (property in methods) return methods[property];
-      if (property in proto) return Reflect.get(target, property, receiver);
+      if (property in proto) return reflectGet(target, property, receiver);
       return getItem(prefix + property) ?? undefined;
     },
     set: (_target, property, value) => {
@@ -122,7 +129,8 @@ export function createPartitionedStorage(
     getOwnPropertyDescriptor: (_target, property) => {
       if (typeof property !== "string") return undefined;
       const value = getItem(prefix + property);
-      return value === null ? undefined : { value, writable: true, enumerable: true, configurable: true };
+      if (value === null) return undefined;
+      return { __proto__: null, value, writable: true, enumerable: true, configurable: true } as PropertyDescriptor;
     },
     defineProperty: (_target, property, descriptor) => {
       if (typeof property === "string" && "value" in descriptor) setItem(prefix + property, toText(descriptor.value));
@@ -214,8 +222,8 @@ function installStorageEvents(
 }
 
 function findGetter(object: object, name: string): ((this: unknown) => unknown) | undefined {
-  for (let current: object | null = object; current; current = Object.getPrototypeOf(current) as object | null) {
-    const get = Object.getOwnPropertyDescriptor(current, name)?.get;
+  for (let current: object | null = object; current; current = protoOf(current) as object | null) {
+    const get = describe(current, name)?.get;
     if (get) return get;
   }
   return undefined;

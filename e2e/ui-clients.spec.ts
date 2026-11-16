@@ -63,8 +63,16 @@ test("a UI window a proxied page opens is out of that page's reach", async ({ pa
       );
       const popup = await popupEvent;
       await popup.waitForLoadState("load");
-      // The popup is a real UI window, so what its opener can reach is what matters.
-      expect(await popup.evaluate(async () => (await fetch("/_g/auth/state")).status)).toBe(200);
+      // The popup is a real UI window, so what its opener can reach is what matters. Firefox loads a popup with an
+      // opener outside the worker and the UI reloads it once through the worker, so the check retries across that.
+      await expect(async () => {
+        expect(
+          await popup.evaluate(async () => ({
+            controlled: !!navigator.serviceWorker.controller,
+            status: (await fetch("/_g/auth/state")).status,
+          })),
+        ).toEqual({ controlled: true, status: 200 });
+      }).toPass({ timeout: 10_000 });
       const reach = await page.evaluate(async () => {
         const popup = (window as unknown as Opener).__popup;
         if (!popup) return { closed: true, document: null, fetch: "throws" };

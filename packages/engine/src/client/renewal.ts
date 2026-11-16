@@ -9,6 +9,9 @@ export interface EngineScript {
 }
 
 const CLIENT_FILE = /^\/_g\/client\.[A-Za-z0-9]+\.js$/;
+// Taken at load: steps run on renewals, inside another site's page calls.
+const warn = console.warn;
+const nativeConsole = console;
 
 /** Only the engine's own file on our origin may renew a window: every way a page inserts a script rewrites its src. */
 export function engineScriptConfig(script: EngineScript | null, origin: string): ClientConfig | null {
@@ -61,7 +64,7 @@ export function createRenew(
  * (another engine version, a broken config), a reload gives the document a fresh window instead of the old state.
  * Chromium, Firefox and WebKit reuse only a window's initial blank document, so a reloaded page gets its own window.
  */
-export function renewExisting(helpers: unknown, reload: () => void): void {
+export function renewExisting(helpers: unknown, reload: () => void): boolean {
   let renewed = false;
   try {
     const renew = (helpers as { renew?: unknown } | null | undefined)?.renew;
@@ -70,6 +73,7 @@ export function renewExisting(helpers: unknown, reload: () => void): void {
     // A runtime that fails to renew is treated like one that cannot.
   }
   if (!renewed) reload();
+  return renewed;
 }
 
 /** Engines differ on whether a reused window keeps its listeners, so they are added again; the browser drops repeats. */
@@ -113,7 +117,7 @@ export class DocumentSteps {
       step(config);
     } catch (error) {
       // One browser difference should cost one step, not the whole document.
-      console.warn("Girici:", name, error);
+      apply(warn, nativeConsole, ["Girici:", name, error]);
     }
   }
 }
