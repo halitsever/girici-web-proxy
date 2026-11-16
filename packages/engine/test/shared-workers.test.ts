@@ -20,15 +20,15 @@ const nonce = "n".repeat(32);
 const addressOf = (partition = SITE_A, module = false, script = SCRIPT) =>
   new URL(origin + sharedWorkerPath(script, partition, module));
 const keyOf = (url: URL) => url.pathname + url.search;
-const answer = (url: URL, starts: SharedWorkerStarts, destination = "sharedworker") =>
-  answerSharedWorker({ destination }, url, { origin, runtimePath: "/_g/worker.x.js", starts });
+const answer = (url: URL, starts: SharedWorkerStarts, destination = "sharedworker", siteHost = false) =>
+  answerSharedWorker({ destination }, url, { origin, runtimePath: "/_g/worker.x.js", starts, siteHost });
 
 /** Answers a start that `who` announced, giving up after the wait in fake time. */
-async function answerFor(who: WorkerIdentity, partition: string): Promise<Response> {
+async function answerFor(who: WorkerIdentity, partition: string, siteHost = false): Promise<Response> {
   const starts = new SharedWorkerStarts();
   const url = addressOf(partition);
   starts.announce(keyOf(url), nonce, who);
-  const pending = answer(url, starts);
+  const pending = answer(url, starts, "sharedworker", siteHost);
   await vi.advanceTimersByTimeAsync(SHARED_START_WAIT_MS);
   return pending;
 }
@@ -89,6 +89,17 @@ describe("answerSharedWorker", () => {
     expect((await answerFor({ ...identity, top: "https://news.test" }, "__g^|null|https://site-a.test|")).status).toBe(
       200,
     );
+  });
+
+  it("lets a frame on a site host name the top host it was given, which the worker cannot ask", async () => {
+    vi.useFakeTimers();
+    const framed = "__g^|http://k6wjalxihe6pja6woodbryo47k.proxy.test|https://site-a.test|";
+    const unknown = { ...identity, top: null };
+    expect((await answerFor(unknown, framed, true)).status).toBe(200);
+    expect((await answerFor(unknown, framed)).status).toBe(403);
+    expect((await answerFor({ ...identity, top: "https://news.test" }, framed, true)).status).toBe(403);
+    const other = { page: "https://site-b.test/", top: null };
+    expect((await answerFor(other, framed, true)).status).toBe(403);
   });
 
   it("refuses a first-party partition to a page framed by another site", async () => {
@@ -201,6 +212,14 @@ describe("announceSharedStart", () => {
     expect(announceSharedStart(key, nonce, identity, { origin, starts })).toBe(true);
     expect(await starts.take(key, 0)).toEqual({ nonce, identity });
     expect(await starts.take(key, 0)).toBeNull();
+  });
+
+  it("queues a site host frame's start under the top host it names", () => {
+    const starts = new SharedWorkerStarts();
+    const key = keyOf(addressOf("__g^|http://k6wjalxihe6pja6woodbryo47k.proxy.test|https://site-a.test|"));
+    const framed = { ...identity, top: null };
+    expect(announceSharedStart(key, nonce, framed, { origin, starts })).toBe(false);
+    expect(announceSharedStart(key, nonce, framed, { origin, starts, siteHost: true })).toBe(true);
   });
 });
 

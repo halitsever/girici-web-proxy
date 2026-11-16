@@ -1,5 +1,5 @@
 import type { BrowserContext, Page } from "@playwright/test";
-import { expect, openThroughUi, test } from "./support/test.ts";
+import { expect, isSiteProject, openThroughUi, test } from "./support/test.ts";
 
 // Every way the opener can hold a window before another site's first page arrives in it. "existing" sends a window
 // that already shows a page of the opener's site, so the victim's page is its second history entry. The "prepared"
@@ -48,7 +48,8 @@ for (const [via, how, name, length] of PATHS) {
       sample: [],
       compiled: [],
       history: length,
-      referrer: "https://site-a.test/",
+      // A navigation between site hosts carries no referrer in subdomain mode.
+      referrer: isSiteProject(test.info()) ? "" : "https://site-a.test/",
       name,
       opener: opened,
       openerDocument: opened ? "SecurityError" : "none",

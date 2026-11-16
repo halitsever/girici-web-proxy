@@ -186,10 +186,6 @@ for (const { via, path, host = "site-b.test", answers, webkit, cookie } of VICTI
     context,
     browserName,
   }) => {
-    test.skip(
-      isSiteProject(test.info()) && via === "frame" && host === "site-b.test",
-      "another site's frame loads on its own host, so the browser keeps it out of the page's reach",
-    );
     // MagicString, which srcdoc markup goes through, breaks once Object.prototype has descriptor fields.
     const descriptors = path === "srcdoc" ? "&descriptors=off" : "";
     await openThroughUi(page, `https://site-a.test/xs-cookie-spy?do=${path}&host=${host}${descriptors}`);
@@ -213,8 +209,11 @@ for (const { via, path, host = "site-b.test", answers, webkit, cookie } of VICTI
     await expect(victim.locator("#results")).not.toBeEmpty();
     const results = JSON.parse((await victim.locator("#results").textContent()) ?? "{}") as Record<string, unknown>;
     // Proves which case ran: the spying page's runtime serving the victim, or the victim on a runtime of its own.
-    expect(results.reused).toBe(REUSED[via]);
-    const expected = browserName === "webkit" && webkit ? webkit : answers;
+    // In subdomain mode another site's frame loads on its own host, which gives it a window of its own.
+    const ownHost = isSiteProject(test.info()) && host === "site-b.test";
+    expect(results.reused).toBe(REUSED[via] && !ownHost);
+    // WebKit's answers differ only in a reused window.
+    const expected = browserName === "webkit" && webkit && !ownHost ? webkit : answers;
     if (expected) expect(expected).toContainEqual(results[path]);
     if (path === "listen") {
       await seed();
