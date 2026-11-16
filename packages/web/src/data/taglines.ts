@@ -1,3 +1,4 @@
+import { textFor, type Catalogs, type Lang } from "@girici/engine/shared";
 import { pickRandom } from "@/lib/random";
 
 // Light headline over the browse box. One is picked at random on each visit.
@@ -54,6 +55,53 @@ const taglines: [string, ...string[]] = [
   "Ready when you are. Where to?",
 ];
 
-export function getRandomTagline(): string {
-  return pickRandom(taglines);
+const turkish: [string, ...string[]] = [
+  "Engelleri kaldırmak için güzel bir gün.",
+  "Açık web bir arama uzağınızda.",
+  "Duvarlar buradan daha küçük görünüyor.",
+  "Adresi yazın, bekçiyi atlayın.",
+  "Bir yerlerde bir site sizi bekliyor.",
+  "Duvar yok, dolambaç yok, sadece istediğiniz sayfa.",
+  "Sınırlar haritalar içindir, tarayıcılar için değil.",
+  "Web nereye gidiyorsa siz de oraya.",
+  "Bir bağlantı yapıştırın, açılışını izleyin.",
+  "Web açık olsun diye yapıldı. Öyle kalsın.",
+  "Sizin sunucunuz, sizin kurallarınız, sizin internetiniz.",
+  "Orada engelli, burada açık.",
+  "Sayfaya ulaşın, barikatı geride bırakın.",
+  "Önce merak, kısıtlama asla.",
+  "Bir site seçin. Hangisi olursa.",
+  "Uzun yolun kısası.",
+  "Tek bir kutu, arkasında koca bir web.",
+  "Önce engeli kaldırın, soruları sonra sorun.",
+  "Çitsiz internet.",
+  "Tüm webe açılan sessiz bir kapı.",
+  "Nerede gezindiğiniz yalnızca sizi ilgilendirir.",
+  "Bir sekme açın, bir kıtaya açılın.",
+  "Söylemeniz yeter, site karşınızda.",
+  "Bölge yok, engel yok, dert yok.",
+  "Adres çubuğu özgürlüğü.",
+  "Burada her URL'ye ulaşılır.",
+  "Duvarlar hiç yokmuş gibi gezinin.",
+  "Güvenlik duvarının gidemediği yerlere gidelim.",
+  "Saklanan sayfa yeniden gözler önünde.",
+  "Tek adımda öbür taraftasınız.",
+  "Yazın, ulaşın, bu kadar.",
+  "Mesafe, görmezden gelebileceğiniz bir ayar.",
+  "Filtresiz webe açılan pencereniz.",
+  "Burada “engellendi” sadece bir öneri.",
+  "“Bölgenizde kullanılamıyor” yazısı olmayan web.",
+  "Her adrese açık bir yol.",
+  "Webin tamamını mahalleniz gibi dolaşın.",
+  "Webdeki her kapının kilidi açık.",
+  "Engeli geçin, doğrudan konuya gelin.",
+  "Açık internet, tam olması gerektiği gibi.",
+  "Her sayfaya giden yolu bulun.",
+  "Hazır olduğunuzda başlayalım. Nereye?",
+];
+
+const TAGLINES: Catalogs<[string, ...string[]]> = { en: taglines, tr: turkish };
+
+export function getRandomTagline(lang: Lang): string {
+  return pickRandom(textFor(TAGLINES, lang));
 }

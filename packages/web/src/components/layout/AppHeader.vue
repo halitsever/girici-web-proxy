@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { Search, SlidersHorizontal, User } from "lucide-vue-next";
 import { RouterLink, useRoute } from "vue-router";
+import { t, type TextKey } from "@/lib/i18n";
 import BrandMark from "./BrandMark.vue";
 
 const route = useRoute();
-const tabs = [
-  { to: "/", label: "Browse", icon: Search },
-  { to: "/settings", label: "Settings", icon: SlidersHorizontal },
-  { to: "/account", label: "Account", icon: User },
+const tabs: Array<{ to: string; label: TextKey; icon: typeof Search }> = [
+  { to: "/", label: "nav.browse", icon: Search },
+  { to: "/settings", label: "nav.settings", icon: SlidersHorizontal },
+  { to: "/account", label: "nav.account", icon: User },
 ];
 </script>
 
@@ -19,14 +20,14 @@ const tabs = [
       </RouterLink>
       <nav class="flex items-center gap-0.5 rounded-[10px] border border-border bg-card p-[3px]">
         <RouterLink
-          v-for="t in tabs"
-          :key="t.to"
-          :to="t.to"
+          v-for="tab in tabs"
+          :key="tab.to"
+          :to="tab.to"
           class="inline-flex h-8 items-center gap-[7px] rounded-[7px] px-3 text-[13px] font-medium no-underline transition-colors"
-          :class="route.path === t.to ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          :class="route.path === tab.to ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
         >
-          <component :is="t.icon" class="h-3.5 w-3.5" />
-          {{ t.label }}
+          <component :is="tab.icon" class="h-3.5 w-3.5" />
+          {{ t(tab.label) }}
         </RouterLink>
       </nav>
     </div>

@@ -11,6 +11,7 @@ const sites: SiteContext = {
   site: "https://site-a.test",
   toolbar: false,
   engine: "Google",
+  lang: "auto",
 };
 
 describe("shouldShowToolbar", () => {

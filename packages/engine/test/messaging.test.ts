@@ -278,6 +278,7 @@ const SITES: SiteContext = {
   site: "https://site-a.test",
   toolbar: true,
   engine: "DuckDuckGo",
+  lang: "auto",
 };
 const HOST_A = "https://k6wjalxihe6pja6woodbryo47k.proxy.test";
 const HOST_B = "https://g4fjzasx42nioynauh4u6ncvdg.proxy.test";

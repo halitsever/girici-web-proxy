@@ -166,6 +166,7 @@ export class SiteModeService {
       site: labelSiteOf(target),
       toolbar: state.prefs.toolbar,
       engine: state.prefs.engine,
+      lang: state.prefs.lang,
     };
   }
 

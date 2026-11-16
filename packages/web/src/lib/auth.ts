@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface AdminInfo {
   username: string;
   name: string;
@@ -36,14 +38,13 @@ export interface SetupInput {
 }
 
 const JSON_HEADERS = { "content-type": "application/json", accept: "application/json" };
-const WRONG_PASSWORD = "The current password is wrong. Forgot it? Run node reset-admin-password.js on the server.";
 
 let cached: Promise<AuthState> | null = null;
 
 /** The SPA guard and the account/settings screens read their truth from here. */
 export async function fetchAuthState(): Promise<AuthState> {
   const res = await fetch("/_g/auth/state", { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error("Could not load the sign-in state.");
+  if (!res.ok) throw new Error(t("error.authState"));
   return res.json() as Promise<AuthState>;
 }
 
@@ -59,15 +60,15 @@ function invalidate(): void {
 
 export async function setupAdmin(input: SetupInput): Promise<AuthState> {
   const state = await postState("/_g/setup", input, {
-    400: "Please fill every field; the password needs at least 8 characters.",
-    403: "The setup code is wrong. Copy it from the latest server log.",
+    400: t("error.setupFields"),
+    403: t("error.setupCode"),
   });
   invalidate();
   return state;
 }
 
 export async function login(username: string, password: string): Promise<AuthState> {
-  const state = await postState("/_g/login", { username, password }, { 401: "Wrong username or password." });
+  const state = await postState("/_g/login", { username, password }, { 401: t("error.login") });
   invalidate();
   return state;
 }
@@ -85,11 +86,7 @@ export async function updateAccount(input: {
   currentPassword: string;
 }): Promise<AdminInfo> {
   const res = await fetch("/_g/account", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) });
-  if (!res.ok)
-    throw writeError(
-      res.status,
-      res.status === 400 ? "Check the name, email and password." : "Could not save the account.",
-    );
+  if (!res.ok) throw writeError(res.status, res.status === 400 ? t("error.accountFields") : t("error.accountSave"));
   invalidate();
   return (await res.json()).admin as AdminInfo;
 }
@@ -100,7 +97,7 @@ export async function setPublicAccess(on: boolean, currentPassword: string): Pro
     headers: JSON_HEADERS,
     body: JSON.stringify({ publicAccess: on, currentPassword }),
   });
-  if (!res.ok) throw writeError(res.status, "Could not change public access.");
+  if (!res.ok) throw writeError(res.status, t("error.publicAccess"));
   invalidate();
   return (await res.json()).public as boolean;
 }
@@ -112,7 +109,7 @@ export async function setSealAddresses(on: boolean, currentPassword: string): Pr
     headers: JSON_HEADERS,
     body: JSON.stringify({ sealAddresses: on, currentPassword }),
   });
-  if (!res.ok) throw writeError(res.status, "Could not change address encryption.");
+  if (!res.ok) throw writeError(res.status, t("error.instanceSeal"));
   invalidate();
   return (await res.json()).sealAddresses as boolean;
 }
@@ -127,14 +124,14 @@ export async function setInstanceSwitch(
     headers: JSON_HEADERS,
     body: JSON.stringify({ [name]: on, currentPassword }),
   });
-  if (!res.ok) throw writeError(res.status, "Could not change the setting.");
+  if (!res.ok) throw writeError(res.status, t("error.setting"));
   invalidate();
   return res.json() as Promise<AdminSettings>;
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {
   const res = await fetch("/_g/admin/settings", { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error("Could not load the admin settings.");
+  if (!res.ok) throw new Error(t("error.adminSettings"));
   return res.json() as Promise<AdminSettings>;
 }
 
@@ -146,21 +143,21 @@ export async function saveBlockedHosts(hosts: string[], currentPassword: string)
   });
   if (res.status === 400) {
     const body = (await res.json().catch(() => ({}))) as { invalid?: string[] };
-    if (body.invalid?.length) throw new Error(`These entries are not valid sites: ${body.invalid.join(", ")}`);
+    if (body.invalid?.length) throw new Error(t("error.invalidHosts", { list: body.invalid.join(", ") }));
   }
-  if (!res.ok) throw writeError(res.status, "Could not save blocked sites.");
+  if (!res.ok) throw writeError(res.status, t("error.blockedSave"));
   return res.json() as Promise<AdminSettings>;
 }
 
 /** Account and admin writes share these answers: 403 is a wrong current password, 429 too many tries. */
 export function writeError(status: number, fallback: string): Error {
-  if (status === 403) return new Error(WRONG_PASSWORD);
-  if (status === 429) return new Error("Too many attempts. Wait a minute and try again.");
+  if (status === 403) return new Error(t("error.wrongPassword"));
+  if (status === 429) return new Error(t("error.tooManyAttempts"));
   return new Error(fallback);
 }
 
 async function postState(path: string, body: unknown, messages: Record<number, string>): Promise<AuthState> {
   const res = await fetch(path, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(messages[res.status] ?? "Something went wrong. Please try again.");
+  if (!res.ok) throw new Error(messages[res.status] ?? t("error.generic"));
   return res.json() as Promise<AuthState>;
 }

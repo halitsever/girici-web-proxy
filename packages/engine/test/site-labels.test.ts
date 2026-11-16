@@ -14,6 +14,7 @@ const sites: SiteContext = {
   site: "https://site-a.test",
   toolbar: true,
   engine: "DuckDuckGo",
+  lang: "auto",
 };
 const A = "https://k6wjalxihe6pja6woodbryo47k.proxy.test";
 const B = "https://g4fjzasx42nioynauh4u6ncvdg.proxy.test";

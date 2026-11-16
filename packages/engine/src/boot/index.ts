@@ -1,7 +1,12 @@
+import { pickLanguage, textFor } from "../shared/i18n/catalog.ts";
+import { fill } from "../shared/i18n/text.ts";
 import { nextBootAttempt, nextStep, REPLAY_FORM_ID, replayForm, type BootState } from "./attempts.ts";
+import { BOOT_TEXT } from "./text.ts";
 
 const STATE_KEY = "girici:boot";
 const status = document.getElementById("girici-boot");
+// The server wrote the page in the visitor's language, so its lang attribute wins over the browser's list.
+const text = textFor(BOOT_TEXT, pickLanguage(BOOT_TEXT, document.documentElement.lang, navigator.languages));
 
 function show(message: string): void {
   if (status) status.textContent = message;
@@ -26,13 +31,13 @@ function writeState(state: BootState): void {
 
 async function boot(): Promise<void> {
   if (!("serviceWorker" in navigator)) {
-    show("This browser cannot run Girici here. Service workers need HTTPS or localhost.");
+    show(text.noWorker);
     return;
   }
   const attempt = nextBootAttempt(readState(), Date.now());
   writeState(attempt.state);
   if (!attempt.allowed) {
-    show("Girici could not take control of this tab. Reload to try again.");
+    show(text.noControl);
     return;
   }
 
@@ -52,5 +57,5 @@ async function boot(): Promise<void> {
 }
 
 boot().catch((error: unknown) => {
-  show(`Girici could not start: ${error instanceof Error ? error.message : String(error)}`);
+  show(fill(text.failed, { error: error instanceof Error ? error.message : String(error) }));
 });

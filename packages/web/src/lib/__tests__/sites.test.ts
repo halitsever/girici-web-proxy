@@ -11,6 +11,7 @@ const SETTINGS: Settings = {
   blockCookies: false,
   toolbar: false,
   sealAddresses: true,
+  lang: "de",
 };
 
 function authState(siteDomain: string | null): AuthState {
@@ -47,7 +48,7 @@ describe("syncSettings", () => {
     expect(calls[0]!.init?.method).toBe("POST");
     expect(new Headers(calls[0]!.init?.headers).get("content-type")).toBe("application/json");
     expect(calls[0]!.init?.body).toBe(
-      '{"blockThirdPartyCookies":false,"sealAddresses":true,"toolbar":false,"engine":"Bing"}',
+      '{"blockThirdPartyCookies":false,"sealAddresses":true,"toolbar":false,"engine":"Bing","lang":"de"}',
     );
   });
 
@@ -71,7 +72,7 @@ describe("syncSettings", () => {
     await syncSettings(SETTINGS, authState(null));
     expect(calls).toEqual([]);
     expect(received).toEqual([
-      { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: false, sealAddresses: true },
+      { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: false, sealAddresses: true, lang: "de" },
     ]);
   });
 });

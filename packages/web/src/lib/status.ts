@@ -1,4 +1,5 @@
 import { relativeTime } from "./history";
+import { t } from "./i18n";
 
 export interface TrafficTotals {
   requests: number;
@@ -18,16 +19,14 @@ export interface StatusReport {
   limits: { bandwidthPerMinute: number; dailyQuota: number; metrics: boolean };
 }
 
-const LOAD_ERROR = "Could not load the status.";
-
 export async function fetchStatus(fetcher: typeof fetch = fetch): Promise<StatusReport> {
   let res: Response;
   try {
     res = await fetcher("/_g/admin/status", { headers: { accept: "application/json" } });
   } catch {
-    throw new Error(LOAD_ERROR);
+    throw new Error(t("error.status"));
   }
-  if (!res.ok) throw new Error(LOAD_ERROR);
+  if (!res.ok) throw new Error(t("error.status"));
   return res.json() as Promise<StatusReport>;
 }
 
@@ -50,12 +49,14 @@ export function formatBytes(bytes: number): string {
 }
 
 export function limitText(bytes: number, per: "minute" | "day"): string {
-  return bytes === 0 ? "Off" : `${formatBytes(bytes)} per ${per} per visitor`;
+  return bytes === 0
+    ? t("status.off")
+    : t(per === "minute" ? "status.perMinute" : "status.perDay", { size: formatBytes(bytes) });
 }
 
 export function runningText(startedAt: number, now = Date.now()): string {
   const ago = relativeTime(startedAt, now);
-  return ago === "now" ? "Running since just now" : `Running since ${ago} ago`;
+  return ago === t("time.now") ? t("status.runningNow") : t("status.running", { ago });
 }
 
 export function sumTotals(list: readonly TrafficTotals[]): TrafficTotals {

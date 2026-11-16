@@ -12,18 +12,17 @@ import {
   type SitePlanRequest,
   type SiteSummary,
 } from "@girici/engine/shared";
-
-const NEEDS_WORKER = "Site data needs the Girici service worker. Reload and try again.";
+import { t, tn } from "./i18n";
 
 /** The cookie jar lives in the service worker, which only answers pages it controls. */
 async function ensureController(): Promise<void> {
   const container = navigator.serviceWorker;
-  if (!container) throw new Error(NEEDS_WORKER);
+  if (!container) throw new Error(t("error.siteWorker"));
   await container.register("/_g/sw.js", { scope: "/", updateViaCache: "none" });
   await container.ready;
   if (container.controller) return;
   await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(NEEDS_WORKER)), 3000);
+    const timer = setTimeout(() => reject(new Error(t("error.siteWorker"))), 3000);
     container.addEventListener(
       "controllerchange",
       () => {
@@ -42,7 +41,7 @@ async function siteDataRpc<T>(body: Record<string, unknown>): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ v: PROTOCOL_VERSION, ...body }),
   });
-  if (!res.ok) throw new Error("Could not reach the site data store.");
+  if (!res.ok) throw new Error(t("error.siteStore"));
   return res.json() as Promise<T>;
 }
 
@@ -64,7 +63,7 @@ const LEGACY_CACHE_PREFIX = "girici:";
 /** Subdomain mode: the root lists the sites this browser opened from a cookie their hosts set. */
 export async function listVisitedSites(fetcher: typeof fetch = fetch): Promise<SiteListAnswer["sites"]> {
   const res = await fetcher(SITES_LIST_PATH, { headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error("Could not load the sites you visited.");
+  if (!res.ok) throw new Error(t("error.visited"));
   return ((await res.json()) as SiteListAnswer).sites;
 }
 
@@ -100,7 +99,7 @@ export async function clearSites(sites: string[] | "all", env: ClearSitesEnv = b
     body: JSON.stringify(body),
   });
   const start = res.ok ? ((await res.json()) as Partial<SitePlanAnswer>).start : undefined;
-  if (typeof start !== "string") throw new Error("Could not start clearing site data.");
+  if (typeof start !== "string") throw new Error(t("error.clearStart"));
   env.assign(start);
 }
 
@@ -116,7 +115,7 @@ function browserClearEnv(): ClearSitesEnv {
 export function clearedNote(value: unknown): string {
   if (typeof value !== "string" || !/^\d+$/.test(value)) return "";
   const count = Number(value);
-  return count === 1 ? "Cleared 1 site." : `Cleared ${count} sites.`;
+  return tn("sites.cleared", count);
 }
 
 /** Most sites are https, so only a plain http site keeps its scheme in the list. */

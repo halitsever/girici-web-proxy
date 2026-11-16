@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { initials } from "@/lib/account";
 import { getAuthState, logout, updateAccount, type AdminInfo } from "@/lib/auth";
+import { t } from "@/lib/i18n";
 
 const router = useRouter();
 const admin = ref<AdminInfo>({ username: "", name: "", email: "" });
@@ -26,14 +27,14 @@ async function onSaveProfile() {
   profileError.value = "";
   savedProfile.value = false;
   if (!currentPassword.value) {
-    profileError.value = "Enter your current password first.";
+    profileError.value = t("error.passwordFirst");
     return;
   }
   try {
     admin.value = await updateAccount({ name: name.value, email: email.value, currentPassword: currentPassword.value });
     savedProfile.value = true;
   } catch (e) {
-    profileError.value = e instanceof Error ? e.message : "Could not save.";
+    profileError.value = e instanceof Error ? e.message : t("account.saveFailed");
   }
 }
 
@@ -41,15 +42,15 @@ async function onChangePassword() {
   passwordError.value = "";
   savedPassword.value = false;
   if (password.value.length < 8) {
-    passwordError.value = "The password needs at least 8 characters.";
+    passwordError.value = t("account.tooShort");
     return;
   }
   if (password.value !== confirm.value) {
-    passwordError.value = "The two passwords do not match.";
+    passwordError.value = t("account.mismatch");
     return;
   }
   if (!currentPassword.value) {
-    passwordError.value = "Enter your current password first.";
+    passwordError.value = t("error.passwordFirst");
     return;
   }
   try {
@@ -65,7 +66,7 @@ async function onChangePassword() {
     confirm.value = "";
     savedPassword.value = true;
   } catch (e) {
-    passwordError.value = e instanceof Error ? e.message : "Could not change the password.";
+    passwordError.value = e instanceof Error ? e.message : t("account.passwordFailed");
   }
 }
 
@@ -94,65 +95,67 @@ onMounted(async () => {
         {{ monogram }}
       </div>
       <div class="min-w-0">
-        <p class="truncate text-[22px] font-semibold tracking-[-0.03em]">{{ admin.name || "Admin" }}</p>
+        <p class="truncate text-[22px] font-semibold tracking-[-0.03em]">{{ admin.name || t("account.admin") }}</p>
         <p class="truncate text-[14px] text-muted-foreground">@{{ admin.username }}</p>
       </div>
     </div>
 
     <div class="rounded-xl border border-border bg-gi-panel p-5">
       <label class="flex flex-col gap-2 text-[14px] font-medium">
-        Current password
+        {{ t("account.currentPassword") }}
         <Input v-model="currentPassword" type="password" autocomplete="current-password" />
       </label>
-      <p class="mt-2 text-[13px] text-muted-foreground">Needed to save any change on this page.</p>
+      <p class="mt-2 text-[13px] text-muted-foreground">{{ t("account.currentPasswordHelp") }}</p>
     </div>
 
     <div class="rounded-xl border border-border bg-gi-panel p-5">
-      <p class="text-[15px] font-semibold">Profile</p>
+      <p class="text-[15px] font-semibold">{{ t("account.profile") }}</p>
       <Alert v-if="profileError" variant="destructive" class="mt-4">
         <AlertDescription>{{ profileError }}</AlertDescription>
       </Alert>
       <div class="mt-4 grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Name
+          {{ t("account.name") }}
           <Input v-model="name" type="text" autocomplete="name" />
         </label>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Email
+          {{ t("account.email") }}
           <Input v-model="email" type="email" autocomplete="email" />
         </label>
       </div>
       <div class="mt-4 flex items-center justify-end gap-3">
-        <span v-if="savedProfile" class="text-[13px] text-gi-success">Saved</span>
-        <Button type="button" size="sm" @click="onSaveProfile">Save changes</Button>
+        <span v-if="savedProfile" class="text-[13px] text-gi-success">{{ t("account.saved") }}</span>
+        <Button type="button" size="sm" @click="onSaveProfile">{{ t("account.save") }}</Button>
       </div>
     </div>
 
     <div class="rounded-xl border border-border bg-gi-panel p-5">
-      <p class="text-[15px] font-semibold">Change password</p>
-      <p class="mt-1 text-[13px] text-muted-foreground">Changing it signs out every other device.</p>
+      <p class="text-[15px] font-semibold">{{ t("account.changePassword") }}</p>
+      <p class="mt-1 text-[13px] text-muted-foreground">{{ t("account.changePasswordHelp") }}</p>
       <Alert v-if="passwordError" variant="destructive" class="mt-4">
         <AlertDescription>{{ passwordError }}</AlertDescription>
       </Alert>
       <div class="mt-4 grid gap-4" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))">
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          New password
+          {{ t("account.newPassword") }}
           <Input v-model="password" type="password" autocomplete="new-password" />
         </label>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Confirm
+          {{ t("account.confirm") }}
           <Input v-model="confirm" type="password" autocomplete="new-password" />
         </label>
       </div>
       <div class="mt-4 flex items-center justify-end gap-3">
-        <span v-if="savedPassword" class="text-[13px] text-gi-success">Password changed</span>
-        <Button type="button" size="sm" @click="onChangePassword">Change password</Button>
+        <span v-if="savedPassword" class="text-[13px] text-gi-success">{{ t("account.passwordChanged") }}</span>
+        <Button type="button" size="sm" @click="onChangePassword">{{ t("account.changePassword") }}</Button>
       </div>
     </div>
 
     <div class="flex flex-wrap gap-3">
-      <Button type="button" variant="outline" size="sm" @click="onSignOut()">Sign out</Button>
-      <Button type="button" variant="outline" size="sm" @click="onSignOut(true)">Sign out everywhere</Button>
+      <Button type="button" variant="outline" size="sm" @click="onSignOut()">{{ t("account.signOut") }}</Button>
+      <Button type="button" variant="outline" size="sm" @click="onSignOut(true)">{{
+        t("account.signOutEverywhere")
+      }}</Button>
     </div>
   </div>
 </template>

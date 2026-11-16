@@ -94,6 +94,7 @@ describe("SiteModeService", () => {
       site: "https://site-a.test",
       toolbar: true,
       engine: "DuckDuckGo",
+      lang: "auto",
     });
   });
 

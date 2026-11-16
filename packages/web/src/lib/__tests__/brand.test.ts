@@ -3,13 +3,15 @@ import {
   applyBrandToDocument,
   brand,
   fetchBrand,
-  LOGO_ERROR,
   parseBrand,
   readLogoFile,
   saveBrand,
   type BrandDocument,
   type BrandElement,
 } from "../brand";
+import { en } from "@/locales/en";
+
+const LOGO_ERROR = en["error.logo"];
 
 afterEach(() => vi.unstubAllGlobals());
 

@@ -1,4 +1,5 @@
-import { append, ownValue } from "../shared/primordials.ts";
+import { pickLanguage, textFor, type LangChoice } from "../shared/i18n/catalog.ts";
+import { append, mapOf, ownValue } from "../shared/primordials.ts";
 import {
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
@@ -9,13 +10,12 @@ import { captureSiteDataEnv, clearPartitions, type SiteDataEnv } from "../shared
 import { classifyInput, type SearchEngine } from "../shared/target.ts";
 import { readToolbarPrefs } from "../shared/ui-settings.ts";
 import type { DocumentListeners } from "./renewal.ts";
-import { TOOLBAR_CSS, TOOLBAR_HTML } from "./toolbar-view.ts";
+import { TOOLBAR_CSS, TOOLBAR_TEXT, toolbarHtml } from "./toolbar-view.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
 
 export const TOOLBAR_TAG = "girici-bar";
 
 const MAX_REATTACH = 3;
-const CONFIRM_TEXT = "Clear cookies and storage for this site?";
 const KEY_EVENTS = ["keydown", "keyup", "keypress"] as const;
 // Taken at load: listen() runs again on renewal, after page code may have replaced it.
 const apply = Reflect.apply;
@@ -28,6 +28,8 @@ export interface ToolbarNatives {
   fetch: typeof fetch;
   /** Storage as it was before storage isolation wrapped it, so clearing reaches every partition by name. */
   siteData: SiteDataEnv;
+  /** The browser's languages, for a toolbar the UI left on "auto". */
+  languages: readonly string[];
 }
 
 /** One set of window key listeners for every document of a window, pointed at the toolbar shown now, if any. */
@@ -54,6 +56,14 @@ export function captureToolbarNatives(win: Realm): ToolbarNatives {
   } catch {
     // A top we cannot read is not our own page.
   }
+  let languages: readonly string[] = [];
+  try {
+    // Copied now, before page code can change what the getter returns.
+    // mapOf, not Array.from: the page owns this realm's Array and could swap it.
+    languages = mapOf(win.navigator.languages, (lang) => `${lang}`);
+  } catch {
+    // No list means English.
+  }
   const attachShadow = win.Element.prototype.attachShadow;
   const setInnerHtml = Object.getOwnPropertyDescriptor(win.ShadowRoot.prototype, "innerHTML")?.set;
   return {
@@ -65,6 +75,7 @@ export function captureToolbarNatives(win: Realm): ToolbarNatives {
     },
     fetch: win.fetch.bind(win),
     siteData: captureSiteDataEnv(win),
+    languages,
   };
 }
 
@@ -111,14 +122,15 @@ export function installToolbar(
   natives: ToolbarNatives,
   nav: ToolbarNavigation,
   keys: ToolbarKeys,
-  options: { home: string; engine: SearchEngine },
+  options: { home: string; engine: SearchEngine; lang: LangChoice },
 ): void {
+  const text = textFor(TOOLBAR_TEXT, pickLanguage(TOOLBAR_TEXT, options.lang, natives.languages));
   const doc = win.document;
   // An SVG document renders no HTML outside a foreignObject, so there is nowhere to show the bar.
   if (doc.documentElement?.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
   const host = doc.createElement(TOOLBAR_TAG);
   const root = natives.attachShadow(host);
-  natives.setShadowHtml(root, TOOLBAR_HTML);
+  natives.setShadowHtml(root, toolbarHtml(text));
   try {
     // Adopted sheets sit outside the page's CSS and its style-src rules.
     const sheet = new win.CSSStyleSheet();
@@ -154,11 +166,11 @@ export function installToolbar(
   const askToClear = () => {
     panel.hidden = true;
     confirm.hidden = false;
-    message.textContent = CONFIRM_TEXT;
+    message.textContent = text.confirmClear;
     confirm.querySelector<HTMLButtonElement>("button")?.focus();
   };
   const clearSite = async () => {
-    message.textContent = "Clearing…";
+    message.textContent = text.clearing;
     try {
       // The service worker picks the site from this page's address, so the body names none.
       const response = await natives.fetch(ctx.origin + SITE_DATA_RPC_PATH, {
@@ -171,7 +183,7 @@ export function installToolbar(
       await clearPartitions(natives.siteData, partitionsToClear(answer));
       nav.reload();
     } catch {
-      message.textContent = "Could not clear this site.";
+      message.textContent = text.clearFailed;
     }
   };
   const submit = () => {

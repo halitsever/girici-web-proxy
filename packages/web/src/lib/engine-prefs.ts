@@ -5,7 +5,7 @@ const ANSWER_MS = 1000;
 
 /** The service worker cannot read localStorage, so the UI tells it the switches it needs. */
 export async function syncEnginePrefs(
-  settings: Pick<Settings, "blockCookies" | "sealAddresses">,
+  settings: Pick<Settings, "blockCookies" | "sealAddresses" | "lang">,
   container: ServiceWorkerContainer | undefined = navigator.serviceWorker,
   instanceSeal?: boolean,
   /** Only for a site opened from the UI: a page can load the UI in a popup, which proves nothing. */
@@ -20,6 +20,7 @@ export async function syncEnginePrefs(
     v: PROTOCOL_VERSION,
     blockThirdPartyCookies: settings.blockCookies,
     sealAddresses: settings.sealAddresses,
+    lang: settings.lang,
   };
   if (instanceSeal !== undefined) message.instanceSeal = instanceSeal;
   if (seen) message.seen = true;

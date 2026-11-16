@@ -5,7 +5,7 @@ import { SITES } from "./e2e/support/site-mode.ts";
 const SITE_SPECS = /sites[\w-]*\.spec\.ts$/;
 /** Single-origin specs whose behaviour must hold in subdomain mode too. */
 const BORROWED_SPECS =
-  /(?:^|\/)(?:proxy|navigation|cross-site|isolation|cookies|third-party-cookies|toolbar|runtime|popup-realm|websocket|shared-worker|cookie-writes|dynamic-scripts)\.spec\.ts$/;
+  /(?:^|\/)(?:proxy|locale|navigation|cross-site|isolation|cookies|third-party-cookies|toolbar|runtime|popup-realm|websocket|shared-worker|cookie-writes|dynamic-scripts)\.spec\.ts$/;
 const singleOrigin = { testIgnore: [SITE_SPECS, ...(process.env.SMOKE ? [] : [/smoke\//])] };
 const siteMode = { testMatch: [SITE_SPECS, BORROWED_SPECS] };
 
@@ -19,6 +19,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:41000",
     proxy: { server: "http://127.0.0.1:41999", bypass: "127.0.0.1,localhost" },
+    // Specs find UI text by its English wording, and the UI follows the browser's language.
+    locale: "en-US",
     trace: "retain-on-failure",
   },
   webServer: [

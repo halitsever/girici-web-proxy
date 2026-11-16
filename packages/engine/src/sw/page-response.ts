@@ -29,6 +29,7 @@ import {
 } from "./body.ts";
 import { cacheKey, RewriteMemo, type Validators } from "./rewrite-cache.ts";
 import { schemefulSite } from "./cookies/policy.ts";
+import type { Lang } from "../shared/i18n/languages.ts";
 import { errorResponse, inertHeaders } from "./error-page.ts";
 import { keepSameHostReferrer, sameHostPolicy } from "./referrer-policy.ts";
 import type { TransportResult } from "./transport.ts";
@@ -52,6 +53,8 @@ export interface PageContext {
   uiOrigin?: string;
   /** Set on a site host: every document there gets it. */
   sites?: SiteContext;
+  /** For the error pages; English when unset. */
+  lang?: Lang;
 }
 
 const rewrites = new RewriteMemo();
@@ -160,7 +163,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
   };
   if ((kind === "html" || kind === "xml") && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
-    return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx));
+    return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx), ctx.lang);
   }
   const bytes = await new Response(body).arrayBuffer();
   const text = decodeText(bytes, contentType);
@@ -259,7 +262,7 @@ function failure(code: RelayErrorCode, status: number, ctx: PageContext, retryAf
   if (code === "challenge" && ctx.destination === "document")
     return Response.redirect(uiPageFor(CHALLENGE_PATH, ctx), 303);
   const wait = WAITS.has(code) ? retryAfter : undefined;
-  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, wait, homeOf(ctx));
+  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, wait, homeOf(ctx), ctx.lang);
 }
 
 function homeOf(ctx: PageContext): string | undefined {

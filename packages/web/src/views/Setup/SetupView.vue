@@ -8,6 +8,7 @@ import SourceLink from "@/components/layout/SourceLink.vue";
 import { Input } from "@/components/ui/input";
 import { setupAdmin } from "@/lib/auth";
 import { brand } from "@/lib/brand";
+import { t } from "@/lib/i18n";
 
 const router = useRouter();
 const setupToken = ref("");
@@ -31,7 +32,7 @@ async function onSubmit() {
     });
     await router.replace("/");
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "Setup failed.";
+    error.value = e instanceof Error ? e.message : t("setup.failed");
   } finally {
     busy.value = false;
   }
@@ -44,8 +45,8 @@ async function onSubmit() {
       <div class="flex flex-col items-center gap-3 text-center">
         <BrandMark size="lg" :show-name="false" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Set up {{ brand.name }}</h1>
-          <p class="mt-1 text-[14px] text-muted-foreground">Create the admin account that controls this proxy.</p>
+          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">{{ t("setup.title", { brand: brand.name }) }}</h1>
+          <p class="mt-1 text-[14px] text-muted-foreground">{{ t("setup.lead") }}</p>
         </div>
       </div>
 
@@ -56,32 +57,30 @@ async function onSubmit() {
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <label class="flex flex-col gap-2 text-[14px] font-medium">
-            Setup code
+            {{ t("setup.code") }}
             <Input v-model="setupToken" type="text" autocomplete="off" spellcheck="false" required />
           </label>
-          <p class="text-[13px] text-muted-foreground">
-            Girici prints it in the server log at startup. With Docker, run docker logs on the container.
-          </p>
+          <p class="text-[13px] text-muted-foreground">{{ t("setup.codeHelp") }}</p>
         </div>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Username
+          {{ t("login.username") }}
           <Input v-model="username" type="text" autocomplete="username" required />
         </label>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Name
+          {{ t("setup.name") }}
           <Input v-model="name" type="text" autocomplete="name" required />
         </label>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Email
+          {{ t("setup.email") }}
           <Input v-model="email" type="email" autocomplete="email" required />
         </label>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Password
+          {{ t("login.password") }}
           <Input v-model="password" type="password" autocomplete="new-password" minlength="8" required />
         </label>
       </div>
 
-      <Button type="submit" :disabled="busy">{{ busy ? "Creating…" : "Create admin" }}</Button>
+      <Button type="submit" :disabled="busy">{{ busy ? t("setup.busy") : t("setup.submit") }}</Button>
 
       <p class="text-center text-[13px]"><SourceLink /></p>
     </form>

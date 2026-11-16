@@ -1,3 +1,5 @@
+import type { Catalogs } from "../shared/i18n/catalog.ts";
+
 /** The Girici mark from girici-icon-white.svg, without its metadata block. */
 const MARK =
   '<svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z"/><rect width="38" height="8" x="24" y="26"/></svg>';
@@ -13,18 +15,70 @@ const CLOSE = icon("M6 6l12 12M18 6L6 18");
 const button = (action: string, label: string, content: string) =>
   `<button type="button" data-action="${action}" aria-label="${label}" title="${label}">${content}</button>`;
 
+export interface ToolbarText {
+  toolbar: string;
+  home: string;
+  back: string;
+  forward: string;
+  reload: string;
+  address: string;
+  clearSite: string;
+  hide: string;
+  clear: string;
+  cancel: string;
+  confirmClear: string;
+  clearing: string;
+  clearFailed: string;
+}
+
+/** Plain text with no markup characters, since it goes into attributes and the shadow root as written. */
+export const TOOLBAR_TEXT: Catalogs<ToolbarText> = {
+  en: {
+    toolbar: "Girici toolbar",
+    home: "Girici home",
+    back: "Back",
+    forward: "Forward",
+    reload: "Reload",
+    address: "Address",
+    clearSite: "Clear site data",
+    hide: "Hide toolbar",
+    clear: "Clear",
+    cancel: "Cancel",
+    confirmClear: "Clear cookies and storage for this site?",
+    clearing: "Clearing…",
+    clearFailed: "Could not clear this site.",
+  },
+  tr: {
+    toolbar: "Girici araç çubuğu",
+    home: "Girici ana sayfası",
+    back: "Geri",
+    forward: "İleri",
+    reload: "Yenile",
+    address: "Adres",
+    clearSite: "Site verilerini temizle",
+    hide: "Araç çubuğunu gizle",
+    clear: "Temizle",
+    cancel: "Vazgeç",
+    confirmClear: "Bu sitenin çerezleri ve depolanan verileri silinsin mi?",
+    clearing: "Temizleniyor…",
+    clearFailed: "Bu sitenin verileri temizlenemedi.",
+  },
+};
+
 /** Static markup only: no URLs, so nothing in it depends on the page's rewriting. */
-export const TOOLBAR_HTML = `<button class="handle" type="button" aria-label="Girici toolbar">${MARK}</button>
+export function toolbarHtml(text: ToolbarText): string {
+  return `<button class="handle" type="button" aria-label="${text.toolbar}">${MARK}</button>
 <div class="panel" role="toolbar" aria-label="Girici" hidden>
-${button("home", "Girici home", MARK)}${button("back", "Back", BACK)}${button("forward", "Forward", FORWARD)}${button("reload", "Reload", RELOAD)}
-<input class="address" type="text" aria-label="Address" spellcheck="false" autocomplete="off" autocapitalize="off">
-${button("clear", "Clear site data", TRASH)}${button("hide", "Hide toolbar", CLOSE)}
+${button("home", text.home, MARK)}${button("back", text.back, BACK)}${button("forward", text.forward, FORWARD)}${button("reload", text.reload, RELOAD)}
+<input class="address" type="text" aria-label="${text.address}" spellcheck="false" autocomplete="off" autocapitalize="off">
+${button("clear", text.clearSite, TRASH)}${button("hide", text.hide, CLOSE)}
 </div>
-<div class="panel confirm" role="group" aria-label="Clear site data" hidden>
+<div class="panel confirm" role="group" aria-label="${text.clearSite}" hidden>
 <span class="message"></span>
-<button class="text danger" type="button" data-action="confirm-clear">Clear</button>
-<button class="text" type="button" data-action="cancel-clear">Cancel</button>
+<button class="text danger" type="button" data-action="confirm-clear">${text.clear}</button>
+<button class="text" type="button" data-action="cancel-clear">${text.cancel}</button>
 </div>`;
+}
 
 export const TOOLBAR_CSS = `
 :host { all: initial; position: fixed; left: 12px; bottom: 12px; z-index: 2147483647; color: #fafafa;
