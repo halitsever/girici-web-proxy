@@ -1,5 +1,5 @@
 import { pickLanguage, textFor, type LangChoice } from "../shared/i18n/catalog.ts";
-import { append, ownValue } from "../shared/primordials.ts";
+import { append, mapOf, ownValue } from "../shared/primordials.ts";
 import {
   PROTOCOL_VERSION,
   SITE_DATA_RPC_PATH,
@@ -59,7 +59,8 @@ export function captureToolbarNatives(win: Realm): ToolbarNatives {
   let languages: readonly string[] = [];
   try {
     // Copied now, before page code can change what the getter returns.
-    languages = Array.from(win.navigator.languages);
+    // mapOf, not Array.from: the page owns this realm's Array and could swap it.
+    languages = mapOf(win.navigator.languages, (lang) => `${lang}`);
   } catch {
     // No list means English.
   }
