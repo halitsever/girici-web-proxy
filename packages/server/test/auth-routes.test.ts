@@ -18,11 +18,18 @@ const SETUP_CODE = "TEST-CODE-0001";
 
 async function listen(
   store: AuthStore,
-  options: { trustProxy?: boolean; siteDomain?: SiteDomain } = {},
+  options: { trustProxy?: boolean; siteDomain?: SiteDomain; statePerMinute?: number } = {},
 ): Promise<string> {
   const app = express();
   if (options.trustProxy) app.set("trust proxy", true);
-  app.use(authRouter(store, { loginMax: 5, setupToken: SETUP_CODE, siteDomain: options.siteDomain }));
+  app.use(
+    authRouter(store, {
+      loginMax: 5,
+      statePerMinute: options.statePerMinute,
+      setupToken: SETUP_CODE,
+      siteDomain: options.siteDomain,
+    }),
+  );
   server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -281,6 +288,14 @@ describe("authRouter logout everywhere", () => {
 });
 
 describe("authRouter limits", () => {
+  it("caps auth state reads per client with a Retry-After", async () => {
+    const base = await listen(new AuthStore(openDb(":memory:")), { statePerMinute: 3 });
+    for (let i = 0; i < 3; i++) expect((await fetch(`${base}/_g/auth/state`)).status).toBe(200);
+    const limited = await fetch(`${base}/_g/auth/state`);
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThanOrEqual(1);
+  });
+
   it("counts sign-ins from one IPv6 /64 together", async () => {
     const store = new AuthStore(openDb(":memory:"));
     store.createAdmin(setup);
