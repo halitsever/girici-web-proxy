@@ -126,6 +126,8 @@ export function installToolbar(
 ): void {
   const text = textFor(TOOLBAR_TEXT, pickLanguage(TOOLBAR_TEXT, options.lang, natives.languages));
   const doc = win.document;
+  // An SVG document renders no HTML outside a foreignObject, so there is nowhere to show the bar.
+  if (doc.documentElement?.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
   const host = doc.createElement(TOOLBAR_TAG);
   const root = natives.attachShadow(host);
   natives.setShadowHtml(root, toolbarHtml(text));

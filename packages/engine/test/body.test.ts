@@ -9,6 +9,16 @@ describe("rewriteKind", () => {
     expect(rewriteKind("image", false, "text/html")).toBeNull();
   });
 
+  it("rewrites XHTML and SVG documents but never an SVG loaded as an image", () => {
+    expect(rewriteKind("document", true, "application/xhtml+xml")).toBe("xml");
+    for (const destination of ["document", "iframe", "frame", "object", "embed"] as RequestDestination[])
+      expect(rewriteKind(destination, false, "image/svg+xml"), destination).toBe("xml");
+    expect(rewriteKind("image", false, "image/svg+xml")).toBeNull();
+    expect(rewriteKind("", false, "image/svg+xml")).toBeNull();
+    expect(rewriteKind("document", true, "application/xml")).toBeNull();
+    expect(rewriteKind("document", true, "text/xml")).toBeNull();
+  });
+
   it("picks the rewriter from the destination and the content type", () => {
     expect(rewriteKind("document", true, "text/html; charset=utf-8")).toBe("html");
     expect(rewriteKind("iframe", true, "TEXT/HTML")).toBe("html");
@@ -35,6 +45,14 @@ describe("decodeText", () => {
     expect(decodeText(utf8, null)).toBe("ğ");
   });
 
+  it("reads an XML document's encoding from its byte order mark or declaration", () => {
+    const latin = new Uint8Array([...new TextEncoder().encode('<?xml version="1.0" encoding="ISO-8859-9"?><a>'), 0xf0]);
+    expect(decodeText(latin.buffer, "image/svg+xml")).toBe('<?xml version="1.0" encoding="ISO-8859-9"?><a>ğ');
+    const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x61, 0x00, 0x2f, 0x00, 0x3e, 0x00]);
+    expect(decodeText(utf16.buffer, "application/xhtml+xml")).toBe("<a/>");
+    expect(decodeText(new TextEncoder().encode("<a>ğ</a>").buffer as ArrayBuffer, "text/xml")).toBe("<a>ğ</a>");
+  });
+
   it("falls back to the charset a page declares in <meta>", () => {
     const encode = (text: string, ...bytes: number[]) =>
       new Uint8Array([...new TextEncoder().encode(text), ...bytes]).buffer;
@@ -55,12 +73,11 @@ describe("sandboxesDocument", () => {
   it("sandboxes every document body it does not rewrite, except PDFs and media", () => {
     const cases: Array<[RequestDestination, boolean, string | null]> = [
       ["iframe", true, "text/plain"],
-      ["document", true, "image/svg+xml"],
       ["document", true, null],
-      ["document", true, "application/xhtml+xml"],
-      ["object", false, "image/svg+xml"],
       ["embed", false, "application/octet-stream"],
       ["frame", true, "application/xml"],
+      ["document", true, "text/xml"],
+      ["document", true, "application/rss+xml"],
     ];
     for (const [destination, navigation, type] of cases)
       expect(sandboxesDocument(destination, navigation, type), `${destination} ${type}`).toBe(true);
@@ -68,6 +85,8 @@ describe("sandboxesDocument", () => {
       expect(sandboxesDocument("document", true, type)).toBe(false);
     expect(sandboxesDocument("image", false, "image/svg+xml")).toBe(false);
     expect(sandboxesDocument("document", true, "text/html")).toBe(false);
+    expect(sandboxesDocument("document", true, "image/svg+xml")).toBe(false);
+    expect(sandboxesDocument("object", false, "application/xhtml+xml")).toBe(false);
   });
 });
 

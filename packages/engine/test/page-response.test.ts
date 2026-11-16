@@ -153,6 +153,54 @@ describe("buildPageResponse", () => {
     expect(video.headers.get("content-security-policy")).toBeNull();
   });
 
+  it("gives SVG and XHTML documents the runtime and keeps their type", async () => {
+    const svg =
+      '<?xml version="1.0" encoding="windows-1254"?><svg xmlns="http://www.w3.org/2000/svg"><a href="/x"/></svg>';
+    for (const [type, destination] of [
+      ["image/svg+xml", "document"],
+      ["image/svg+xml", "object"],
+      ["application/xhtml+xml", "iframe"],
+    ] as const) {
+      const res = await buildPageResponse(
+        upstream([["content-type", type]], svg),
+        context({ navigation: destination !== "object", destination }),
+      );
+      expect(res.headers.get("content-type")).toBe(`${type}; charset=utf-8`);
+      expect(res.headers.get("content-security-policy")).toBeNull();
+      const text = await res.text();
+      expect(text).toContain('encoding="UTF-8"');
+      expect(text).toContain(
+        '<svg xmlns="http://www.w3.org/2000/svg"><script xmlns="http://www.w3.org/1999/xhtml" src=',
+      );
+      expect(text).toContain('<a href="/~/https/site-a.test/x"/>');
+    }
+  });
+
+  it("keeps an SVG image, plain XML and a rootless SVG document inert", async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>';
+    const image = await buildPageResponse(
+      upstream([["content-type", "image/svg+xml"]], svg),
+      context({ destination: "image" }),
+    );
+    expect(await image.text()).toBe(svg);
+    const nav = context({ navigation: true, destination: "document" });
+    const xml = await buildPageResponse(upstream([["content-type", "text/xml"]], svg), nav);
+    expect(xml.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(await xml.text()).toBe(svg);
+    const broken = await buildPageResponse(upstream([["content-type", "image/svg+xml"]], "not xml"), nav);
+    expect(broken.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
+    expect(broken.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await broken.text()).toBe("not xml");
+  });
+
+  it("refuses an SVG document when its runtime cannot be verified", async () => {
+    const res = await buildPageResponse(
+      upstream([["content-type", "image/svg+xml"]], "<svg/>"),
+      context({ navigation: true, destination: "document", runtimeAvailable: async () => false }),
+    );
+    expect(res.status).toBe(503);
+  });
+
   it("injects an absolute runtime URL and the page's site", async () => {
     const res = await buildPageResponse(
       upstream([["content-type", "text/html"]], "<p>x</p>"),

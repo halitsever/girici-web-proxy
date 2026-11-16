@@ -23,7 +23,9 @@ nobody has tested it end to end yet.
 
 - **Voice, video calls and peer-to-peer features.** WebRTC is turned off so it cannot connect around the proxy.
 - **Sites that need a specific IP or region,** beyond what your server or upstream proxy has.
-- **Documents Girici does not rewrite.** XHTML, SVG and XML documents open without their scripts.
+- **Plain XML documents.** Feeds and other `application/xml` or `text/xml` documents open sandboxed, without
+  their scripts or `xml-stylesheet` styling. XHTML and SVG documents run normally, except that an XSLT stylesheet
+  they link is dropped.
 
 ## Help fill in this table
 

@@ -1,8 +1,8 @@
 import { rewriteCss } from "../rewrite/css.ts";
-import { rewriteHtml } from "../rewrite/html.ts";
+import { rewriteHtml, rewriteXml } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { rewriteRefresh } from "../rewrite/refresh.ts";
-import { clientTag } from "../shared/client-tag.ts";
+import { clientTag, xmlClientTag } from "../shared/client-tag.ts";
 import { encodeUrl } from "../shared/codec.ts";
 import {
   encodeHeaderValue,
@@ -97,7 +97,7 @@ async function peek(
 
 // The browser already decoded the relay body, so the upstream encoding and length no longer apply.
 const DROPPED_HEADERS = new Set(["content-encoding", "content-length", "set-cookie"]);
-const REWRITTEN_TYPES: Record<BodyKind, string> = {
+const REWRITTEN_TYPES: Record<Exclude<BodyKind, "xml">, string> = {
   html: "text/html; charset=utf-8",
   css: "text/css; charset=utf-8",
   js: "text/javascript; charset=utf-8",
@@ -149,9 +149,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     const length = envelope.find(([name]) => name === "content-length")?.[1];
     if (!encoded && length) headers.set("content-length", length);
     if (sandboxesDocument(ctx.destination, ctx.navigation, contentType)) {
-      for (const [name, value] of Object.entries(inertHeaders())) headers.set(name, value);
-      // With nosniff, a missing type leaves some browsers an empty document.
-      headers.set("content-type", contentTypeOf(contentType) ?? "text/plain; charset=utf-8");
+      sandbox(headers, contentType);
     } else if (isDocumentLoad(ctx.destination, ctx.navigation)) {
       // The browser parses the header on its own, so it may only ever see the one type decided here.
       const type = contentTypeOf(contentType);
@@ -164,38 +162,61 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     lastModified: envelope.find(([name]) => name === "last-modified")?.[1] ?? null,
     length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
   };
-  if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
+  if ((kind === "html" || kind === "xml") && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
     return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx), ctx.lang);
   }
-  const text = decodeText(await new Response(body).arrayBuffer(), contentType);
+  const bytes = await new Response(body).arrayBuffer();
+  const text = decodeText(bytes, contentType);
+  if (kind === "xml") {
+    const rewritten = rewriteXml(text, await documentOptions(ctx, xmlClientTag));
+    // Without a root to hold the runtime, the document gets no scripts at all.
+    if (rewritten === null) {
+      sandbox(headers, contentType);
+      return new Response(bytes, { status, headers });
+    }
+    headers.set("content-type", `${mimeOf(contentType)}; charset=utf-8`);
+    return new Response(rewritten, { status, headers });
+  }
   headers.set("content-type", REWRITTEN_TYPES[kind]);
   return new Response(await rewriteBody(kind, text, ctx, validators), { status, headers });
 }
 
-async function rewriteBody(kind: BodyKind, text: string, ctx: PageContext, validators: Validators): Promise<string> {
+function sandbox(headers: Headers, contentType: string | null): void {
+  for (const [name, value] of Object.entries(inertHeaders())) headers.set(name, value);
+  // With nosniff, a missing type leaves some browsers an empty document.
+  headers.set("content-type", contentTypeOf(contentType) ?? "text/plain; charset=utf-8");
+}
+
+/** What the HTML and XML rewriters need to give a document its runtime. */
+async function documentOptions(ctx: PageContext, tag: typeof clientTag) {
+  const config: ClientConfig = {
+    v: PROTOCOL_VERSION,
+    cookies: await ctx.cookies(),
+    site: schemefulSite(ctx.target),
+  };
+  if (ctx.cookiesBlocked) config.cookiesBlocked = true;
+  if (ctx.sites) config.sites = ctx.sites;
+  const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
+  return {
+    url: ctx.target,
+    origin: ctx.origin,
+    inject: tag(clientUrl, ctx.seal ? { ...config, seal: ctx.seal } : config),
+    // A srcdoc frame has no sealed address of its own, so it never gets the key. Its markup is HTML in any document.
+    frameInject: (base: URL) => clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } }),
+    opaque: !!ctx.seal,
+    ...(ctx.sites ? { attribute: keepSameHostReferrer } : undefined),
+  };
+}
+
+async function rewriteBody(
+  kind: Exclude<BodyKind, "xml">,
+  text: string,
+  ctx: PageContext,
+  validators: Validators,
+): Promise<string> {
   switch (kind) {
-    case "html": {
-      const config: ClientConfig = {
-        v: PROTOCOL_VERSION,
-        cookies: await ctx.cookies(),
-        site: schemefulSite(ctx.target),
-      };
-      if (ctx.cookiesBlocked) config.cookiesBlocked = true;
-      if (ctx.sites) config.sites = ctx.sites;
-      const clientUrl = new URL(ctx.clientScript, ctx.origin).href;
-      const inject = clientTag(clientUrl, ctx.seal ? { ...config, seal: ctx.seal } : config);
-      // A srcdoc frame has no sealed address of its own, so it never gets the key.
-      const frameInject = (base: URL) =>
-        clientTag(clientUrl, { ...config, inherit: { origin: ctx.origin, base: base.href } });
-      return rewriteHtml(text, {
-        url: ctx.target,
-        origin: ctx.origin,
-        inject,
-        frameInject,
-        opaque: !!ctx.seal,
-        ...(ctx.sites ? { attribute: keepSameHostReferrer } : undefined),
-      });
-    }
+    case "html":
+      return rewriteHtml(text, await documentOptions(ctx, clientTag));
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
     case "js":
