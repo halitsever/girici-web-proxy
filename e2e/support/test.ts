@@ -40,6 +40,15 @@ export async function enableSealing(page: Page): Promise<void> {
   await page.reload();
 }
 
+/** Linux WebKit sometimes never commits a navigation that switches browsing context groups (WebKit bug 327297). */
+export function retryWebKitInCi(): void {
+  // Retries are set before a project is known, so other browsers fail a retry at once.
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
+  test.beforeEach(({ browserName }, testInfo) => {
+    if (testInfo.retry > 0 && browserName !== "webkit") throw new Error("only WebKit gets a retry");
+  });
+}
+
 export async function openThroughUi(page: Page, url: string): Promise<void> {
   await page.goto("/");
   const input = page.getByLabel("URL or search");

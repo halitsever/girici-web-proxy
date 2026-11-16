@@ -1,5 +1,7 @@
 import type { Page } from "@playwright/test";
-import { expect, openThroughUi, test } from "./support/test.ts";
+import { expect, openThroughUi, retryWebKitInCi, test } from "./support/test.ts";
+
+retryWebKitInCi();
 
 async function rangeFetch(page: Page, url: string, range: string) {
   return page.evaluate(
