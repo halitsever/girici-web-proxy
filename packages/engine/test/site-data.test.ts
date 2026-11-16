@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionOrigin } from "../src/shared/partition.ts";
+import { opfsFolder, partitionOrigin, prefixFor } from "../src/shared/partition.ts";
 import { clearPartitions, partitionOrigins, type SiteDataEnv } from "../src/shared/site-data.ts";
 
 function fakeStorage(keys: string[]): Storage {
@@ -22,11 +22,18 @@ function keysOf(storage: Storage): string[] {
   return keys;
 }
 
-function fakeEnv(input: { local?: string[]; session?: string[]; dbs?: string[]; caches?: string[] }) {
+function fakeEnv(input: {
+  local?: string[];
+  session?: string[];
+  dbs?: string[];
+  caches?: string[];
+  folders?: string[];
+}) {
   const local = fakeStorage(input.local ?? []);
   const session = fakeStorage(input.session ?? []);
   const dbs = [...(input.dbs ?? [])];
   const caches = [...(input.caches ?? [])];
+  const folders = [...(input.folders ?? [])];
   const remove = (list: string[], name: string) => {
     const index = list.indexOf(name);
     if (index >= 0) list.splice(index, 1);
@@ -38,8 +45,15 @@ function fakeEnv(input: { local?: string[]; session?: string[]; dbs?: string[]; 
     deleteDatabase: async (name) => remove(dbs, name),
     cacheNames: async () => [...caches],
     deleteCache: async (name) => remove(caches, name),
+    folderNames: async () => [...folders],
+    deleteFolder: async (name) => remove(folders, name),
   };
-  return Object.assign(env, { localKeys: () => keysOf(local), dbs: () => [...dbs], caches: () => [...caches] });
+  return Object.assign(env, {
+    localKeys: () => keysOf(local),
+    dbs: () => [...dbs],
+    caches: () => [...caches],
+    folders: () => [...folders],
+  });
 }
 
 const env = () =>
@@ -108,5 +122,17 @@ describe("site partitions", () => {
     expect(partitionOrigin("__g|garbage")).toBeNull();
     expect(partitionOrigin("__g|javascript:alert(1)|k")).toBeNull();
     expect(partitionOrigin("girici:settings")).toBeNull();
+  });
+});
+
+describe("site partitions in the origin private file system", () => {
+  it("lists and clears a site's folders, leaving other folders alone", async () => {
+    const a = opfsFolder(prefixFor("https://a.test"));
+    const b = opfsFolder(prefixFor("https://b.test"));
+    const embedded = opfsFolder(prefixFor("https://b.test", "https://a.test"));
+    const e = fakeEnv({ folders: [a, b, embedded, "legacy"] });
+    expect(await partitionOrigins(e)).toEqual(["https://a.test", "https://b.test"]);
+    await clearPartitions(e, "a.test");
+    expect(e.folders()).toEqual([b, "legacy"]);
   });
 });

@@ -14,6 +14,13 @@ import type { OpenSealed } from "../shared/sealed-address.ts";
 import { readToolbarPrefs, UI_SETTINGS_KEY } from "../shared/ui-settings.ts";
 import { installAttributes } from "./attributes.ts";
 import { installBlobDocuments, isBlobUrl } from "./blob-documents.ts";
+import {
+  type BlobOwners,
+  type GateRealm,
+  installBlobGates,
+  installBlobOwners,
+  type OwnerRealm,
+} from "./blob-owners.ts";
 import { installCookies, type CookieBridge } from "./cookies.ts";
 import { installDocument } from "./document.ts";
 import { readConfig } from "./config.ts";
@@ -241,6 +248,7 @@ export function install(
 
   const childConfig = createChildConfig(ctx, () => cookies.snapshot(), steps, config);
 
+  let owners: BlobOwners | undefined;
   const installSteps: Array<[string, () => void]> = [
     ["document", () => (resetDomain = installDocument(win, ctx, sites))],
     // Early, so the window.open it wraps is still the browser's and the HTML sinks below can reach it.
@@ -310,7 +318,10 @@ export function install(
     ["service worker mask", () => installServiceWorkerMask(win)],
     // Before network so the shim captures the real fetch for its ws-prep RPC.
     ["websocket", () => installWebSocket(win, ctx)],
+    // Before storage isolation, so its channel keeps an unprefixed name.
+    ["blob owners", () => (owners = installBlobOwners(win as unknown as OwnerRealm, partition))],
     ["network", () => installNetwork(win, ctx, cookies)],
+    ["blob gates", () => owners && installBlobGates(win as unknown as GateRealm, owners, ctx.origin)],
     ["storage", () => append(listeners, installStorage(win, partition))],
     ["storage isolation", () => installStorageIsolation(win, ctx, partition)],
     [
@@ -384,7 +395,13 @@ export function install(
   });
   steps.add("blob document", (next) => {
     const blob = next.inherit?.blob;
-    if (typeof blob === "string" && isBlobUrl(blob)) void blobs.load(blob);
+    if (typeof blob !== "string" || !isBlobUrl(blob)) return;
+    // The bootstrap document is the embedder's to read, so another partition's blob stays out of it.
+    if (!owners) void blobs.load(blob);
+    else
+      owners.check(blob, (allowed) => {
+        if (allowed) void blobs.load(blob);
+      });
   });
   steps.run(config);
 }

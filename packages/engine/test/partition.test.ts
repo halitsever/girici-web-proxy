@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { partitionOrigin, partitionTop, prefixFor, sameSite } from "../src/shared/partition.ts";
+import {
+  opfsFolder,
+  opfsPartition,
+  partitionOrigin,
+  partitionTop,
+  prefixFor,
+  sameSite,
+} from "../src/shared/partition.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 describe("partitions with built-ins the page replaced", () => {
@@ -48,5 +55,14 @@ describe("partition names", () => {
     expect(sameSite(new URL("http://a.test/"), "https://a.test")).toBe(false);
     expect(sameSite(new URL("https://xa.test/"), "https://a.test")).toBe(false);
     expect(sameSite(new URL("https://a.test/"), "garbage")).toBe(false);
+  });
+
+  it("names an origin private file system folder per partition and reads it back", () => {
+    const third = prefixFor("https://b.test", "https://a.test");
+    expect(opfsFolder(prefixFor("https://a.test"))).not.toContain("/");
+    expect(opfsPartition(opfsFolder(third))).toBe(third);
+    expect(opfsPartition("photos")).toBeNull();
+    expect(opfsPartition("%E0%A4%A")).toBeNull();
+    expect(opfsPartition("__g|https://a.test|")).toBeNull();
   });
 });
