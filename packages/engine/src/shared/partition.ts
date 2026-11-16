@@ -11,6 +11,9 @@ import {
 } from "./primordials.ts";
 
 const PREFIX = "__g|";
+// Taken at load, as a page can replace the globals before a frame of it is adopted.
+const encode = encodeURIComponent;
+const decode = decodeURIComponent;
 const THIRD_PARTY = "__g^|";
 
 /**
@@ -29,6 +32,22 @@ export function partitionOrigin(name: string): string | null {
 /** The top origin of a third-party partition name ("null" when it was unknown); null for any other name. */
 export function partitionTop(name: string): string | null {
   return parseName(name)?.top ?? null;
+}
+
+/** The origin private file system folder of a partition; a folder name cannot hold the prefix's slashes. */
+export function opfsFolder(prefix: string): string {
+  return encode(prefix);
+}
+
+/** The partition name behind an origin private file system folder, or null for a folder no partition owns. */
+export function opfsPartition(folder: string): string | null {
+  let name: string;
+  try {
+    name = decode(folder);
+  } catch {
+    return null;
+  }
+  return opfsFolder(name) === folder && parseName(name) !== null ? name : null;
 }
 
 /** Same scheme, and the host is the site's host or one of its subdomains. */

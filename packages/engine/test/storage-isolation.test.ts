@@ -1,7 +1,7 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { installStorageIsolation } from "../src/client/storage-isolation.ts";
-import { prefixFor } from "../src/shared/partition.ts";
+import { opfsFolder, prefixFor } from "../src/shared/partition.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { recordingCalls } from "./recording-calls.ts";
 import { withReplaced } from "./replaced-builtins.ts";
@@ -380,5 +380,80 @@ describe("installStorageIsolation inside an adoption", () => {
     );
     win.indexedDB.open("__girici");
     expect(opened).toEqual([`idb:${prefixFor("https://a.test")}__girici`]);
+  });
+});
+
+/** An origin private file system: folders by path, with the handle classes a realm exposes. */
+function fakeOpfsWin() {
+  const created: string[] = [];
+  const paths = new WeakMap<object, string>();
+  class FileSystemHandle {
+    get name(): string {
+      const path = paths.get(this);
+      if (path === undefined) throw new TypeError("Illegal invocation");
+      return path.split("/").pop() ?? "";
+    }
+  }
+  class FileSystemDirectoryHandle extends FileSystemHandle {
+    getDirectoryHandle(name: string, options?: { create?: boolean }) {
+      if (options?.create) created.push(name);
+      const child = new FileSystemDirectoryHandle();
+      paths.set(child, `${paths.get(this)}/${name}`);
+      return Promise.resolve(child);
+    }
+  }
+  const root = new FileSystemDirectoryHandle();
+  paths.set(root, "");
+  class StorageManager {
+    getDirectory() {
+      return Promise.resolve(root);
+    }
+  }
+  const win = {
+    StorageManager,
+    FileSystemHandle,
+    FileSystemDirectoryHandle,
+    navigator: { storage: new StorageManager() },
+    ...PAGE,
+  } as unknown as Realm & { navigator: { storage: { getDirectory(): Promise<FileSystemDirectoryHandle> } } };
+  return { win, created, paths, root };
+}
+
+describe("installStorageIsolation for the origin private file system", () => {
+  it("gives each partition a folder of its own that reads as a root", async () => {
+    const { win, created, paths } = fakeOpfsWin();
+    let partition = prefixFor("https://a.test");
+    installStorageIsolation(win, ctxFor("https://a.test"), () => partition);
+    const a = await win.navigator.storage.getDirectory();
+    partition = prefixFor("https://b.test");
+    const b = await win.navigator.storage.getDirectory();
+    expect(created).toEqual([opfsFolder(prefixFor("https://a.test")), opfsFolder(prefixFor("https://b.test"))]);
+    expect(paths.get(a)).toBe(`/${opfsFolder(prefixFor("https://a.test"))}`);
+    expect(paths.get(b)).not.toBe(paths.get(a));
+    expect(b.name).toBe("");
+    expect((await b.getDirectoryHandle("data")).name).toBe("data");
+    expect(win.navigator.storage.getDirectory()).toBeInstanceOf(PAGE.Promise);
+  });
+
+  it("keeps the shared root out of the page's own promise machinery", async () => {
+    const { win, root } = fakeOpfsWin();
+    const seen: unknown[] = [];
+    const then = PAGE.Promise.prototype.then;
+    installStorageIsolation(win, ctxFor("https://a.test"), () => prefixFor("https://a.test"));
+    PAGE.Promise.prototype.then = function (this: Promise<unknown>, resolve, reject) {
+      return Reflect.apply(then, this, [
+        (value: unknown) => {
+          seen.push(value);
+          return typeof resolve === "function" ? resolve(value) : value;
+        },
+        reject,
+      ]) as Promise<never>;
+    };
+    try {
+      await win.navigator.storage.getDirectory();
+    } finally {
+      PAGE.Promise.prototype.then = then;
+    }
+    expect(seen).not.toContain(root);
   });
 });

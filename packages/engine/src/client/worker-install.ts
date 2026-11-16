@@ -15,6 +15,7 @@ import {
   toText,
 } from "../shared/primordials.ts";
 import { rewriteUrl, unrewriteUrl } from "../shared/url-rewrite.ts";
+import { type GateRealm, installBlobGates, installBlobOwners, type OwnerRealm } from "./blob-owners.ts";
 import { hookConstructor } from "./constructors.ts";
 import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
@@ -68,10 +69,13 @@ export function installWorker(scope: WorkerScope): void {
 
   define(scope, "__g$", { value: workerHelpers(scope, ctx) });
   maskOrigin(scope, ctx);
+  // Before storage isolation, so its channel keeps an unprefixed name.
+  const owners = installBlobOwners(scope as unknown as OwnerRealm, () => partition);
   installStorageIsolation(scope as unknown as Realm, ctx, () => partition);
   hookImportScripts(scope, ctx);
   hookFetch(scope, ctx);
   hookXhr(scope, ctx);
+  installBlobGates(scope as unknown as GateRealm, owners, ctx.origin);
   hookSubresources(scope, ctx);
   // Nested workers get this worker's runtime and partition; a blob one also keeps this worker's base.
   hookWorkers(scope, {

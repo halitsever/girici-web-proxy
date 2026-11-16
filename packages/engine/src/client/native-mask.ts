@@ -13,7 +13,9 @@ const natives = new WeakMap<object, AnyFunction>();
 /** Records that `hooked` replaces `native`; anti-tamper checks that read fn.toString() then see "[native code]". */
 export function maskNative<T>(hooked: T, native: unknown): T {
   if (typeof hooked === "function" && typeof native === "function") {
-    apply(store, natives, [hooked, native]);
+    // A hook over another hook reports the browser's native, not the inner hook's source.
+    const inner = apply(lookup, natives, [native]) as AnyFunction | undefined;
+    apply(store, natives, [hooked, inner ?? native]);
   }
   return hooked;
 }
