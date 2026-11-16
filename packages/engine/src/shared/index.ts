@@ -9,3 +9,4 @@ export * from "./ui-settings.ts";
 export * from "./partition.ts";
 export * from "./site-data.ts";
 export { SEALED_PREFIX, isSealedPath, type OpenSealed } from "./sealed-address.ts";
+export { sha256 } from "./seal-cipher.ts";

@@ -48,6 +48,18 @@ describe("authRouter state", () => {
     store.setSealAddresses(true);
     expect(await (await fetch(`${base}/_g/auth/state`)).json()).toMatchObject({ authed: false, sealAddresses: true });
   });
+
+  it("tells visitors to warn about shared links only while the instance is public", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const base = await listen(store);
+    const warning = async () =>
+      ((await (await fetch(`${base}/_g/auth/state`)).json()) as { deepLinkWarning: unknown }).deepLinkWarning;
+    expect(await warning()).toBe(false);
+    store.setPublicAccess(true);
+    expect(await warning()).toBe(true);
+    store.setDeepLinkWarning(false);
+    expect(await warning()).toBe(false);
+  });
 });
 
 describe("authRouter setup", () => {

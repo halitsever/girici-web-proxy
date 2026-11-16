@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { setPublicAccess, setSealAddresses, updateAccount } from "../auth";
+import { setInstanceSwitch, setPublicAccess, setSealAddresses, updateAccount } from "../auth";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -21,5 +21,27 @@ describe("admin writes", () => {
     });
     await expect(setSealAddresses(true, "pw")).resolves.toBe(true);
     expect(sent).toEqual([{ sealAddresses: true, currentPassword: "pw" }]);
+  });
+
+  it("changes an instance switch with the current password", async () => {
+    const sent: Array<{ url: string; body: unknown }> = [];
+    const settings = {
+      public: true,
+      sealAddresses: false,
+      blockedHosts: [],
+      envBlockedHosts: [],
+      deepLinkWarning: true,
+      proofOfWork: true,
+    };
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      sent.push({ url, body: JSON.parse(init.body as string) });
+      return Response.json(settings);
+    });
+    await expect(setInstanceSwitch("proofOfWork", true, "pw")).resolves.toEqual(settings);
+    expect(sent).toEqual([{ url: "/_g/admin/settings", body: { proofOfWork: true, currentPassword: "pw" } }]);
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 403 }));
+    await expect(setInstanceSwitch("deepLinkWarning", false, "x")).rejects.toThrow("Forgot it?");
+    vi.stubGlobal("fetch", async () => new Response(null, { status: 500 }));
+    await expect(setInstanceSwitch("deepLinkWarning", false, "x")).rejects.toThrow("Could not change the setting.");
   });
 });

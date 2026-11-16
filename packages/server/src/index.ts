@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { createApp } from "./app.ts";
 import { generateSetupCode, setupBanner } from "./auth/setup-code.ts";
 import { AuthStore } from "./auth/store.ts";
@@ -11,6 +12,7 @@ import { tokenBucket } from "./http/rate-limit.ts";
 import { fetch as undiciFetch } from "undici";
 import { createHttpServer } from "./http/server.ts";
 import { createLogger } from "./log.ts";
+import { openInstanceTools } from "./open-instance.ts";
 import { engineBundlesDir, webDistDir } from "./paths.ts";
 import { createTunnelDialer, createUpstreamAgent } from "./upstream/agent.ts";
 import { HostBlocklist } from "./upstream/blocklist.ts";
@@ -32,10 +34,12 @@ const trustWarning = trustProxyWarning(config.trustProxy);
 // Its own warn-level logger, so LOG_LEVEL=error cannot hide a setting that lets clients forge their address.
 if (trustWarning) createLogger("warn").warn(trustWarning);
 
+let db: DatabaseSync;
 let authStore: AuthStore;
 try {
   mkdirSync(config.dataDir, { recursive: true });
-  authStore = new AuthStore(openDb(join(config.dataDir, "girici.db")), config.sessionSecret);
+  db = openDb(join(config.dataDir, "girici.db"));
+  authStore = new AuthStore(db, config.sessionSecret);
 } catch (error) {
   logger.error(
     `Cannot open the database in ${config.dataDir}: ${error instanceof Error ? error.message : String(error)}`,
@@ -61,11 +65,16 @@ const limiter = config.rateLimit > 0 ? tokenBucket({ perMinute: config.rateLimit
 const blocklist = new HostBlocklist(config.blockedHosts, authStore.blockedHosts());
 // A fresh code at every start until setup is done, unless the operator fixed one.
 const setupCode = config.setupToken ?? generateSetupCode();
+
+// The browser check, traffic statistics and bandwidth limits, wired into both relays.
+const tools = openInstanceTools({ config, store: authStore, db, logger });
+
 const agent = createUpstreamAgent({
   proxy: config.upstreamProxy,
   testUpstreams: config.testUpstreams,
   testCa: config.testCaPath ? readFileSync(config.testCaPath, "utf8") : undefined,
 });
+
 const server = createHttpServer(
   createApp({
     webDistDir,
@@ -78,6 +87,7 @@ const server = createHttpServer(
     limiter,
     blocklist,
     setupToken: setupCode,
+    ...tools.app,
     relay: {
       agent,
       allowedTestHosts: new Set(config.testUpstreams.keys()),
@@ -113,6 +123,7 @@ const wsRelay = attachWsRelay(server, {
   trust,
   limiter,
   blocklist,
+  ...tools.ws,
 });
 server.on("error", (error) => {
   logger.error(error.message);
@@ -127,6 +138,8 @@ for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.once(signal, () => {
     logger.info(`${signal} received, shutting down`);
     server.close(() => {
+      // The statistics share the database, so they are written before it closes.
+      tools.statsFlush.stop();
       authStore.close();
       process.exit(0);
     });

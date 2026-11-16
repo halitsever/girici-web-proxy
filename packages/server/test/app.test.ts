@@ -99,6 +99,13 @@ describe("createApp", () => {
     expect(res.headers.get("permissions-policy")).toBe(PERMISSIONS_POLICY);
   });
 
+  it("serves the shell at the challenge page", async () => {
+    const res = await fetch(`${base}/_g/challenge?next=x`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("girici-test");
+    expect(res.headers.get("content-security-policy")).toBe(UI_CSP);
+  });
+
   it("forbids framing and openers on everything outside the boot page", async () => {
     for (const path of ["/healthz", "/robots.txt", "/_g/auth/state", "/_g/nope", "/_g/ui/app.js"]) {
       const res = await fetch(`${base}${path}`);

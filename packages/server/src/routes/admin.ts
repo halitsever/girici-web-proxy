@@ -17,7 +17,19 @@ export interface AdminSettings {
   blockedHosts: string[];
   envBlockedHosts: string[];
   sealAddresses: boolean;
+  deepLinkWarning: boolean;
+  proofOfWork: boolean;
 }
+
+/** The on/off switches the settings POST takes, each a boolean. */
+const SWITCHES = {
+  publicAccess: (store: AuthStore, on: boolean) => store.setPublicAccess(on),
+  sealAddresses: (store: AuthStore, on: boolean) => store.setSealAddresses(on),
+  deepLinkWarning: (store: AuthStore, on: boolean) => store.setDeepLinkWarning(on),
+  proofOfWork: (store: AuthStore, on: boolean) => store.setProofOfWork(on),
+} as const;
+
+type SwitchName = keyof typeof SWITCHES;
 
 /** Account and operator settings for the signed-in admin; changes need same origin, a session and the password. */
 export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: BrandStore): Router {
@@ -61,15 +73,10 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: B
   });
 
   router.post("/_g/admin/settings", sameOrigin, requireSession(store), settingsJson, confirm, (req, res) => {
-    const body = req.body as { publicAccess?: unknown; blockedHosts?: unknown; sealAddresses?: unknown };
-    const hasPublic = body?.publicAccess !== undefined;
-    const hasHosts = body?.blockedHosts !== undefined;
-    const hasSeal = body?.sealAddresses !== undefined;
-    if (
-      (!hasPublic && !hasHosts && !hasSeal) ||
-      (hasPublic && typeof body.publicAccess !== "boolean") ||
-      (hasSeal && typeof body.sealAddresses !== "boolean")
-    ) {
+    const body = (req.body ?? {}) as Partial<Record<SwitchName | "blockedHosts", unknown>>;
+    const switches = (Object.keys(SWITCHES) as SwitchName[]).filter((name) => body[name] !== undefined);
+    const hasHosts = body.blockedHosts !== undefined;
+    if ((switches.length === 0 && !hasHosts) || switches.some((name) => typeof body[name] !== "boolean")) {
       res.status(400).end();
       return;
     }
@@ -82,8 +89,7 @@ export function adminRouter(store: AuthStore, blocklist: HostBlocklist, brand: B
       }
       hosts = result.hosts;
     }
-    if (hasPublic) store.setPublicAccess(body.publicAccess === true);
-    if (hasSeal) store.setSealAddresses(body.sealAddresses === true);
+    for (const name of switches) SWITCHES[name](store, body[name] === true);
     if (hosts) {
       store.setBlockedHosts(hosts);
       blocklist.update(hosts);
@@ -134,6 +140,8 @@ function settingsOf(store: AuthStore, blocklist: HostBlocklist): AdminSettings {
     blockedHosts: blocklist.stored(),
     envBlockedHosts: blocklist.env(),
     sealAddresses: store.sealAddresses(),
+    deepLinkWarning: store.deepLinkWarning(),
+    proofOfWork: store.proofOfWork(),
   };
 }
 

@@ -16,7 +16,10 @@ function fakeContainer(options: { answer?: boolean; registered?: boolean }) {
   return { container, received };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("syncEnginePrefs", () => {
   it("sends the switch to the active worker and waits for its answer", async () => {
@@ -39,6 +42,23 @@ describe("syncEnginePrefs", () => {
         instanceSeal: true,
       },
     ]);
+  });
+
+  it("tells the worker this browser has seen Girici only when asked to", async () => {
+    const { container, received } = fakeContainer({ answer: true });
+    await syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container, undefined, true);
+    expect(received).toEqual([
+      { type: "girici:prefs", v: PROTOCOL_VERSION, blockThirdPartyCookies: true, sealAddresses: false, seen: true },
+    ]);
+  });
+
+  it("does not mark the browser as having seen Girici when a UI page merely loads", async () => {
+    for (const pathname of ["/", "/settings", "/account"]) {
+      vi.stubGlobal("location", { pathname });
+      const { container, received } = fakeContainer({ answer: true });
+      await syncEnginePrefs({ blockCookies: true, sealAddresses: false }, container);
+      expect(received[0], pathname).not.toHaveProperty("seen");
+    }
   });
 
   it("gives up after a second when the worker never answers", async () => {

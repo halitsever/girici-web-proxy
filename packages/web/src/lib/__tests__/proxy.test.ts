@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { openProxied, reloadThroughEngine, serviceWorkerSupport, type ReloadEnv } from "../proxy";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openProxied, reloadThroughEngine, serviceWorkerSupport, startEngine, type ReloadEnv } from "../proxy";
 
 describe("serviceWorkerSupport", () => {
   it.each([
@@ -123,5 +123,31 @@ describe("openProxied", () => {
       assign: (url) => void steps.push(`assign ${url}`),
     });
     expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
+  });
+});
+
+describe("startEngine", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("tells the worker this browser has seen Girici, since the visitor is opening a site from it", async () => {
+    const received: unknown[] = [];
+    const worker = {
+      postMessage(data: unknown, ports: MessagePort[]) {
+        received.push(data);
+        ports[0]?.postMessage({ ok: true });
+      },
+    };
+    vi.stubGlobal("navigator", {
+      serviceWorker: {
+        register: async () => ({}),
+        ready: Promise.resolve({}),
+        getRegistration: async () => ({ active: worker }),
+      },
+    });
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("offline");
+    });
+    await startEngine();
+    expect(received).toEqual([expect.objectContaining({ type: "girici:prefs", seen: true })]);
   });
 });

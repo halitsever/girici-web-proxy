@@ -272,6 +272,47 @@ describe("buildPageResponse", () => {
     expect((await buildPageResponse(unauth, context())).type).toBe("error");
   });
 
+  it("sends a top-level load the server wants checked to the challenge page, and a frame to an inert page", async () => {
+    const challenged: TransportResult = { ok: false, code: "challenge", status: 403 };
+    const nav = await buildPageResponse(challenged, context({ navigation: true, destination: "document" }));
+    expect(nav.status).toBe(303);
+    expect(nav.headers.get("location")).toBe(
+      `${origin}/_g/challenge?next=${encodeURIComponent("https://site-a.test/dir/page")}`,
+    );
+    const frame = await buildPageResponse(challenged, context({ navigation: true, destination: "iframe" }));
+    expect(frame.status).toBe(403);
+    expect(frame.headers.get("content-security-policy")).toMatch(/^sandbox/);
+    expect(await frame.text()).toContain("check this browser before it opens site-a.test");
+    expect((await buildPageResponse(challenged, context())).type).toBe("error");
+  });
+
+  it("sends a sealed load to the challenge page with its sealed address", async () => {
+    const nav = await buildPageResponse(
+      { ok: false, code: "challenge", status: 403 },
+      context({ navigation: true, destination: "document", address: () => "/~/x/L.B" }),
+    );
+    expect(new URL(nav.headers.get("location")!).searchParams.get("next")).toBe("/~/x/L.B");
+  });
+
+  it("shows the quota page with the server's wait", async () => {
+    const nav = await buildPageResponse(
+      { ok: false, code: "quota", status: 429, retryAfter: 120 },
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(nav.status).toBe(429);
+    expect(nav.headers.get("retry-after")).toBe("120");
+    expect(await nav.text()).toContain("Try again in 2 minutes.");
+  });
+
+  it("passes a rate limit's wait on to its page", async () => {
+    const nav = await buildPageResponse(
+      { ok: false, code: "rate_limited", status: 429, retryAfter: 30 },
+      context({ navigation: true, destination: "document" }),
+    );
+    expect(nav.status).toBe(429);
+    expect(nav.headers.get("retry-after")).toBe("30");
+  });
+
   it("rewrites documents and injects the client runtime", async () => {
     const res = await buildPageResponse(
       upstream(

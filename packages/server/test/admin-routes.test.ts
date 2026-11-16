@@ -136,6 +136,25 @@ describe("adminRouter settings", () => {
     expect(await read.json()).toMatchObject({ sealAddresses: true });
   });
 
+  it("changes the warning and the browser check only with the current password", async () => {
+    const { base, store, cookie } = await withAdmin();
+    expect((await post(base, "/_g/admin/settings", { proofOfWork: true }, cookie)).status).toBe(403);
+    expect(store.proofOfWork()).toBe(false);
+    const res = await post(
+      base,
+      "/_g/admin/settings",
+      { deepLinkWarning: false, proofOfWork: true, currentPassword: setup.password },
+      cookie,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ deepLinkWarning: false, proofOfWork: true });
+    expect(store.deepLinkWarning()).toBe(false);
+    expect(store.proofOfWork()).toBe(true);
+    const bad = await post(base, "/_g/admin/settings", { proofOfWork: "on", currentPassword: setup.password }, cookie);
+    expect(bad.status).toBe(400);
+    expect(store.proofOfWork()).toBe(true);
+  });
+
   it("keeps the instance name and the instance switches apart in the settings store", async () => {
     const { base, store, cookie } = await withAdmin();
     const brand = await post(base, "/_g/admin/brand", { name: "Kurulum", currentPassword: setup.password }, cookie);
@@ -165,6 +184,8 @@ describe("adminRouter settings", () => {
       blockedHosts: [],
       envBlockedHosts: ["env.example"],
       sealAddresses: false,
+      deepLinkWarning: true,
+      proofOfWork: false,
     });
   });
 

@@ -54,6 +54,15 @@ describe("HttpRelayTransport", () => {
     expect(await new Response(result.response.body).text()).toBe("body");
   });
 
+  it("passes the wait of a refusal on", async () => {
+    const refusal = (retryAfter: string) =>
+      returning(
+        new Response("", { status: 429, headers: { "x-girici-error": "quota", "retry-after": retryAfter } }),
+      ).send(request(), ctx);
+    expect(await refusal("42")).toEqual({ ok: false, code: "quota", status: 429, retryAfter: 42 });
+    expect(await refusal("soon")).toEqual({ ok: false, code: "quota", status: 429 });
+  });
+
   it("aborts the relay fetch when the page cancels the body", async () => {
     const seen: Array<{ url: string; init: RequestInit }> = [];
     const upstream = new ReadableStream<Uint8Array>({

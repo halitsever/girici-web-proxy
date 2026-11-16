@@ -12,10 +12,20 @@ describe("PrefsService", () => {
     const saved: unknown[] = [];
     const prefs = new PrefsService({ load: async () => undefined, save: async (value) => void saved.push(value) });
     await prefs.ready();
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: false, instanceSeal: false });
+    expect(prefs.current()).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: false,
+      instanceSeal: false,
+      seen: false,
+    });
     await prefs.set({ blockThirdPartyCookies: false });
-    expect(prefs.current()).toEqual({ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false });
-    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false }]);
+    expect(prefs.current()).toEqual({
+      blockThirdPartyCookies: false,
+      sealAddresses: false,
+      instanceSeal: false,
+      seen: false,
+    });
+    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false, seen: false }]);
   });
 
   it("loads a stored choice and survives a broken store", async () => {
@@ -42,7 +52,12 @@ describe("PrefsService", () => {
       save: async () => {},
     });
     await stored.ready();
-    expect(stored.current()).toEqual({ blockThirdPartyCookies: true, sealAddresses: true, instanceSeal: false });
+    expect(stored.current()).toEqual({
+      blockThirdPartyCookies: true,
+      sealAddresses: true,
+      instanceSeal: false,
+      seen: false,
+    });
   });
 });
 
@@ -80,12 +95,45 @@ describe("readPrefsMessage", () => {
   });
 
   it("lets the UI turn the instance switch on but never off, which only the server's answer does", () => {
-    expect(readPrefsMessage({ ...valid, instanceSeal: false }, ui, origin, known)).toEqual({
+    expect(readPrefsMessage({ ...valid, instanceSeal: false, seen: false }, ui, origin, known)).toEqual({
       blockThirdPartyCookies: false,
     });
   });
 
   it("ignores a window on a UI address that no UI navigation produced", () => {
     expect(readPrefsMessage(valid, { ...ui, id: "page-7" }, origin, known)).toBeNull();
+  });
+
+  it("remembers that this browser has seen Girici, which the UI can set but never clear", async () => {
+    expect(readPrefsMessage({ ...valid, seen: true }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+      seen: true,
+    });
+    expect(readPrefsMessage({ ...valid, seen: false }, ui, origin, known)).toEqual({ blockThirdPartyCookies: false });
+    expect(
+      readPrefsMessage({ ...valid, seen: true }, { ...ui, url: "https://girici.test/~/https/a.test/" }, origin, known),
+    ).toBeNull();
+    const stored = new PrefsService({
+      load: async () => ({ blockThirdPartyCookies: true, seen: true }),
+      save: async () => {},
+    });
+    await stored.ready();
+    expect(stored.current().seen).toBe(true);
+  });
+
+  it("takes seen only from the home, settings and account pages", () => {
+    for (const path of ["/", "/settings", "/account", "/Settings/"]) {
+      expect(
+        readPrefsMessage({ ...valid, seen: true }, { ...ui, url: `${origin}${path}` }, origin, known),
+        path,
+      ).toEqual({ blockThirdPartyCookies: false, seen: true });
+    }
+    // A shared link can open these pages with a next address, so loading one is no proof of having seen Girici.
+    for (const path of ["/_g/challenge?next=/~/https/phish.test/", "/_g/login", "/_g/setup"]) {
+      expect(
+        readPrefsMessage({ ...valid, seen: true }, { ...ui, url: `${origin}${path}` }, origin, known),
+        path,
+      ).toEqual({ blockThirdPartyCookies: false });
+    }
   });
 });

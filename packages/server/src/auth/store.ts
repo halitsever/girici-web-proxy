@@ -152,6 +152,24 @@ export class AuthStore {
     this.#setSetting("seal_addresses", on ? "1" : "0");
   }
 
+  /** The notice shown before a proxied page reached by a shared link; on unless the admin turned it off. */
+  deepLinkWarning(): boolean {
+    return this.#setting("deep_link_warning") !== "0";
+  }
+
+  setDeepLinkWarning(on: boolean): void {
+    this.#setSetting("deep_link_warning", on ? "1" : "0");
+  }
+
+  /** The proof-of-work browser check for visitors. */
+  proofOfWork(): boolean {
+    return this.#setting("proof_of_work") === "1";
+  }
+
+  setProofOfWork(on: boolean): void {
+    this.#setSetting("proof_of_work", on ? "1" : "0");
+  }
+
   /** Normalized host entries the admin blocked in Settings; an unreadable value counts as none. */
   blockedHosts(): string[] {
     const raw = this.#setting("blocked_hosts");

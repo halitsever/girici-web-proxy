@@ -9,6 +9,8 @@ export interface AuthState {
   authed: boolean;
   public: boolean;
   sealAddresses: boolean;
+  /** True only while the instance is public and the admin left the warning on. */
+  deepLinkWarning: boolean;
   admin?: AdminInfo;
 }
 
@@ -17,7 +19,11 @@ export interface AdminSettings {
   sealAddresses: boolean;
   blockedHosts: string[];
   envBlockedHosts: string[];
+  deepLinkWarning: boolean;
+  proofOfWork: boolean;
 }
+
+export type InstanceSwitch = "deepLinkWarning" | "proofOfWork";
 
 export interface SetupInput {
   setupToken: string;
@@ -107,6 +113,21 @@ export async function setSealAddresses(on: boolean, currentPassword: string): Pr
   if (!res.ok) throw writeError(res.status, "Could not change address encryption.");
   invalidate();
   return (await res.json()).sealAddresses as boolean;
+}
+
+export async function setInstanceSwitch(
+  name: InstanceSwitch,
+  on: boolean,
+  currentPassword: string,
+): Promise<AdminSettings> {
+  const res = await fetch("/_g/admin/settings", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ [name]: on, currentPassword }),
+  });
+  if (!res.ok) throw writeError(res.status, "Could not change the setting.");
+  invalidate();
+  return res.json() as Promise<AdminSettings>;
 }
 
 export async function getAdminSettings(): Promise<AdminSettings> {

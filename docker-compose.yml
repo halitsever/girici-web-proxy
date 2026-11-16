@@ -19,6 +19,11 @@ services:
       GIRICI_TRUST_PROXY: ${GIRICI_TRUST_PROXY:-}
       # A fixed setup code instead of the one printed to the log; see .env.example.
       GIRICI_SETUP_TOKEN: ${GIRICI_SETUP_TOKEN:-}
+      # Open-instance limits and /metrics, off while empty; see .env.example.
+      GIRICI_BANDWIDTH_LIMIT: ${GIRICI_BANDWIDTH_LIMIT:-}
+      GIRICI_DAILY_QUOTA: ${GIRICI_DAILY_QUOTA:-}
+      GIRICI_METRICS_TOKEN: ${GIRICI_METRICS_TOKEN:-}
+      GIRICI_POW_DIFFICULTY: ${GIRICI_POW_DIFFICULTY:-}
       # SOURCE_URL: https://github.com/you/your-fork
     volumes:
       - girici_data:/data
