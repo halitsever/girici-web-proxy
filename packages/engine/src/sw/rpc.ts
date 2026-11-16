@@ -1,5 +1,5 @@
 import { COOKIE_BATCH_LIMIT, PROTOCOL_VERSION } from "../shared/protocol.ts";
-import type { CookieService } from "./cookies/jar.ts";
+import { scriptCookieKey, type CookieService } from "./cookies/jar.ts";
 
 interface Waiter {
   seq: number;
@@ -12,6 +12,8 @@ export class CookieRpc {
   readonly #maxWait: number;
   readonly #orderWait: number;
   readonly #processed = new Map<string, number>();
+  /** Per page, the seq of the last write applied to each cookie, so a late batch cannot undo a newer one. */
+  readonly #written = new Map<string, Map<string, number>>();
   readonly #waiters = new Map<string, Set<Waiter>>();
   /** The batch each page is applying, so two of its batches never interleave. */
   readonly #applying = new Map<string, Promise<void>>();
@@ -50,17 +52,27 @@ export class CookieRpc {
     if (clientId !== "" && done !== undefined && done < first - 1)
       await this.#until(clientId, first - 1, this.#orderWait);
     await this.#serial(clientId, async () => {
-      const applied = clientId === "" ? 0 : (this.#processed.get(clientId) ?? 0);
-      // In order, so the jar ends with the page's last write; a write a later batch already followed is skipped.
-      if (!options.blocked)
-        for (let index = 0; index < batch.length; index++)
-          if (first + index > applied) await this.#cookies.setFromScript(pageUrl, batch[index]!);
+      if (!options.blocked) await this.#apply(clientId, pageUrl, batch, first);
       this.#markProcessed(clientId, seq);
     });
     const visible = options.blocked ? [] : await this.#cookies.snapshot(pageUrl);
     return new Response(JSON.stringify({ cookies: visible }), {
       headers: { "content-type": "application/json" },
     });
+  }
+
+  /** In order, so the jar ends with the page's last write; a write to a cookie a later write already set is skipped. */
+  async #apply(clientId: string, pageUrl: URL, batch: string[], first: number): Promise<void> {
+    let written = this.#written.get(clientId);
+    if (!written && clientId !== "") this.#written.set(clientId, (written = new Map()));
+    for (let index = 0; index < batch.length; index++) {
+      const key = written && scriptCookieKey(pageUrl, batch[index]!);
+      if (written && key) {
+        if ((written.get(key) ?? 0) >= first + index) continue;
+        written.set(key, first + index);
+      }
+      await this.#cookies.setFromScript(pageUrl, batch[index]!);
+    }
   }
 
   waitFor(clientId: string, seq: number): Promise<void> {
@@ -91,6 +103,7 @@ export class CookieRpc {
 
   forget(clientId: string): void {
     this.#processed.delete(clientId);
+    this.#written.delete(clientId);
     this.#applying.delete(clientId);
     for (const waiter of this.#waiters.get(clientId) ?? []) waiter.resolve();
     this.#waiters.delete(clientId);

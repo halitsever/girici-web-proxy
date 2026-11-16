@@ -8,6 +8,7 @@ const SVG = "http://www.w3.org/2000/svg";
 
 /** A DOM whose text lives in `stored` behind prototype accessors, as the browser's own accessors are. */
 function fakeDom() {
+  const visits = { children: 0 };
   class FakeNode {
     stored = "";
     connected = false;
@@ -26,6 +27,10 @@ function fakeDom() {
     parent: FakeNode | null = null;
     get parentNode(): FakeNode | null {
       return this.parent;
+    }
+    get nextElementSibling(): FakeNode | null {
+      const siblings = (this.parent as unknown as { children?: FakeNode[] } | null)?.children ?? [];
+      return siblings.slice(siblings.indexOf(this) + 1).find((node) => node.kind === 1) ?? null;
     }
     get childNodes(): FakeNodeList {
       return new FakeNodeList((this as unknown as { children?: FakeNode[] }).children ?? []);
@@ -162,6 +167,16 @@ function fakeDom() {
       this.attributes = attributes;
       this.namespace = namespace;
       this.children = children;
+      for (const child of children) child.parent = this;
+    }
+    get firstElementChild(): FakeNode | null {
+      visits.children++;
+      return this.children.find((node) => node.kind === 1) ?? null;
+    }
+    /** What a hooked insertion does once the backstop has run. */
+    adopt(child: FakeNode): void {
+      this.children.push(child);
+      child.parent = this;
     }
     get localName(): string {
       return this.name;
@@ -251,6 +266,10 @@ function fakeDom() {
     constructor(children: FakeNode[]) {
       super(11);
       this.children = children;
+      for (const child of children) child.parent = this;
+    }
+    get firstElementChild(): FakeNode | null {
+      return this.children.find((node) => node.kind === 1) ?? null;
     }
     querySelectorAll(): FakeNodeList {
       return scriptsIn(this.children);
@@ -305,7 +324,7 @@ function fakeDom() {
       return attr;
     },
   };
-  return { dom, scripts: scripts as ScriptText, protos: { FakeElement, FakeNode, FakeCharacterData } };
+  return { dom, scripts: scripts as ScriptText, visits, protos: { FakeElement, FakeNode, FakeCharacterData } };
 }
 
 describe("scriptKindOf", () => {
@@ -412,6 +431,45 @@ describe("installScriptText", () => {
     const nested = dom.script({ stored: "c" });
     scripts.check([dom.element("div", [nested])], dom.element("body"));
     expect(dom.nativeText(nested)).toBe("[js:c]");
+  });
+
+  it("finds a script deep inside an inserted subtree", () => {
+    const { dom, scripts } = fakeDom();
+    const deep = dom.script({ stored: "d" });
+    scripts.check([dom.element("div", [dom.element("p", [dom.element("span", [deep])])])], dom.element("body"));
+    expect(dom.nativeText(deep)).toBe("[js:d]");
+  });
+
+  it("looks again at a script-free subtree once something goes into it", () => {
+    const { dom, scripts } = fakeDom();
+    const p = dom.element("p");
+    const div = dom.element("div", [p]);
+    scripts.check([div], dom.element("section"));
+    const script = dom.script();
+    scripts.check([script], p);
+    p.adopt(script);
+    // Text the hooks never saw, as an XML parser's script would hold.
+    script.stored = "late";
+    scripts.check([div], dom.element("body"));
+    expect(dom.nativeText(script)).toBe("[js:late]");
+  });
+
+  it("visits each element of a tree built bottom up about once", () => {
+    const { dom, scripts, visits } = fakeDom();
+    const build = (depth: number): ReturnType<typeof dom.element> => {
+      const parent = dom.element("div");
+      if (depth === 0) return parent;
+      for (let index = 0; index < 3; index++) {
+        const child = build(depth - 1);
+        scripts.check([child], parent);
+        parent.adopt(child);
+      }
+      return parent;
+    };
+    const tree = build(6);
+    const elements = (3 ** 7 - 1) / 2;
+    scripts.check([tree], dom.element("body"));
+    expect(visits.children).toBeLessThanOrEqual(elements);
   });
 
   it("rewrites a text node added to an empty script", () => {

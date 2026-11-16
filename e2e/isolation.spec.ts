@@ -115,3 +115,56 @@ test("reads a srcdoc Attr node back as written and runs it once", async ({ page 
     markup: true,
   });
 });
+
+test("keeps the origin private file system apart per site", async ({ page, browserName }) => {
+  test.skip(browserName === "webkit", "Playwright's WebKit fails OPFS writes with UnknownError, even on a plain page");
+  const write = (value: string) =>
+    page.evaluate(async (text) => {
+      const root = await navigator.storage.getDirectory();
+      const file = await root.getFileHandle("note", { create: true });
+      const writable = await file.createWritable();
+      await writable.write(text);
+      await writable.close();
+    }, value);
+  const read = () =>
+    page.evaluate(async () => {
+      const root = await navigator.storage.getDirectory();
+      const names: string[] = [];
+      for await (const name of (root as unknown as { keys(): AsyncIterable<string> }).keys()) names.push(name);
+      const note = names.includes("note") ? await (await (await root.getFileHandle("note")).getFile()).text() : null;
+      return { rootName: root.name, names, note };
+    });
+  await openThroughUi(page, "https://site-a.test/idb-store");
+  await write("a");
+  await page.goto("/~/https/site-b.test/idb-store");
+  expect(await read()).toEqual({ rootName: "", names: [], note: null });
+  await page.goto("/~/https/site-a.test/idb-store");
+  expect(await read()).toEqual({ rootName: "", names: ["note"], note: "a" });
+});
+
+test("refuses one site's blob URLs to another", async ({ page, context }) => {
+  await openThroughUi(page, "https://site-a.test/idb-store");
+  const theirs = await page.evaluate(() => URL.createObjectURL(new Blob(["secret"])));
+  const other = await context.newPage();
+  await other.goto("/~/https/site-b.test/idb-store");
+  // A site host's first visit reloads past the bootstrap page, which would cut off a fetch started before it.
+  await expect(other.locator("#girici-boot")).toHaveCount(0);
+  await other.waitForLoadState("load");
+  const outcome = await other.evaluate(async (url) => {
+    const own = URL.createObjectURL(new Blob(["mine"]));
+    const viaFetch = await fetch(url).then(
+      (response) => response.text(),
+      (error: Error) => error.name,
+    );
+    const viaXhr = await new Promise<string>((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("GET", url);
+      xhr.onload = () => resolve(xhr.responseText);
+      xhr.onerror = () => resolve("error");
+      xhr.send();
+    });
+    return { viaFetch, viaXhr, own: await (await fetch(own)).text() };
+  }, theirs);
+  expect(outcome).toEqual({ viaFetch: "TypeError", viaXhr: "error", own: "mine" });
+  expect(await page.evaluate(async (url) => (await fetch(url)).text(), theirs)).toBe("secret");
+});
