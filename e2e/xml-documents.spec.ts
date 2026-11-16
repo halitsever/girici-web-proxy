@@ -19,7 +19,8 @@ test("opens a top-level SVG document with its scripts and links through the prox
     href: "https://site-a.test/scripted.svg",
     style: STYLE,
   });
-  await page.locator("#link text").click();
+  // WebKit's hit test never settles on an SVG <text> node, so the click goes to the link itself.
+  await page.locator("#link").click();
   await expect(page.locator("h1")).toHaveText("Site B");
 });
 
