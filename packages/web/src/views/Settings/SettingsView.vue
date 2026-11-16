@@ -18,6 +18,7 @@ import {
 } from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
+import { setLanguage, t, tn, UI_LANGUAGES, type TextKey } from "@/lib/i18n";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import {
   clearedNote,
@@ -46,18 +47,14 @@ const publicAccess = ref(false);
 const publicError = ref("");
 const instanceSeal = ref(false);
 const instanceSealError = ref("");
-const SWITCH_ROWS: ReadonlyArray<{ name: InstanceSwitch; label: string; help: string }> = [
-  {
-    name: "deepLinkWarning",
-    label: "Warn before shared links",
-    help: "Someone who opens a proxied page from a link, before ever opening a site from Girici's home page, first sees a notice that the page comes through this proxy. Applies while public access is on.",
-  },
-  {
-    name: "proofOfWork",
-    label: "Browser check for visitors",
-    help: "Browsers solve a short puzzle before their first page, and again when their address changes. It slows down bots that abuse the proxy. Applies while public access is on; you are never checked.",
-  },
+const SWITCH_ROWS: ReadonlyArray<{ name: InstanceSwitch; label: TextKey; help: TextKey }> = [
+  { name: "deepLinkWarning", label: "admin.warning", help: "admin.warningHelp" },
+  { name: "proofOfWork", label: "admin.pow", help: "admin.powHelp" },
 ];
+const languageOptions = computed(() => [
+  { code: "auto" as const, name: t("settings.languageAuto") },
+  ...UI_LANGUAGES.map((info) => ({ code: info.code, name: info.name })),
+]);
 // The server's defaults until the admin settings load.
 const instanceSwitches = ref<Record<InstanceSwitch, boolean>>({ deepLinkWarning: true, proofOfWork: false });
 const instanceSwitchErrors = ref<Record<InstanceSwitch, string>>({ deepLinkWarning: "", proofOfWork: "" });
@@ -91,26 +88,36 @@ const siteSupport = serviceWorkerSupport({
   hasServiceWorker: "serviceWorker" in navigator,
 });
 const siteNote = computed(() => {
-  if (siteSupport !== "ok") return "Site data needs HTTPS (or localhost).";
+  if (siteSupport !== "ok") return t("sites.needsHttps");
   if (!sitesLoaded.value) return "";
-  if (siteMode.value) return visited.value.length || legacyData.value ? "" : "No site data yet.";
-  return sites.value.length ? "" : "No site data yet.";
+  if (siteMode.value) return visited.value.length || legacyData.value ? "" : t("sites.empty");
+  return sites.value.length ? "" : t("sites.empty");
 });
 
 watch(settings, (value) => saveSettings(value), { deep: true });
+watch(
+  () => settings.value.lang,
+  (choice) => setLanguage(choice, navigator.languages),
+);
 // Site hosts also read the toolbar and search engine, from the cookie the root keeps for them.
 watch(
   () =>
     siteMode.value
-      ? [settings.value.blockCookies, settings.value.sealAddresses, settings.value.toolbar, settings.value.engine]
-      : [settings.value.blockCookies, settings.value.sealAddresses],
+      ? [
+          settings.value.blockCookies,
+          settings.value.sealAddresses,
+          settings.value.lang,
+          settings.value.toolbar,
+          settings.value.engine,
+        ]
+      : [settings.value.blockCookies, settings.value.sealAddresses, settings.value.lang],
   () => void syncSettings(settings.value, authState.value),
 );
 
 async function onToggleInstanceSeal(on: boolean) {
   instanceSealError.value = "";
   if (!adminPassword.value) {
-    instanceSealError.value = "Enter your current password first.";
+    instanceSealError.value = t("error.passwordFirst");
     return;
   }
   const previous = instanceSeal.value;
@@ -121,14 +128,14 @@ async function onToggleInstanceSeal(on: boolean) {
     await syncEnginePrefs(settings.value, undefined, instanceSeal.value);
   } catch (e) {
     instanceSeal.value = previous;
-    instanceSealError.value = e instanceof Error ? e.message : "Could not change address encryption.";
+    instanceSealError.value = e instanceof Error ? e.message : t("error.instanceSeal");
   }
 }
 
 async function onToggleInstanceSwitch(name: InstanceSwitch, on: boolean) {
   instanceSwitchErrors.value[name] = "";
   if (!adminPassword.value) {
-    instanceSwitchErrors.value[name] = "Enter your current password first.";
+    instanceSwitchErrors.value[name] = t("error.passwordFirst");
     return;
   }
   const previous = instanceSwitches.value[name];
@@ -137,14 +144,14 @@ async function onToggleInstanceSwitch(name: InstanceSwitch, on: boolean) {
     instanceSwitches.value[name] = (await setInstanceSwitch(name, on, adminPassword.value))[name];
   } catch (e) {
     instanceSwitches.value[name] = previous;
-    instanceSwitchErrors.value[name] = e instanceof Error ? e.message : "Could not change the setting.";
+    instanceSwitchErrors.value[name] = e instanceof Error ? e.message : t("error.setting");
   }
 }
 
 async function onTogglePublic(on: boolean) {
   publicError.value = "";
   if (!adminPassword.value) {
-    publicError.value = "Enter your current password first.";
+    publicError.value = t("error.passwordFirst");
     return;
   }
   const previous = publicAccess.value;
@@ -153,7 +160,7 @@ async function onTogglePublic(on: boolean) {
     publicAccess.value = await setPublicAccess(on, adminPassword.value);
   } catch (e) {
     publicAccess.value = previous;
-    publicError.value = e instanceof Error ? e.message : "Could not change public access.";
+    publicError.value = e instanceof Error ? e.message : t("error.publicAccess");
   }
 }
 
@@ -168,7 +175,7 @@ async function onPickLogo(event: Event) {
   } catch (e) {
     pendingLogo.value = undefined;
     input.value = "";
-    instanceError.value = e instanceof Error ? e.message : "Could not read the logo.";
+    instanceError.value = e instanceof Error ? e.message : t("error.logoRead");
   }
 }
 
@@ -176,7 +183,7 @@ async function onSaveInstance() {
   instanceStatus.value = "";
   instanceError.value = "";
   if (!adminPassword.value) {
-    instanceError.value = "Enter your current password first.";
+    instanceError.value = t("error.passwordFirst");
     return;
   }
   savingInstance.value = true;
@@ -190,9 +197,9 @@ async function onSaveInstance() {
     );
     instanceName.value = saved.name === DEFAULT_BRAND_NAME ? "" : saved.name;
     pendingLogo.value = undefined;
-    instanceStatus.value = "Saved.";
+    instanceStatus.value = t("admin.saved");
   } catch (e) {
-    instanceError.value = e instanceof Error ? e.message : "Could not save the instance.";
+    instanceError.value = e instanceof Error ? e.message : t("error.instanceSave");
   } finally {
     savingInstance.value = false;
   }
@@ -202,7 +209,7 @@ async function onSaveBlocked() {
   blockedStatus.value = "";
   blockedError.value = "";
   if (!adminPassword.value) {
-    blockedError.value = "Enter your current password first.";
+    blockedError.value = t("error.passwordFirst");
     return;
   }
   savingBlocked.value = true;
@@ -213,9 +220,9 @@ async function onSaveBlocked() {
       .filter(Boolean);
     const saved = await saveBlockedHosts(hosts, adminPassword.value);
     blockedText.value = saved.blockedHosts.join("\n");
-    blockedStatus.value = "Saved.";
+    blockedStatus.value = t("admin.saved");
   } catch (e) {
-    blockedError.value = e instanceof Error ? e.message : "Could not save blocked sites.";
+    blockedError.value = e instanceof Error ? e.message : t("error.blockedSave");
   } finally {
     savingBlocked.value = false;
   }
@@ -223,8 +230,8 @@ async function onSaveBlocked() {
 
 function siteDetail(entry: SiteSummary): string {
   const parts: string[] = [];
-  if (entry.cookies > 0) parts.push(entry.cookies === 1 ? "1 cookie" : `${entry.cookies} cookies`);
-  if (entry.origins.length > 0) parts.push("storage");
+  if (entry.cookies > 0) parts.push(tn("sites.cookies", entry.cookies));
+  if (entry.origins.length > 0) parts.push(t("sites.storage"));
   return parts.join(" · ");
 }
 
@@ -242,7 +249,7 @@ async function loadSites() {
     }
     siteError.value = "";
   } catch (e) {
-    siteError.value = e instanceof Error ? e.message : "Could not load site data.";
+    siteError.value = e instanceof Error ? e.message : t("error.siteLoad");
   } finally {
     sitesLoaded.value = true;
   }
@@ -254,7 +261,7 @@ async function onClearSite(site: string | null) {
   try {
     await clearSiteData(site);
   } catch (e) {
-    siteError.value = e instanceof Error ? e.message : "Could not clear site data.";
+    siteError.value = e instanceof Error ? e.message : t("error.siteClear");
   } finally {
     siteBusy.value = false;
   }
@@ -269,7 +276,7 @@ async function onClearSites(target: string[] | "all") {
   try {
     await clearSites(target);
   } catch (e) {
-    siteError.value = e instanceof Error ? e.message : "Could not clear site data.";
+    siteError.value = e instanceof Error ? e.message : t("error.siteClear");
     siteBusy.value = false;
   }
 }
@@ -282,7 +289,7 @@ async function onRemoveLegacy() {
     await clearLegacyRootData(env);
     legacyData.value = await hasLegacyRootData(env);
   } catch (e) {
-    siteError.value = e instanceof Error ? e.message : "Could not remove the old site data.";
+    siteError.value = e instanceof Error ? e.message : t("error.legacyRemove");
   } finally {
     siteBusy.value = false;
   }
@@ -337,15 +344,46 @@ onMounted(async () => {
 <template>
   <div class="mx-auto flex w-full max-w-[680px] flex-col gap-6 px-4" style="padding-top: clamp(28px, 6vh, 56px)">
     <div>
-      <h1 class="text-[26px] font-semibold tracking-[-0.03em]">Settings</h1>
-      <p class="mt-1 text-[14px] text-muted-foreground">How Girici opens and handles the sites you visit.</p>
+      <h1 class="text-[26px] font-semibold tracking-[-0.03em]">{{ t("settings.title") }}</h1>
+      <p class="mt-1 text-[14px] text-muted-foreground">{{ t("settings.lead") }}</p>
     </div>
 
     <div class="divide-y divide-border rounded-xl border border-border bg-gi-panel">
       <div class="flex flex-col gap-3.5 p-5">
         <div>
-          <p class="text-[14px] font-medium">Search engine</p>
-          <p class="text-[13px] text-muted-foreground">Used when what you type isn't a URL.</p>
+          <p id="language-label" class="text-[14px] font-medium">{{ t("settings.language") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.languageHelp") }}</p>
+        </div>
+        <div
+          role="radiogroup"
+          aria-labelledby="language-label"
+          class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
+          style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
+        >
+          <button
+            v-for="option in languageOptions"
+            :key="option.code"
+            type="button"
+            role="radio"
+            :aria-checked="settings.lang === option.code"
+            :lang="option.code === 'auto' ? undefined : option.code"
+            class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
+            :class="
+              settings.lang === option.code
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            "
+            @click="settings.lang = option.code"
+          >
+            {{ option.name }}
+          </button>
+        </div>
+      </div>
+
+      <div class="flex flex-col gap-3.5 p-5">
+        <div>
+          <p class="text-[14px] font-medium">{{ t("settings.engine") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.engineHelp") }}</p>
         </div>
         <div
           class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
@@ -370,56 +408,47 @@ onMounted(async () => {
 
       <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Open in new tab</p>
-          <p class="text-[13px] text-muted-foreground">Keep Girici open while you browse.</p>
+          <p class="text-[14px] font-medium">{{ t("settings.newTab") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.newTabHelp") }}</p>
         </div>
         <Switch v-model="settings.newTab" />
       </div>
 
       <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Show toolbar on sites</p>
-          <p class="text-[13px] text-muted-foreground">
-            A small Girici button on every site, for the address bar and quick actions.
-          </p>
+          <p class="text-[14px] font-medium">{{ t("settings.toolbar") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.toolbarHelp") }}</p>
         </div>
-        <Switch v-model="settings.toolbar" aria-label="Show toolbar on sites" />
+        <Switch v-model="settings.toolbar" :aria-label="t('settings.toolbar')" />
       </div>
 
       <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Remember history</p>
-          <p class="text-[13px] text-muted-foreground">Show recent sites in the palette. Stored on this device only.</p>
+          <p class="text-[14px] font-medium">{{ t("settings.history") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.historyHelp") }}</p>
         </div>
         <Switch v-model="settings.rememberHistory" />
       </div>
 
       <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Block third-party cookies</p>
-          <p class="text-[13px] text-muted-foreground">Stops trackers from following you across proxied sites.</p>
-          <p v-if="!settings.blockCookies" class="mt-1 text-[13px] text-gi-danger">
-            With this off, any site you open can send requests to your other sites with your cookies and read the
-            replies.
-          </p>
+          <p class="text-[14px] font-medium">{{ t("settings.cookies") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.cookiesHelp") }}</p>
+          <p v-if="!settings.blockCookies" class="mt-1 text-[13px] text-gi-danger">{{ t("settings.cookiesOff") }}</p>
         </div>
-        <Switch v-model="settings.blockCookies" aria-label="Block third-party cookies" />
+        <Switch v-model="settings.blockCookies" :aria-label="t('settings.cookies')" />
       </div>
 
       <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Encrypt page addresses</p>
-          <p class="text-[13px] text-muted-foreground">
-            Pages open at encrypted addresses, so the address bar does not name the site. The browser's history may
-            still list some plain addresses, and recent sites keep real ones. Links you copy will not open in another
-            browser.
-          </p>
-          <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">Turned on for everyone by the admin.</p>
+          <p class="text-[14px] font-medium">{{ t("settings.seal") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("settings.sealHelp") }}</p>
+          <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">{{ t("settings.sealByAdmin") }}</p>
         </div>
         <Switch
           :model-value="settings.sealAddresses || instanceSeal"
           :disabled="instanceSeal"
-          aria-label="Encrypt page addresses"
+          :aria-label="t('settings.seal')"
           @update:model-value="(on: boolean) => (settings.sealAddresses = on)"
         />
       </div>
@@ -427,40 +456,29 @@ onMounted(async () => {
 
     <div v-if="authed" class="rounded-xl border border-border bg-gi-panel">
       <div class="px-5 pt-5">
-        <p class="text-[15px] font-semibold">Admin</p>
-        <p class="mt-1 text-[13px] text-muted-foreground">Operator controls for this proxy.</p>
+        <p class="text-[15px] font-semibold">{{ t("admin.title") }}</p>
+        <p class="mt-1 text-[13px] text-muted-foreground">{{ t("admin.lead") }}</p>
         <label class="mt-4 flex flex-col gap-2 text-[14px] font-medium">
-          Current password
+          {{ t("account.currentPassword") }}
           <Input v-model="adminPassword" type="password" autocomplete="current-password" />
         </label>
-        <p class="mt-2 text-[13px] text-muted-foreground">
-          Needed to change these settings. Kept only while this page is open.
-        </p>
+        <p class="mt-2 text-[13px] text-muted-foreground">{{ t("admin.passwordHelp") }}</p>
       </div>
       <div class="mt-4 flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Public access</p>
-          <p class="text-[13px] text-muted-foreground">
-            When on, anyone can browse without signing in. Account and admin settings still need you.
-          </p>
+          <p class="text-[14px] font-medium">{{ t("admin.public") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("admin.publicHelp") }}</p>
           <p v-if="publicError" class="mt-1 text-[13px] text-gi-danger">{{ publicError }}</p>
         </div>
-        <Switch :model-value="publicAccess" @update:model-value="onTogglePublic" />
+        <Switch :model-value="publicAccess" :aria-label="t('admin.public')" @update:model-value="onTogglePublic" />
       </div>
       <div class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Encrypt page addresses for everyone</p>
-          <p class="text-[13px] text-muted-foreground">
-            Turns on encrypted page addresses in every visitor's browser. Visitors cannot turn it off. Browsers that
-            have Girici open pick the change up on a page load within a minute.
-          </p>
+          <p class="text-[14px] font-medium">{{ t("admin.seal") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("admin.sealHelp") }}</p>
           <p v-if="instanceSealError" class="mt-1 text-[13px] text-gi-danger">{{ instanceSealError }}</p>
         </div>
-        <Switch
-          :model-value="instanceSeal"
-          aria-label="Encrypt page addresses for everyone"
-          @update:model-value="onToggleInstanceSeal"
-        />
+        <Switch :model-value="instanceSeal" :aria-label="t('admin.seal')" @update:model-value="onToggleInstanceSeal" />
       </div>
       <div
         v-for="row in SWITCH_ROWS"
@@ -468,31 +486,29 @@ onMounted(async () => {
         class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]"
       >
         <div>
-          <p class="text-[14px] font-medium">{{ row.label }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ row.help }}</p>
+          <p class="text-[14px] font-medium">{{ t(row.label) }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t(row.help) }}</p>
           <p v-if="instanceSwitchErrors[row.name]" class="mt-1 text-[13px] text-gi-danger">
             {{ instanceSwitchErrors[row.name] }}
           </p>
         </div>
         <Switch
           :model-value="instanceSwitches[row.name]"
-          :aria-label="row.label"
+          :aria-label="t(row.label)"
           @update:model-value="(on: boolean) => onToggleInstanceSwitch(row.name, on)"
         />
       </div>
       <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
         <div>
-          <p class="text-[14px] font-medium">Instance</p>
-          <p class="text-[13px] text-muted-foreground">
-            The name and logo every visitor sees. The name can be up to 40 characters.
-          </p>
+          <p class="text-[14px] font-medium">{{ t("admin.instance") }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("admin.instanceHelp") }}</p>
         </div>
         <label class="flex flex-col gap-2 text-[14px] font-medium">
-          Instance name
+          {{ t("admin.instanceName") }}
           <Input v-model="instanceName" type="text" maxlength="40" :placeholder="DEFAULT_BRAND_NAME" />
         </label>
         <div class="flex flex-col gap-2">
-          <label for="instance-logo" class="text-[14px] font-medium">Logo</label>
+          <label for="instance-logo" class="text-[14px] font-medium">{{ t("admin.logo") }}</label>
           <input
             id="instance-logo"
             type="file"
@@ -500,24 +516,30 @@ onMounted(async () => {
             class="text-[13px]"
             @change="onPickLogo"
           />
-          <p class="text-[13px] text-muted-foreground">PNG, JPEG, WebP or SVG, up to 256 KB.</p>
+          <p class="text-[13px] text-muted-foreground">{{ t("admin.logoHelp") }}</p>
           <div v-if="logoPreview" class="flex items-center gap-3">
-            <img :src="logoPreview" class="h-9 w-9 rounded-md border border-border object-contain" alt="Logo preview" />
-            <Button type="button" size="sm" variant="outline" @click="pendingLogo = null">Remove logo</Button>
+            <img
+              :src="logoPreview"
+              class="h-9 w-9 rounded-md border border-border object-contain"
+              :alt="t('admin.logoPreview')"
+            />
+            <Button type="button" size="sm" variant="outline" @click="pendingLogo = null">{{
+              t("admin.removeLogo")
+            }}</Button>
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <Button type="button" size="sm" :disabled="savingInstance" @click="onSaveInstance">Save instance</Button>
+          <Button type="button" size="sm" :disabled="savingInstance" @click="onSaveInstance">{{
+            t("admin.saveInstance")
+          }}</Button>
           <span v-if="instanceStatus" class="text-[13px] text-gi-success">{{ instanceStatus }}</span>
           <span v-if="instanceError" class="text-[13px] text-gi-danger">{{ instanceError }}</span>
         </div>
       </div>
       <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
         <div>
-          <label for="blocked-hosts" class="text-[14px] font-medium">Blocked sites</label>
-          <p class="text-[13px] text-muted-foreground">
-            One site per line. Blocking a site also blocks its subdomains.
-          </p>
+          <label for="blocked-hosts" class="text-[14px] font-medium">{{ t("admin.blocked") }}</label>
+          <p class="text-[13px] text-muted-foreground">{{ t("admin.blockedHelp") }}</p>
         </div>
         <textarea
           id="blocked-hosts"
@@ -528,10 +550,12 @@ onMounted(async () => {
           class="w-full rounded-md border border-input bg-card px-3.5 py-2 font-mono text-[13px] shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         />
         <p v-if="envBlocked.length" class="text-[13px] text-muted-foreground">
-          Also blocked by GIRICI_BLOCKED_HOSTS: {{ envBlocked.join(", ") }}
+          {{ t("admin.blockedByEnv", { list: envBlocked.join(", ") }) }}
         </p>
         <div class="flex items-center gap-3">
-          <Button type="button" size="sm" :disabled="savingBlocked" @click="onSaveBlocked">Save</Button>
+          <Button type="button" size="sm" :disabled="savingBlocked" @click="onSaveBlocked">{{
+            t("admin.save")
+          }}</Button>
           <span v-if="blockedStatus" class="text-[13px] text-gi-success">{{ blockedStatus }}</span>
           <span v-if="blockedError" class="text-[13px] text-gi-danger">{{ blockedError }}</span>
         </div>
@@ -543,10 +567,8 @@ onMounted(async () => {
     <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">
         <div>
-          <p class="text-[15px] font-semibold">Site data</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">
-            Cookies and storage of the sites you opened through Girici, on this device. Each site keeps its own.
-          </p>
+          <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
+          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSites") }}</p>
         </div>
         <button
           type="button"
@@ -554,7 +576,7 @@ onMounted(async () => {
           :disabled="!visited.length || siteBusy"
           @click="onClearSites('all')"
         >
-          Clear all
+          {{ t("sites.clearAll") }}
         </button>
       </div>
       <p v-if="clearedStatus" role="status" class="border-t border-border px-5 py-3 text-[13px] text-gi-success">
@@ -570,24 +592,22 @@ onMounted(async () => {
         <button
           type="button"
           class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          :aria-label="`Clear ${siteName(entry.site)}`"
+          :aria-label="t('sites.clearOne', { site: siteName(entry.site) })"
           :disabled="siteBusy"
           @click="onClearSites([entry.site])"
         >
-          Clear
+          {{ t("sites.clear") }}
         </button>
       </div>
       <div v-if="legacyData" class="flex items-center justify-between gap-4 border-t border-border px-5 py-3">
-        <p class="text-[13px] text-muted-foreground">
-          Sites you opened before each site got its own address left data here. No site can reach it any more.
-        </p>
+        <p class="text-[13px] text-muted-foreground">{{ t("sites.legacy") }}</p>
         <button
           type="button"
           class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
           :disabled="siteBusy"
           @click="onRemoveLegacy"
         >
-          Remove data from before subdomain mode
+          {{ t("sites.removeLegacy") }}
         </button>
       </div>
       <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">{{ siteNote }}</p>
@@ -597,10 +617,8 @@ onMounted(async () => {
     <section v-else class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">
         <div>
-          <p class="text-[15px] font-semibold">Site data</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">
-            Cookies and storage that sites keep through Girici, on this device.
-          </p>
+          <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
+          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSingle") }}</p>
         </div>
         <button
           type="button"
@@ -608,7 +626,7 @@ onMounted(async () => {
           :disabled="!sites.length || siteBusy"
           @click="onClearSite(null)"
         >
-          Clear all
+          {{ t("sites.clearAll") }}
         </button>
       </div>
       <div v-for="entry in sites" :key="entry.site" class="flex items-center gap-3 border-t border-border px-5 py-3">
@@ -624,11 +642,11 @@ onMounted(async () => {
         <button
           type="button"
           class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          :aria-label="`Clear ${entry.site}`"
+          :aria-label="t('sites.clearOne', { site: entry.site })"
           :disabled="siteBusy"
           @click="onClearSite(entry.site)"
         >
-          Clear
+          {{ t("sites.clear") }}
         </button>
       </div>
       <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">{{ siteNote }}</p>
@@ -638,8 +656,8 @@ onMounted(async () => {
     <div class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">
         <div>
-          <p class="text-[15px] font-semibold">History</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">Sites you opened, on this device only.</p>
+          <p class="text-[15px] font-semibold">{{ t("history.title") }}</p>
+          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("history.lead") }}</p>
         </div>
         <button
           type="button"
@@ -647,7 +665,7 @@ onMounted(async () => {
           :disabled="!history.length"
           @click="onClearHistory"
         >
-          Clear all
+          {{ t("sites.clearAll") }}
         </button>
       </div>
       <div v-for="entry in history" :key="entry.name" class="flex items-center gap-3 border-t border-border px-5 py-3">
@@ -663,19 +681,19 @@ onMounted(async () => {
           class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
           @click="openEntry(entry.name)"
         >
-          Open
+          {{ t("history.open") }}
         </button>
         <button
           type="button"
           class="h-8 shrink-0 rounded-md px-2.5 text-[13px] font-medium text-gi-subtle transition-colors hover:text-gi-danger"
-          :aria-label="`Remove ${entry.name}`"
+          :aria-label="t('history.removeOne', { name: entry.name })"
           @click="removeEntry(entry.name)"
         >
-          Remove
+          {{ t("history.remove") }}
         </button>
       </div>
       <p v-if="!history.length" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">
-        No history yet.
+        {{ t("history.empty") }}
       </p>
     </div>
   </div>

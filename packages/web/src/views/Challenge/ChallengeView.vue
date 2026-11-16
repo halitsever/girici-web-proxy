@@ -10,13 +10,13 @@ import { getAuthState } from "@/lib/auth";
 import {
   afterCheck,
   fetchChallenge,
-  LOOPED,
   passedRecently,
   rememberPass,
   solveInWorker,
   submitSolution,
   tabStorage,
 } from "@/lib/pow";
+import { t } from "@/lib/i18n";
 
 const route = useRoute();
 const router = useRouter();
@@ -27,7 +27,7 @@ const nextParam = typeof route.query.next === "string" ? route.query.next : "";
 onMounted(() => {
   // Back here for the same page right after a pass: the relay did not take the cookie, so solving again would loop.
   if (passedRecently(tabStorage(), nextParam)) {
-    error.value = LOOPED;
+    error.value = t("challenge.looped");
     return;
   }
   void run();
@@ -43,7 +43,7 @@ async function run() {
     rememberPass(tabStorage(), nextParam);
     await goNext();
   } catch (e) {
-    error.value = e instanceof Error ? e.message : "The check did not go through. Reload the page to try again.";
+    error.value = e instanceof Error ? e.message : t("challenge.failed");
     busy.value = false;
   }
 }
@@ -64,12 +64,17 @@ async function goNext() {
       <div class="flex flex-col items-center gap-3 text-center">
         <BrandMark size="lg" :show-name="false" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">Checking your browser</h1>
-          <p class="mt-1 text-[14px] text-muted-foreground">This takes a few seconds and happens about once a day.</p>
+          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">{{ t("challenge.title") }}</h1>
+          <p class="mt-1 text-[14px] text-muted-foreground">{{ t("challenge.lead") }}</p>
         </div>
       </div>
 
-      <div v-if="busy" class="flex justify-center text-muted-foreground" role="status" aria-label="Checking">
+      <div
+        v-if="busy"
+        class="flex justify-center text-muted-foreground"
+        role="status"
+        :aria-label="t('challenge.busy')"
+      >
         <LoaderCircle class="size-6 animate-spin" aria-hidden="true" />
       </div>
 
@@ -77,7 +82,7 @@ async function goNext() {
         <Alert variant="destructive">
           <AlertDescription>{{ error }}</AlertDescription>
         </Alert>
-        <Button @click="run">Try again</Button>
+        <Button @click="run">{{ t("challenge.retry") }}</Button>
       </template>
 
       <p class="text-center text-[13px]"><SourceLink /></p>

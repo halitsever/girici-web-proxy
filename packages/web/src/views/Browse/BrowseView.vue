@@ -2,6 +2,7 @@
 import { ArrowRight, Clock, Search } from "lucide-vue-next";
 import { computed, onMounted, ref, watch } from "vue";
 import { getAuthState } from "@/lib/auth";
+import { lang, t, type TextKey } from "@/lib/i18n";
 import { openProxied, openProxiedTab, serviceWorkerSupport } from "@/lib/proxy";
 import { loadHistory, rememberVisit, relativeTime, type HistoryEntry } from "@/lib/history";
 import { loadSettings } from "@/lib/settings";
@@ -29,7 +30,7 @@ const SUGGESTIONS = [
 
 const settings = ref(loadSettings());
 const history = ref<HistoryEntry[]>([]);
-const tagline = getRandomTagline();
+const tagline = getRandomTagline(lang.value);
 const query = ref("");
 const selectedIndex = ref(0);
 const error = ref<string | null>(null);
@@ -44,7 +45,7 @@ const badge = computed(() => {
     case "url":
       return "URL";
     case "invalid":
-      return "INVALID";
+      return t("browse.badgeInvalid");
     case "search":
       return resolution.value.engine.toUpperCase();
     default:
@@ -63,7 +64,7 @@ const rows = computed<Row[]>(() => {
       group: "Open",
       key: "open",
       kind: "open-search",
-      label: `Search ${res.engine} for “${query.value.trim()}”`,
+      label: t("browse.search", { engine: res.engine, query: query.value.trim() }),
       path: res.path,
     });
   if (!q && history.value.length) {
@@ -93,8 +94,14 @@ const rows = computed<Row[]>(() => {
   return out;
 });
 
+const GROUP_LABELS: Record<Row["group"], TextKey> = {
+  Open: "browse.groupOpen",
+  Recent: "browse.groupRecent",
+  Suggestions: "browse.groupSuggestions",
+};
+
 const grouped = computed(() => {
-  const groups: Array<{ group: string; items: Row[] }> = [];
+  const groups: Array<{ group: Row["group"]; items: Row[] }> = [];
   for (const row of rows.value) {
     const last = groups.at(-1);
     if (last && last.group === row.group) last.items.push(row);
@@ -124,23 +131,23 @@ async function openRow(row: Row | undefined) {
     hasServiceWorker: "serviceWorker" in navigator,
   });
   if (support === "insecure") {
-    error.value = "Girici needs HTTPS (or localhost) to run in this browser.";
+    error.value = t("browse.needsHttps");
     return;
   }
   if (support === "unsupported") {
-    error.value = "This browser does not support service workers, which Girici needs.";
+    error.value = t("browse.noWorker");
     return;
   }
   error.value = null;
   const name = row.host ?? row.label;
   if (settings.value.rememberHistory && row.kind !== "recent") history.value = rememberVisit(history.value, name);
-  success.value = `Opening ${name}${settings.value.newTab ? " in a new tab" : ""}…`;
+  success.value = t(settings.value.newTab ? "browse.openingTab" : "browse.opening", { name });
   try {
     if (settings.value.newTab) await openProxiedTab(row.path);
     else await openProxied(row.path);
   } catch (cause) {
     success.value = null;
-    error.value = `Could not start the proxy engine: ${cause instanceof Error ? cause.message : String(cause)}`;
+    error.value = t("browse.engineFailed", { error: cause instanceof Error ? cause.message : String(cause) });
   }
 }
 
@@ -150,8 +157,8 @@ function onSubmit() {
     void openRow(row);
     return;
   }
-  if (resolution.value.kind === "empty") error.value = "Enter a website or search term.";
-  else if (resolution.value.kind === "invalid") error.value = "That doesn’t look like a valid URL.";
+  if (resolution.value.kind === "empty") error.value = t("browse.empty");
+  else if (resolution.value.kind === "invalid") error.value = t("browse.invalid");
 }
 
 function onEscape() {
@@ -175,7 +182,7 @@ onMounted(async () => {
     <h1 class="text-center text-[clamp(26px,5vw,36px)] font-semibold tracking-[-0.035em] text-balance">
       {{ tagline }}
     </h1>
-    <p class="mt-3 mb-8 text-[15px] text-muted-foreground">Type a URL or search. Everything routes through Girici.</p>
+    <p class="mt-3 mb-8 text-[15px] text-muted-foreground">{{ t("browse.lead") }}</p>
 
     <form
       class="w-full max-w-[620px] rounded-[14px] border bg-card shadow-[0_24px_64px_-16px_rgba(0,0,0,.6)] transition-colors"
@@ -188,12 +195,12 @@ onMounted(async () => {
           v-model="query"
           type="text"
           class="min-w-0 flex-1 bg-transparent text-[16px] text-foreground outline-none placeholder:text-[var(--gi-placeholder)]"
-          placeholder="Type a URL or search…"
+          :placeholder="t('browse.placeholder')"
           autocomplete="off"
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          aria-label="URL or search"
+          :aria-label="t('browse.inputLabel')"
           @keydown.down.prevent="move(1)"
           @keydown.up.prevent="move(-1)"
           @keydown.esc.prevent="onEscape"
@@ -208,7 +215,9 @@ onMounted(async () => {
 
       <div class="flex flex-col gap-0.5 p-2">
         <template v-for="section in grouped" :key="section.group">
-          <div class="px-2.5 pt-2 pb-1.5 text-[12px] font-medium text-gi-subtle">{{ section.group }}</div>
+          <div class="px-2.5 pt-2 pb-1.5 text-[12px] font-medium text-gi-subtle">
+            {{ t(GROUP_LABELS[section.group]) }}
+          </div>
           <button
             v-for="row in section.items"
             :key="row.key"
@@ -262,13 +271,12 @@ onMounted(async () => {
       >
         <span v-if="error" class="text-gi-danger">{{ error }}</span>
         <span v-else-if="success" class="text-gi-success">{{ success }}</span>
-        <span v-else class="text-gi-subtle">Routed via Girici</span>
-        <span class="text-gi-subtle">↑↓ navigate · ↵ open · esc clear</span>
+        <span v-else class="text-gi-subtle">{{ t("browse.routed") }}</span>
+        <span class="text-gi-subtle">{{ t("browse.keys") }}</span>
       </div>
     </form>
     <p v-if="siteMode === false" class="mt-4 max-w-[620px] text-center text-[12px] text-gi-subtle">
-      Every site you open through Girici shares one browser origin. Don't sign in to important accounts while using
-      sites you don't trust.
+      {{ t("browse.sharedOrigin") }}
     </p>
   </div>
 </template>

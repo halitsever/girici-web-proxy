@@ -5,6 +5,7 @@ import { createApp, watch } from "vue";
 import App from "./App.vue";
 import { getAuthState } from "./lib/auth";
 import { applyBrandToDocument, brand, loadBrand, type BrandDocument } from "./lib/brand";
+import { applyLanguageToDocument, lang, setLanguage } from "./lib/i18n";
 import { reloadThroughEngine } from "./lib/proxy";
 import { loadSettings } from "./lib/settings";
 import { isSiteMode, retireRootEngine, syncSettings } from "./lib/sites";
@@ -18,6 +19,8 @@ async function start(): Promise<void> {
   const state = await getAuthState().catch(() => null);
   const reloading = await (isSiteMode(state) ? retireRootEngine().catch(() => false) : engine);
   if (reloading) return;
+  setLanguage(loadSettings().lang, navigator.languages);
+  watch(lang, (next) => applyLanguageToDocument(next, document.documentElement), { immediate: true });
   await loadBrand();
   // BrandDocument is the narrow structural view the unit test fakes; the real Document satisfies it at run time.
   watch(brand, (next) => applyBrandToDocument(next, document as unknown as BrandDocument), { immediate: true });
