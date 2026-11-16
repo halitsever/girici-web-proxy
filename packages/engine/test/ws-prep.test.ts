@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildWsPrep, sealWsPrep } from "../src/sw/ws-prep.ts";
+import { buildWsPrep, sealWsPrep, wsCaller } from "../src/sw/ws-prep.ts";
 
 const jar = {
   header: async (target: URL) => (target.host === "gateway.discord.gg" ? "sess=1" : null),
@@ -19,6 +19,19 @@ describe("buildWsPrep", () => {
   it("rejects non-ws schemes and junk", async () => {
     expect(await buildWsPrep(jar, "https://gateway.discord.gg/", null)).toBeNull();
     expect(await buildWsPrep(jar, "not a url", null)).toBeNull();
+  });
+
+  it("sends a worker no page vouched for with no cookies and an opaque Origin, whatever the setting", async () => {
+    const asked: URL[] = [];
+    const spy = { header: async (target: URL) => (asked.push(target), "sess=1") };
+    const caller = wsCaller("worker", null, null);
+    const prep = await buildWsPrep(spy, "wss://gateway.discord.gg/", caller, () => true);
+    expect(prep).toEqual({ url: "wss://gateway.discord.gg/", cookie: null, origin: "null" });
+    expect(asked).toEqual([]);
+    expect(wsCaller(undefined, null, null)).toBe("anonymous");
+    expect(wsCaller("sharedworker", null, { page: "https://a.test/x" })).toEqual(new URL("https://a.test/x"));
+    expect(wsCaller("window", new URL("https://b.test/"), null)).toEqual(new URL("https://b.test/"));
+    expect(wsCaller("window", null, { page: "https://a.test/x" })).toBeNull();
   });
 
   it("leaves the cookie out when the target's cookies are blocked", async () => {

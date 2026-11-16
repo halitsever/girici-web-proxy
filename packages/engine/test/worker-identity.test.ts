@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecordStore } from "../src/sw/client-records.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
+import { SHARED_PATH_LIMIT } from "../src/shared/worker-boot.ts";
 import { answerAnnouncement, readAnnouncement, readNonce, WorkerRegistry } from "../src/sw/worker-identity.ts";
 
 function memoryRecords(): ClientRecordStore & { stores: Record<"ui" | "workers", Map<string, unknown>> } {
@@ -192,13 +193,55 @@ describe("answerAnnouncement", () => {
     expect((await answerAnnouncement(post(valid), "page", async () => null, workers)).status).toBe(403);
     expect(await workers.claim("w1", nonce)).toBeNull();
   });
+
+  it("hands a shared start over with the nonce it registered and the caller's identity", async () => {
+    const workers = new WorkerRegistry(memoryRecords());
+    await workers.ready();
+    const shared: unknown[] = [];
+    const onShared = (...args: unknown[]) => void shared.push(args);
+    const body = JSON.stringify({ v: PROTOCOL_VERSION, n: nonce, w: SHARED });
+    expect((await answerAnnouncement(post(body), "page", async () => id, workers, onShared)).status).toBe(204);
+    expect(shared).toEqual([[SHARED, nonce, id]]);
+    expect(await workers.claim("w1", nonce)).toEqual(id);
+  });
+
+  it("hands nothing over for a plain announcement or a caller with no identity", async () => {
+    const workers = new WorkerRegistry(memoryRecords());
+    const shared: unknown[] = [];
+    const onShared = (...args: unknown[]) => void shared.push(args);
+    await answerAnnouncement(post(valid), "page", async () => id, workers, onShared);
+    const body = JSON.stringify({ v: PROTOCOL_VERSION, n: "m".repeat(32), w: SHARED });
+    expect((await answerAnnouncement(post(body), "page", async () => null, workers, onShared)).status).toBe(403);
+    expect(shared).toEqual([]);
+  });
 });
+
+const SHARED = "/_g/rpc/shared-worker?s=x&p=y&t=classic";
 
 describe("readAnnouncement", () => {
   it("reads only the current protocol version", () => {
-    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce })).toBe(nonce);
+    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce })).toEqual({ nonce, shared: null });
     for (const body of [{ v: PROTOCOL_VERSION - 1, n: nonce }, { n: nonce }, null, "x"])
       expect(readAnnouncement(body), JSON.stringify(body)).toBeNull();
+  });
+
+  it("reads a shared start from an announcement and refuses a foreign one", () => {
+    const prefix = "/_g/rpc/shared-worker?";
+    const longest = prefix + "a".repeat(4096 - prefix.length);
+    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: SHARED })).toEqual({ nonce, shared: SHARED });
+    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: longest })?.shared).toBe(longest);
+    for (const w of ["/_g/admin/x", 1, null, "/_g/rpc/shared-worker", "/_g/rpc/shared-workers?s=x"])
+      expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w }), String(w)).toBeNull();
+  });
+
+  it("keeps the nonce of an announcement whose shared address is too long, as a worker of its own", () => {
+    const tooLong = "/_g/rpc/shared-worker?" + "a".repeat(SHARED_PATH_LIMIT);
+    expect(readAnnouncement({ v: PROTOCOL_VERSION, n: nonce, w: tooLong })).toEqual({ nonce, shared: null });
+  });
+
+  it("keys a shared start by the address as the browser requests it", () => {
+    const body = { v: PROTOCOL_VERSION, n: nonce, w: "/_g/rpc/shared-worker?s=it's&p=y&t=classic" };
+    expect(readAnnouncement(body)?.shared).toBe("/_g/rpc/shared-worker?s=it%27s&p=y&t=classic");
   });
 });
 

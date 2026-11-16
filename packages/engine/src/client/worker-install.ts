@@ -20,9 +20,10 @@ import { createHelpers } from "./helpers.ts";
 import { createFakeLocation } from "./location.ts";
 import { installStorageIsolation } from "./storage-isolation.ts";
 import type { Realm, UrlContext } from "./url-context.ts";
+import { installWebSocket, type WebSocketRealm } from "./websocket.ts";
 import { hookWorkers } from "./worker-bootstrap.ts";
 
-/** The worker globals this runtime touches; typed narrowly so it needs neither the DOM nor the WebWorker lib. */
+/** The worker globals this runtime touches, typed by hand since the WebWorker lib cannot load beside the DOM one. */
 export interface WorkerScope {
   __giriciBase?: string;
   __giriciRuntime?: string;
@@ -32,7 +33,11 @@ export interface WorkerScope {
   importScripts?: (...urls: string[]) => void;
   fetch?: (input: unknown, init?: unknown) => unknown;
   XMLHttpRequest?: { prototype: { open: (...args: unknown[]) => void } };
-  WebSocket?: unknown;
+  WebSocket?: WebSocketRealm["WebSocket"];
+  EventTarget?: WebSocketRealm["EventTarget"];
+  Event?: WebSocketRealm["Event"];
+  MessageEvent?: WebSocketRealm["MessageEvent"];
+  CloseEvent?: WebSocketRealm["CloseEvent"];
   WebSocketStream?: unknown;
   WebTransport?: unknown;
   eval: (code: string) => unknown;
@@ -58,6 +63,8 @@ export function installWorker(scope: WorkerScope): void {
   const partition = boot.partition ?? prefixFor(ctx.realUrl().origin);
   // Taken before hookFetch, which would send the announcement to the proxied site.
   const nativeFetch = scope.fetch;
+  // Also before hookFetch, so the shim asks for its seal with the worker's own fetch.
+  if (scope.WebSocket) installWebSocket(scope as unknown as WebSocketRealm, ctx);
 
   define(scope, "__g$", { value: workerHelpers(scope, ctx) });
   maskOrigin(scope, ctx);
@@ -212,27 +219,8 @@ function hookXhr(scope: WorkerScope, ctx: UrlContext): void {
   };
 }
 
-/** WebRTC leaks the real address and the socket relays are not here yet, so neither connects from a worker. */
+/** WebRTC leaks the real address and these two transports have no relay, so none of them connects from a worker. */
 function blockRealtime(scope: WorkerScope): void {
   const removed = ["WebSocketStream", "WebTransport", "RTCPeerConnection"];
   for (let index = 0; index < removed.length; index++) Reflect.deleteProperty(scope, removed[index] as string);
-  if (scope.WebSocket) scope.WebSocket = blockedWebSocket();
-}
-
-function blockedWebSocket(): unknown {
-  return class WebSocket {
-    static readonly CONNECTING = 0;
-    static readonly OPEN = 1;
-    static readonly CLOSING = 2;
-    static readonly CLOSED = 3;
-    readonly url: string;
-    readyState = 3;
-    constructor(url: string) {
-      this.url = String(url);
-    }
-    send(): void {}
-    close(): void {}
-    addEventListener(): void {}
-    removeEventListener(): void {}
-  };
 }

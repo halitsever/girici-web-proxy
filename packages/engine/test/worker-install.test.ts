@@ -7,8 +7,9 @@ import { installWorkers } from "../src/client/workers.ts";
 import { prefixFor } from "../src/shared/partition.ts";
 import { PROTOCOL_VERSION } from "../src/shared/protocol.ts";
 import { rewriteUrl, unrewriteUrl } from "../src/shared/url-rewrite.ts";
+import { sharedWorkerPath } from "../src/shared/worker-boot.ts";
 import { recordingCalls } from "./recording-calls.ts";
-import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+import { DESCRIPTOR_ADDITIONS, REPLACED_BUILTINS, withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 const ORIGIN = "http://p.test";
 const RUNTIME = `${ORIGIN}/_g/worker.X.js`;
@@ -155,6 +156,62 @@ function installedScope(boot: Record<string, string> = {}) {
   return { ...fake, scope };
 }
 
+const SOCKET_ORIGIN = "http://proxy.test";
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+class TestCloseEvent extends Event {
+  readonly code: number;
+  readonly reason: string;
+  readonly wasClean: boolean;
+  constructor(type: string, init: { code?: number; reason?: string; wasClean?: boolean } = {}) {
+    super(type);
+    this.code = init.code ?? 0;
+    this.reason = init.reason ?? "";
+    this.wasClean = init.wasClean ?? false;
+  }
+}
+
+/** A worker scope whose WebSocket and fetch record what the relay shim asks for; ws-prep answers `prep`. */
+function socketScope(prep: unknown) {
+  const sockets: Array<{ url: string; protocols: unknown }> = [];
+  const relays: Array<{ onopen: (() => void) | null; sent: unknown[] }> = [];
+  const fetched: Array<[unknown, unknown]> = [];
+  class RecordingWebSocket {
+    onopen: (() => void) | null = null;
+    sent: unknown[] = [];
+    constructor(url: string, protocols?: unknown) {
+      sockets.push({ url, protocols });
+      relays.push(this);
+    }
+    send(data: unknown): void {
+      this.sent.push(data);
+    }
+  }
+  const scope = {
+    __giriciBase: "https://site-a.test/w.js",
+    __giriciRuntime: `${SOCKET_ORIGIN}/_g/worker.X.js`,
+    location: { origin: SOCKET_ORIGIN, href: `blob:${SOCKET_ORIGIN}/0` },
+    eval: (code: string) => code,
+    ...fakeGlobals().globals,
+    WebSocket: RecordingWebSocket as unknown as typeof WebSocket,
+    fetch: (url: unknown, init?: { body?: unknown }) => {
+      fetched.push([url, init?.body]);
+      // Answered on a later task, as the network would, so nothing the page adds meanwhile reads the response.
+      return new Promise((resolve) => setTimeout(() => resolve({ ok: true, json: async () => prep }), 0));
+    },
+    EventTarget,
+    Event,
+    MessageEvent,
+    CloseEvent: TestCloseEvent,
+    Blob,
+    RTCPeerConnection: class {},
+    WebSocketStream: class {},
+    WebTransport: class {},
+  };
+  return { scope, sockets, relays, fetched };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -221,15 +278,13 @@ describe("installWorker", () => {
     expect(code).toBe(bootFor(code, `${ORIGIN}/~/https/a.test/sub.js`, "https://a.test/sub.js"));
   });
 
-  it("gives nested shared and module workers the bootstrap too", () => {
+  it("gives nested module workers the bootstrap and shared ones their shared address", () => {
     const { scope, workers, blobs } = installedScope();
     new scope.SharedWorker("shared.js", "name");
     new scope.Worker("mod.js", { type: "module" });
-    const [shared, mod] = workers.map((url) => blobs.get(url));
-    expect([shared, mod]).toEqual([
-      bootFor(shared, `${ORIGIN}/~/https/a.test/shared.js`, "https://a.test/shared.js"),
-      bootFor(mod, `${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true),
-    ]);
+    const mod = blobs.get(workers[1] as string);
+    expect(workers[0]).toBe(ORIGIN + sharedWorkerPath(`${ORIGIN}/~/https/a.test/shared.js`, PARTITION, false));
+    expect(mod).toBe(bootFor(mod, `${ORIGIN}/~/https/a.test/mod.js`, "https://a.test/mod.js", true));
   });
 
   it("keeps the worker's own base for a nested blob worker", () => {
@@ -343,6 +398,80 @@ describe("installWorker", () => {
     expect(Object.getPrototypeOf(new scope.SharedWorker("x")).constructor).toBe(scope.SharedWorker);
     expect(Object.getPrototypeOf(new scope.BroadcastChannel("x")).constructor).toBe(scope.BroadcastChannel);
     expect(Object.getPrototypeOf(new scope.EventSource()).constructor).toBe(scope.EventSource);
+  });
+
+  it("gives a worker the relay WebSocket, sealed through the worker's own fetch", async () => {
+    const { scope, sockets, relays, fetched } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    const socket = new scope.WebSocket("wss://site-a.test/chat");
+    expect(socket.url).toBe("wss://site-a.test/chat");
+    await flush();
+    expect(fetched[0]).toEqual(["http://proxy.test/_g/rpc/ws-prep", '{"url":"wss://site-a.test/chat"}']);
+    expect(sockets[0]).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
+    relays[0]?.onopen?.();
+    expect(JSON.parse(relays[0]?.sent[0] as string)).toEqual({ u: "wss://site-a.test/chat", p: [], s: "S" });
+  });
+
+  it("seals a worker's socket whatever the page replaced, also while it connects", async () => {
+    /** Puts a replacement in place and gives back what undoes it, so it can stay across awaits. */
+    const replace = (target: object, key: PropertyKey, replacement: PropertyDescriptor) => () => {
+      const original = Object.getOwnPropertyDescriptor(target, key) as PropertyDescriptor;
+      Object.defineProperty(target, key, { ...original, ...replacement });
+      return () => Object.defineProperty(target, key, original);
+    };
+    const pages: Array<[string, () => () => void]> = [
+      ...REPLACED_BUILTINS.map(([name, target, key, replacement]): [string, () => () => void] => [
+        name,
+        replace(target, key, replacement),
+      ]),
+      [
+        "Object.prototype get",
+        () => {
+          const proto = Object.prototype as Record<string, unknown>;
+          Object.defineProperty(proto, "get", {
+            __proto__: null,
+            configurable: true,
+            ...DESCRIPTOR_ADDITIONS.get,
+          } as PropertyDescriptor);
+          return () => delete proto.get;
+        },
+      ],
+    ];
+    for (const [name, install] of pages) {
+      const { scope, sockets, relays, fetched } = socketScope({ seal: "S" });
+      installWorker(scope as unknown as WorkerScope);
+      let url: string | undefined;
+      let sent: string | undefined;
+      const restore = install();
+      try {
+        url = new scope.WebSocket("wss://site-a.test/chat").url;
+        await flush();
+        relays[0]?.onopen?.();
+        sent = relays[0]?.sent[0] as string | undefined;
+      } finally {
+        restore();
+      }
+      expect(url, name).toBe("wss://site-a.test/chat");
+      expect(fetched[0], name).toEqual(["http://proxy.test/_g/rpc/ws-prep", '{"url":"wss://site-a.test/chat"}']);
+      expect(sockets[0], name).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
+      expect(JSON.parse(sent as string), name).toMatchObject({ s: "S" });
+    }
+    // A then on Object.prototype decides every promise resolved with a plain object, so it is checked at the call.
+    const { scope, sockets } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    withPrototypeAdditions({ then: { value: () => {}, writable: true } }, () => {
+      expect(new scope.WebSocket("wss://site-a.test/chat").url).toBe("wss://site-a.test/chat");
+    });
+    await flush();
+    expect(sockets[0]).toEqual({ url: "ws://proxy.test/_g/ws", protocols: ["girici.v1"] });
+  });
+
+  it("still takes WebRTC and the other transports away from workers", () => {
+    const { scope } = socketScope({ seal: "S" });
+    installWorker(scope as unknown as WorkerScope);
+    for (const name of ["RTCPeerConnection", "WebSocketStream", "WebTransport"]) {
+      expect(Object.hasOwn(scope, name), name).toBe(false);
+    }
   });
 
   it("leaves a scope it already set up alone", () => {

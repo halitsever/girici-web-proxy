@@ -348,7 +348,6 @@ function connectUpstream(
   const headers: Record<string, string> = { ...forward, origin: sealed?.origin ?? httpOrigin(target) };
   if (sealed?.cookie) headers.cookie = sealed.cookie;
 
-  let setCookies: string[] = [];
   let upstream: WebSocket;
   try {
     upstream = options.dial(target, {
@@ -365,11 +364,9 @@ function connectUpstream(
   }
   track(options.live, upstream);
 
-  upstream.once("upgrade", (res: IncomingMessage) => {
-    setCookies = res.headers["set-cookie"] ?? [];
-  });
   upstream.on("open", () => {
-    client.send(JSON.stringify({ t: "open", p: upstream.protocol, sc: setCookies }));
+    // The open frame carries the protocol only; cookies from the handshake stay on the server.
+    client.send(JSON.stringify({ t: "open", p: upstream.protocol }));
     pipe(client, upstream);
     pipe(upstream, client);
   });
