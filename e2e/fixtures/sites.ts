@@ -2278,17 +2278,57 @@ const RAW_ATTR = page(
 );
 
 const PLAIN_BODY = '<script>parent.postMessage("ran", "*")</script>';
-const SVG_BODY = `<svg xmlns="http://www.w3.org/2000/svg"><script>document.documentElement.setAttribute("data-ran", "1"); parent.postMessage("ran", "*")</script></svg>`;
 const XML_BODY = `<html xmlns="http://www.w3.org/1999/xhtml"><body><script>parent.postMessage("ran", "*")</script></body></html>`;
+
+// Each reports the URL its script sees and a style from a stylesheet it links, which both need the proxy.
+const SCRIPTED_SVG = `<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/css" href="https://site-a.test/xml-docs.css"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="60">
+  <rect id="box" width="20" height="20"/>
+  <a id="link" xlink:href="https://site-b.test/"><text y="50">site b</text></a>
+  <script><![CDATA[
+    addEventListener("load", () => {
+      const report = { kind: "svg", href: location.href, style: getComputedStyle(document.getElementById("box")).fill };
+      document.documentElement.setAttribute("data-report", JSON.stringify(report));
+      if (parent !== window) parent.postMessage(report, "*");
+    });
+  ]]></script>
+</svg>`;
+const SCRIPTED_XHTML = `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>XHTML</title>
+<link rel="stylesheet" href="https://site-a.test/xml-docs.css"/></head>
+<body><p id="where"></p><a id="link" href="https://site-b.test/">site b</a>
+<script>//<![CDATA[
+addEventListener("load", () => {
+  const report = { kind: "xhtml", href: location.href, style: getComputedStyle(document.getElementById("where")).color };
+  document.getElementById("where").textContent = JSON.stringify(report);
+  if (parent !== window) parent.postMessage(report, "*");
+});
+//]]></script></body></html>`;
+
+const XML_DOCS = page(
+  "XML documents",
+  `<pre id="results"></pre>
+<iframe src="/scripted.svg"></iframe>
+<iframe src="/scripted.xhtml"></iframe>
+<img src="/scripted.svg">
+<script>
+  const reports = [];
+  window.addEventListener("message", (event) => {
+    reports.push(JSON.stringify(event.data));
+    document.getElementById("results").textContent = "[" + reports.sort().join(",") + "]";
+  });
+</script>`,
+);
 
 const INERT = page(
   "Inert",
   `<pre id="results"></pre>
 <iframe src="/plain.txt"></iframe>
-<iframe src="/doc.svg"></iframe>
+<iframe src="/text.xml"></iframe>
 <iframe src="/untyped"></iframe>
 <iframe src="/data.xml"></iframe>
-<object data="/doc.svg" type="image/svg+xml"></object>
+<object data="/data.xml" type="application/xml"></object>
 <embed src="/untyped">
 <script>
   let ran = 0;
@@ -2778,7 +2818,6 @@ export const ROUTES: Record<string, Record<string, Route>> = {
     "/reuse-same-child": html(REUSE_SAME_CHILD),
     "/blank-worker": html(BLANK_WORKER),
     "/plain.txt": typed("text/plain", PLAIN_BODY),
-    "/doc.svg": typed("image/svg+xml", SVG_BODY),
     "/untyped": typed(null, PLAIN_BODY),
     "/untyped-page": typed(
       null,
@@ -2791,6 +2830,11 @@ export const ROUTES: Record<string, Record<string, Route>> = {
       res.end(Buffer.from([0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2]));
     },
     "/data.xml": typed("application/xml", XML_BODY),
+    "/text.xml": typed("text/xml", XML_BODY),
+    "/scripted.svg": typed("image/svg+xml", SCRIPTED_SVG),
+    "/scripted.xhtml": typed("application/xhtml+xml", SCRIPTED_XHTML),
+    "/xml-docs.css": css("#box { fill: rgb(1, 2, 3); } #where { color: rgb(1, 2, 3); }"),
+    "/xml-docs": html(XML_DOCS),
     "/inert": html(INERT),
     "/frame-worker": html(FRAME_WORKER),
     "/sri": html(SRI),

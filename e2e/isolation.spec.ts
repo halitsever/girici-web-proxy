@@ -88,8 +88,6 @@ test("runs no script in documents the proxy does not rewrite", async ({ page, br
   // WebKit loads object and embed documents without asking the service worker, so only the four frames are checked there.
   const checked = browserName === "webkit" ? out.readable.slice(0, 4) : out.readable;
   expect(checked.every((value: boolean) => value === false)).toBe(true);
-  await page.goto("/~/https/site-a.test/doc.svg");
-  await expect(page.locator("svg")).not.toHaveAttribute("data-ran", "1");
 });
 
 test("renders an untyped page as HTML and keeps a text document's charset", async ({ page }) => {
