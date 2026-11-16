@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createSSRApp } from "vue";
 import { createMemoryHistory, createRouter } from "vue-router";
 import { renderToString } from "vue/server-renderer";
+import { LANGUAGES } from "@girici/engine/shared";
 import { en } from "@/locales/en";
 import { tr } from "@/locales/tr";
 import LoginView from "@/views/Login/LoginView.vue";
@@ -23,13 +24,14 @@ describe("UI language", () => {
   it("starts in English and follows the setting or the browser", () => {
     expect(lang.value).toBe("en");
     expect(setLanguage("auto", ["tr-TR", "en-US"])).toBe("tr");
-    expect(setLanguage("auto", ["de-DE", "en"])).toBe("en");
+    expect(setLanguage("auto", ["ja-JP", "en"])).toBe("en");
+    expect(setLanguage("auto", ["de-DE", "en"])).toBe("de");
     expect(setLanguage("tr", ["en-US"])).toBe("tr");
-    expect(setLanguage("de", ["tr"])).toBe("tr");
+    expect(setLanguage("de", ["tr"])).toBe("de");
   });
 
   it("offers only the languages it has text for", () => {
-    expect(UI_LANGUAGES.map((info) => info.code)).toEqual(["en", "tr"]);
+    expect(UI_LANGUAGES.map((info) => info.code)).toEqual(LANGUAGES.map((info) => info.code));
   });
 
   it("keeps the same keys and placeholders in Turkish", () => {

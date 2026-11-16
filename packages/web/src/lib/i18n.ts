@@ -15,8 +15,18 @@ import {
 import { ref } from "vue";
 import { en, type Messages } from "@/locales/en";
 import { tr } from "@/locales/tr";
+import { es } from "@/locales/es";
+import { ptBR } from "@/locales/pt-BR";
+import { fr } from "@/locales/fr";
+import { de } from "@/locales/de";
+import { ru } from "@/locales/ru";
+import { fa } from "@/locales/fa";
+import { ar } from "@/locales/ar";
+import { zhCN } from "@/locales/zh-CN";
+import { id } from "@/locales/id";
+import { vi } from "@/locales/vi";
 
-const CATALOGS: Catalogs<Messages> = { en, tr };
+const CATALOGS: Catalogs<Messages> = { en, tr, es, "pt-BR": ptBR, fr, de, ru, fa, ar, "zh-CN": zhCN, id, vi };
 
 type KeyOf<T> = { [K in keyof Messages]: Messages[K] extends T ? K : never }[keyof Messages];
 export type TextKey = KeyOf<string>;

@@ -1,5 +1,5 @@
 import { textFor } from "../shared/i18n/catalog.ts";
-import { DEFAULT_LANG, type Lang } from "../shared/i18n/languages.ts";
+import { DEFAULT_LANG, directionOf, type Lang } from "../shared/i18n/languages.ts";
 import { fill, pluralText } from "../shared/i18n/text.ts";
 import { PAGE_TEXT, type ErrorPageCode } from "./page-text.ts";
 
@@ -36,7 +36,7 @@ export function errorPage(
     wait: waitText(retryAfter, lang),
   });
   return `<!doctype html>
-<html lang="${lang}">
+<html lang="${lang}" dir="${directionOf(lang)}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

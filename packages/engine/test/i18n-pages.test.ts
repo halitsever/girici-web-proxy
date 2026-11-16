@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BOOT_TEXT } from "../src/boot/text.ts";
 import { TOOLBAR_TEXT, toolbarHtml } from "../src/client/toolbar-view.ts";
 import { isLangChoice, pickLanguage, textFor, type Catalogs } from "../src/shared/i18n/catalog.ts";
+import { LANGUAGES } from "../src/shared/i18n/languages.ts";
 import { DEFAULT_ENGINE_PREFS, type EnginePrefs } from "../src/shared/protocol.ts";
 import { DeepLinkWarning } from "../src/sw/deep-link-warning.ts";
 import { errorPage, waitText } from "../src/sw/error-page.ts";
@@ -47,10 +48,19 @@ describe("pickLanguage", () => {
   });
 });
 
+describe("shipped catalogs", () => {
+  it("cover every listed language on every engine surface", () => {
+    const codes = LANGUAGES.map((info) => info.code).sort();
+    for (const [name, catalogs] of Object.entries({ PAGE_TEXT, TOOLBAR_TEXT, BOOT_TEXT })) {
+      expect(Object.keys(catalogs).sort(), name).toEqual(codes);
+    }
+  });
+});
+
 describe("Turkish pages", () => {
   it("writes the error page in Turkish with the host and wait filled in", () => {
     const page = errorPage("quota", new URL("https://a.test/"), 120, "/", "tr");
-    expect(page).toContain('<html lang="tr">');
+    expect(page).toContain('<html lang="tr" dir="ltr">');
     expect(page).toContain("veri kotasını doldurdu. Lütfen 2 dakika sonra yeniden deneyin.");
     expect(page).toContain("Girici'ye dön");
     expect(errorPage("connect", null, undefined, "/", "tr")).toContain("Girici site adresine bağlanamadı.");
@@ -58,10 +68,13 @@ describe("Turkish pages", () => {
     expect(waitText(undefined, "tr")).toBe("daha sonra");
   });
 
-  it("keeps English for a language without a catalog", () => {
-    expect(errorPage("dns", new URL("https://a.test/"), undefined, "/", "de")).toContain(
-      "Girici could not find a.test.",
-    );
+  it("writes a right-to-left language's pages right to left", () => {
+    expect(errorPage("dns", new URL("https://a.test/"), undefined, "/", "ar")).toContain('<html lang="ar" dir="rtl">');
+    expect(errorPage("dns", new URL("https://a.test/"), undefined, "/", "de")).toContain('<html lang="de" dir="ltr">');
+    const html = toolbarHtml(textFor(TOOLBAR_TEXT, "fa"), "rtl");
+    expect(html).toContain('role="toolbar" aria-label="Girici" dir="rtl"');
+    // Addresses read left to right in any language.
+    expect(html).toContain('class="address" type="text" dir="ltr"');
   });
 
   it("writes the shared-link warning in Turkish", async () => {
@@ -76,7 +89,7 @@ describe("Turkish pages", () => {
       keys: { load: async () => null, loadOrCreate: async (fresh) => fresh() },
     });
     const html = await (await warning.page("/~/https/site-a.test/", new URL("https://site-a.test/"), "/", "tr")).text();
-    expect(html).toContain('<html lang="tr">');
+    expect(html).toContain('<html lang="tr" dir="ltr">');
     expect(html).toContain("<h1>Bu sayfa Girici üzerinden açılıyor</h1>");
     expect(html).toContain("site-a.test adresine devam et");
   });

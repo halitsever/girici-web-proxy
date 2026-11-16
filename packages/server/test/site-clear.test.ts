@@ -192,7 +192,7 @@ describe("clear plans", () => {
 
   it("writes the clear page in Turkish", () => {
     const html = clearPage("/next", "tr");
-    expect(html).toContain('<html lang="tr">');
+    expect(html).toContain('<html lang="tr" dir="ltr">');
     expect(html).toContain("<p>Site verileri temizleniyor…</p>");
   });
 });

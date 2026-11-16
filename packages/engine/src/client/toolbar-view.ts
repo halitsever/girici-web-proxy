@@ -1,4 +1,14 @@
 import type { Catalogs } from "../shared/i18n/catalog.ts";
+import { toolbarText as es } from "./locales/es.ts";
+import { toolbarText as ptBR } from "./locales/pt-BR.ts";
+import { toolbarText as fr } from "./locales/fr.ts";
+import { toolbarText as de } from "./locales/de.ts";
+import { toolbarText as ru } from "./locales/ru.ts";
+import { toolbarText as fa } from "./locales/fa.ts";
+import { toolbarText as ar } from "./locales/ar.ts";
+import { toolbarText as zhCN } from "./locales/zh-CN.ts";
+import { toolbarText as id } from "./locales/id.ts";
+import { toolbarText as vi } from "./locales/vi.ts";
 
 /** The Girici mark from girici-icon-white.svg, without its metadata block. */
 const MARK =
@@ -63,17 +73,27 @@ export const TOOLBAR_TEXT: Catalogs<ToolbarText> = {
     clearing: "Temizleniyor…",
     clearFailed: "Bu sitenin verileri temizlenemedi.",
   },
+  es,
+  "pt-BR": ptBR,
+  fr,
+  de,
+  ru,
+  fa,
+  ar,
+  "zh-CN": zhCN,
+  id,
+  vi,
 };
 
 /** Static markup only: no URLs, so nothing in it depends on the page's rewriting. */
-export function toolbarHtml(text: ToolbarText): string {
+export function toolbarHtml(text: ToolbarText, dir: "ltr" | "rtl" = "ltr"): string {
   return `<button class="handle" type="button" aria-label="${text.toolbar}">${MARK}</button>
-<div class="panel" role="toolbar" aria-label="Girici" hidden>
+<div class="panel" role="toolbar" aria-label="Girici" dir="${dir}" hidden>
 ${button("home", text.home, MARK)}${button("back", text.back, BACK)}${button("forward", text.forward, FORWARD)}${button("reload", text.reload, RELOAD)}
-<input class="address" type="text" aria-label="${text.address}" spellcheck="false" autocomplete="off" autocapitalize="off">
+<input class="address" type="text" dir="ltr" aria-label="${text.address}" spellcheck="false" autocomplete="off" autocapitalize="off">
 ${button("clear", text.clearSite, TRASH)}${button("hide", text.hide, CLOSE)}
 </div>
-<div class="panel confirm" role="group" aria-label="${text.clearSite}" hidden>
+<div class="panel confirm" role="group" aria-label="${text.clearSite}" dir="${dir}" hidden>
 <span class="message"></span>
 <button class="text danger" type="button" data-action="confirm-clear">${text.clear}</button>
 <button class="text" type="button" data-action="cancel-clear">${text.cancel}</button>

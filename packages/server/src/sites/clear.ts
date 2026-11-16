@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { DEFAULT_LANG, escapeAttribute, isSiteLabel, type Lang } from "@girici/engine/shared";
+import { DEFAULT_LANG, directionOf, escapeAttribute, isSiteLabel, type Lang } from "@girici/engine/shared";
 import { serverText } from "../http/page-text.ts";
 import type { SiteKeys } from "./keys.ts";
 import { openValue, signValue } from "./signed.ts";
@@ -50,7 +50,7 @@ export function planBelongsTo(plan: ClearPlan, nonces: readonly string[]): boole
 /** A top-level page, since WebKit ignores Clear-Site-Data on a frame; it moves on to `next` at once. */
 export function clearPage(next: string, lang: Lang = DEFAULT_LANG): string {
   return `<!doctype html>
-<html lang="${lang}">
+<html lang="${lang}" dir="${directionOf(lang)}">
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="refresh" content="0;url=${escapeAttribute(next)}" />

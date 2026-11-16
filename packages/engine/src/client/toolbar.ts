@@ -1,4 +1,5 @@
 import { pickLanguage, textFor, type LangChoice } from "../shared/i18n/catalog.ts";
+import { directionOf } from "../shared/i18n/languages.ts";
 import { append, mapOf, ownValue } from "../shared/primordials.ts";
 import {
   PROTOCOL_VERSION,
@@ -124,13 +125,14 @@ export function installToolbar(
   keys: ToolbarKeys,
   options: { home: string; engine: SearchEngine; lang: LangChoice },
 ): void {
-  const text = textFor(TOOLBAR_TEXT, pickLanguage(TOOLBAR_TEXT, options.lang, natives.languages));
+  const lang = pickLanguage(TOOLBAR_TEXT, options.lang, natives.languages);
+  const text = textFor(TOOLBAR_TEXT, lang);
   const doc = win.document;
   // An SVG document renders no HTML outside a foreignObject, so there is nowhere to show the bar.
   if (doc.documentElement?.namespaceURI !== "http://www.w3.org/1999/xhtml") return;
   const host = doc.createElement(TOOLBAR_TAG);
   const root = natives.attachShadow(host);
-  natives.setShadowHtml(root, toolbarHtml(text));
+  natives.setShadowHtml(root, toolbarHtml(text, directionOf(lang)));
   try {
     // Adopted sheets sit outside the page's CSS and its style-src rules.
     const sheet = new win.CSSStyleSheet();
