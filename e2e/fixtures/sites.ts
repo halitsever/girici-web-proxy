@@ -71,7 +71,10 @@ const NAV = page(
 <form method="post" action="/redirect-303"><input name="q" value="dropped"><button id="post-303-go">Go</button></form>
 <button id="blank-popup" onclick="const w = window.open(); w.location = 'https://site-b.test/';">blank popup</button>
 <button id="blank-frame" onclick="const f = document.createElement('iframe'); f.id = 'blank'; document.body.append(f); f.contentWindow.location.href = 'https://site-b.test/';">blank frame</button>
-<iframe id="frame" src="https://site-b.test/frame"></iframe>`,
+<iframe id="frame" src="https://site-b.test/frame"></iframe>
+<iframe id="tds" name="tds"></iframe>
+<form method="post" action="https://site-b.test/echo" target="tds"><input name="q" value="framed"><button id="framed-go">Go</button></form>
+<a id="framed-link" href="https://site-b.test/" target="tds">framed link</a>`,
 );
 
 const RUNTIME = page(
@@ -2929,6 +2932,7 @@ const ROUTES: Record<string, Record<string, Route>> = {
   "site-b.test": {
     "/": html(page("Site B", "<h1>Site B</h1>")),
     "/target": html(page("Target", "<h1>Target</h1>")),
+    "/echo": echo,
     "/search": search,
     "/frame": html(FRAME),
     "/cookie/whoami": whoami,

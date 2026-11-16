@@ -341,6 +341,8 @@ export function installFrames(
   };
   const open = win.open;
   const nameSetter = ownDescriptor(win, "name")?.set;
+  const parentOf = ownDescriptor(win, "parent")?.get;
+  const frameElementOf = ownDescriptor(win, "frameElement")?.get;
   const nativeOpen = (self: unknown, url: string, target: string | undefined, features: string | undefined) =>
     apply(open, self, [url, target, features]) as Window | null;
   /** Any own property counts, so a page cannot pass a window off as unmarked with an accessor. */
@@ -351,13 +353,23 @@ export function installFrames(
       return true;
     }
   };
+  /** Links and forms aimed at a frame's name must keep landing there, so only a popup may give its name up. */
+  const isTopLevel = (opened: object): boolean => {
+    try {
+      if (!parentOf || !frameElementOf) return false;
+      return apply(parentOf, opened, []) === opened && apply(frameElementOf, opened, []) === null;
+    } catch {
+      return false;
+    }
+  };
   /** A window no engine has adopted or marked yet, which the open() just called made. */
   const isNew = (opened: object): boolean => !hasOwnKey(opened, "__g$") && !hasOwnKey(opened, WINDOW_MADE);
   /**
    * Browsers keep the window open(url) made, while it is still blank, for whichever page arrives in it first. A window
    * made by open("") never is kept; anything else this realm cannot vouch for counts as kept.
    */
-  const reusable = (opened: object): boolean => !isNew(opened) && windowMark(opened, WINDOW_MADE) !== "blank";
+  const reusable = (opened: object): boolean =>
+    !isNew(opened) && windowMark(opened, WINDOW_MADE) !== "blank" && isTopLevel(opened);
   const rename = (opened: object, name: string): void => {
     try {
       if (nameSetter) apply(nameSetter, opened, [name]);
