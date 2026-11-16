@@ -1,6 +1,6 @@
 import { parseScript } from "meriyah";
 import { describe, expect, it } from "vitest";
-import { MAX_REWRITE_LENGTH, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/js.ts";
+import { MAX_REWRITE_LENGTH, rewriteFunction, rewriteJs, STANDALONE_SHIM } from "../src/rewrite/js.ts";
 
 const SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); } }).v";
 
@@ -174,6 +174,45 @@ describe("rewriteJs", () => {
 
   it("parses handlers as function bodies", () => {
     expect(rewriteJs("return location.href", { kind: "handler" })).toBe("return __g$.L(location).href");
+  });
+
+  it("rewrites a dynamic function's parameters along with its body", () => {
+    expect(rewriteFunction("a = location.href", "return a", "function")).toEqual({
+      params: "a = __g$.L(location).href",
+      body: "return a",
+    });
+    expect(rewriteFunction("a = location.assign(x), b = eval(c)", "yield a", "generator")).toEqual({
+      params: "a = __g$.L(location).assign(x), b = eval(__g$.E(c))",
+      body: "yield a",
+    });
+    expect(rewriteFunction("a", "await 0; return location.href", "async")).toEqual({
+      params: "a",
+      body: "await 0; return __g$.L(location).href",
+    });
+    // Parameters that close the list early are refused by the constructor, so they are left as they are.
+    const injected = "a) { location.href } (function (b";
+    expect(rewriteFunction(injected, "", "function")).toEqual({ params: injected, body: "" });
+  });
+
+  it("takes escaped identifiers through the rewriter", () => {
+    expect(rewriteJs("l\\u006fcation.href = x")).toContain("__g$");
+    expect(rewriteJs("window.l\\u006fcation.replace(x)")).toContain("__g$");
+  });
+
+  it("parses generator and async bodies as the bodies of their own kind", () => {
+    expect(rewriteJs("yield 1; return location.href", { kind: "generator" })).toBe(
+      "yield 1; return __g$.L(location).href",
+    );
+    expect(rewriteJs("await 0; return location.href", { kind: "async" })).toBe("await 0; return __g$.L(location).href");
+    expect(rewriteJs("yield await 0; location.assign(x)", { kind: "asyncGenerator" })).toBe(
+      "yield await 0; __g$.L(location).assign(x)",
+    );
+    // A body ending in a line comment still ends where the native puts it.
+    expect(rewriteJs("yield location.href // done", { kind: "generator" })).toBe("yield __g$.L(location).href // done");
+    // Only the body is parsed: a body that would close the wrapper early is left as the native would refuse it.
+    expect(rewriteJs("}); location.href; (function* () {", { kind: "generator" })).toBe(
+      "}); location.href; (function* () {",
+    );
   });
 
   it("returns the source untouched when it cannot or need not rewrite", () => {

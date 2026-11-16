@@ -74,6 +74,17 @@ test("loads iframes through the proxy", async ({ page }) => {
   expect(results).toEqual({ href: "https://site-b.test/frame", parent: "SecurityError" });
 });
 
+test("loads links and forms aimed at a blank named frame in that frame", async ({ page }) => {
+  let popups = 0;
+  page.on("popup", () => popups++);
+  const frame = page.frameLocator("#tds");
+  await page.click("#framed-go");
+  await expect(frame.locator("#echo")).toHaveText("POST q=framed");
+  await page.click("#framed-link");
+  await expect(frame.locator("h1")).toHaveText("Site B");
+  expect(popups).toBe(0);
+});
+
 test("resolves URLs against <base>, srcset and stylesheets", async ({ page }) => {
   await page.goto("/~/https/site-a.test/base");
   await expect.poll(() => page.locator("#based").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);

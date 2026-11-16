@@ -1,3 +1,4 @@
+import { indexOf, replaceAll, sliceOf } from "./primordials.ts";
 import type { ClientConfig } from "./protocol.ts";
 
 // Taken at load: the runtime builds tags inside page calls, after page code may have replaced these.
@@ -17,13 +18,46 @@ export function clientTag(src: string, config: ClientConfig): string {
   return `<script src="${src}" data-girici="${escapeAttribute(encode(config) ?? "null")}"></script>`;
 }
 
+const TAG_END = '"></script>';
+
 /** Takes the runtime tag back out of a srcdoc the page reads, so it sees the markup it wrote. */
 export function stripClientTag(markup: string, clientUrl: string): string {
+  // The tag carries the page's cookies, so only natives taken at load see it.
   const open = `<script src="${clientUrl}" data-girici="`;
-  const start = markup.indexOf(open);
+  const start = indexOf(markup, open);
   if (start < 0) return markup;
-  const end = markup.indexOf('"></script>', start + open.length);
-  return end < 0 ? markup : markup.slice(0, start) + markup.slice(end + '"></script>'.length);
+  const end = indexOf(markup, TAG_END, start + open.length);
+  return end < 0 ? markup : sliceOf(markup, 0, start) + sliceOf(markup, end + TAG_END.length);
+}
+
+/** Nested srcdoc attributes escape their markup once more at each level. */
+const NESTED_ESCAPES = /[&"<]/g;
+const MAX_NESTING = 16;
+
+/**
+ * Empties the config of every runtime tag, nested srcdoc documents included, keeping the tags themselves: the
+ * markup then goes through a parser that runs on page-replaceable built-ins, and the configs carry cookies.
+ */
+export function blankClientConfigs(markup: string, clientUrl: string): string {
+  let open = `<script src="${clientUrl}" data-girici="`;
+  let close = TAG_END;
+  for (let depth = 0; depth < MAX_NESTING && open.length <= markup.length; depth++) {
+    let start = indexOf(markup, open);
+    while (start >= 0) {
+      const from = start + open.length;
+      const end = indexOf(markup, close, from);
+      if (end < 0) break;
+      markup = sliceOf(markup, 0, from) + sliceOf(markup, end);
+      start = indexOf(markup, open, from + close.length);
+    }
+    open = replaceAll(open, NESTED_ESCAPES, escapeNested);
+    close = replaceAll(close, NESTED_ESCAPES, escapeNested);
+  }
+  return markup;
+}
+
+function escapeNested(char: string): string {
+  return char === "&" ? "&amp;" : char === '"' ? "&quot;" : "&lt;";
 }
 
 /**

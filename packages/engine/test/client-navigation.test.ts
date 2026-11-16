@@ -209,6 +209,92 @@ describe("installNavigation", () => {
   });
 });
 
+describe("named windows of links and forms", () => {
+  function withTargets() {
+    const fake = fakeWindow();
+    // A plain primary click, read through getters as the DOM's own.
+    class MouseEvent {
+      get button() {
+        return 0;
+      }
+    }
+    for (const key of ["metaKey", "ctrlKey", "shiftKey", "altKey"])
+      Object.defineProperty(MouseEvent.prototype, key, { get: () => false });
+    Object.assign(fake.win, { MouseEvent });
+    const prepared: unknown[] = [];
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    const nav = installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      noCookies,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      noBlobs,
+      (target, destination) => prepared.push([target, destination]),
+    );
+    fake.listeners.length = 0;
+    nav.listen();
+    const dispatch = (type: string, target: unknown, extra: Record<string, unknown> = {}) => {
+      const event = Object.assign(new fake.win.Event(type, [target]), extra);
+      for (const [name, listener] of fake.listeners) if (name === type) listener(event);
+    };
+    return { ...fake, prepared, dispatch };
+  }
+
+  it("readies a named window before a link or form loads into it", () => {
+    const { win, prepared, dispatch } = withTargets();
+    dispatch("click", new win.HTMLAnchorElement({ href: "https://b.test/x", target: "fresh" }));
+    dispatch(
+      "click",
+      new win.HTMLAnchorElement({ href: "https://b.test/x", target: "kept", rel: "nofollow NoOpener" }),
+    );
+    dispatch("click", new win.HTMLAnchorElement({ href: "https://b.test/x" }));
+    new win.HTMLFormElement({ action: "https://c.test/a", target: "form" }).submit();
+    const submitter = new FakeElement({ formtarget: "button", formaction: "https://d.test/" });
+    dispatch("submit", new win.HTMLFormElement({ action: "https://c.test/a", target: "form" }), { submitter });
+    expect(prepared).toEqual([
+      ["fresh", "https://b.test"],
+      ["form", "https://c.test"],
+      ["button", "https://d.test"],
+    ]);
+  });
+});
+
+describe("submits held for cookie writes", () => {
+  it("checks the submitter without the page's Array.prototype.some", () => {
+    const fake = fakeWindow();
+    const ctx = createUrlContext(fake.win as unknown as Realm);
+    const writes = { pendingWrites: () => Promise.resolve() } as unknown as CookieBridge;
+    const nav = installNavigation(
+      fake.win as unknown as Realm,
+      ctx,
+      writes,
+      (fn, self, args) => Reflect.apply(fn, self, args),
+      asIs,
+      noBlobs,
+    );
+    fake.listeners.length = 0;
+    nav.listen();
+    const form = new fake.win.HTMLFormElement({ action: "/search" });
+    const submitter = new FakeElement({ formtarget: "sink" });
+    const event = new fake.win.Event("submit", [form]);
+    Object.defineProperty(event, "submitter", { value: submitter });
+    const seen: unknown[] = [];
+    const page = {
+      value(this: unknown[]) {
+        seen.push(this);
+        return false;
+      },
+    };
+    withReplaced(Array.prototype, "some", page, () => {
+      for (const [type, listener] of fake.listeners) if (type === "submit") listener(event);
+    });
+    expect(seen).toEqual([]);
+    // The override leaves the submit to the browser.
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
 describe("blob links", () => {
   it("restores a clicked link's blob swap at once when Array.prototype.includes is replaced", () => {
     const swaps: unknown[] = [];

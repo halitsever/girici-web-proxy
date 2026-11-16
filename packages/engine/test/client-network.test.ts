@@ -4,6 +4,7 @@ import { installNetwork } from "../src/client/network.ts";
 import { HEADER } from "../src/shared/protocol.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { recordingCalls } from "./recording-calls.ts";
+import { withReplaced } from "./replaced-builtins.ts";
 
 function fakeWin(log: string[], received: unknown[] = []) {
   // Like the native, a request keeps its address in an internal slot that only the prototype getter reads.
@@ -107,5 +108,35 @@ describe("installNetwork", () => {
     const proxied = new fake.Request("/p/https://a.test/y");
     void win.fetch(proxied as unknown as Request);
     expect(received[1]).toBe(proxied);
+  });
+
+  it("tracks its requests in a set the page's WeakSet never sees, even one replaced before install", () => {
+    const fake = fakeWin([]);
+    const win = fake as unknown as Realm;
+    const seen: unknown[] = [];
+    const record = (native: (...args: never[]) => unknown) =>
+      function (this: unknown, ...args: unknown[]) {
+        seen.push(this, ...args);
+        return Reflect.apply(native, this, args);
+      };
+    const NativeSet = WeakSet;
+    // A page's WeakSet that hands every set it makes to the page.
+    const PageSet = function () {
+      const set = new NativeSet();
+      seen.push(set);
+      return set;
+    };
+    withReplaced(globalThis, "WeakSet", { value: PageSet }, () =>
+      installNetwork(win, ctx, { currentSeq: () => 0, applySync: () => {} } as unknown as CookieBridge),
+    );
+    const request = new win.XMLHttpRequest();
+    withReplaced(WeakSet.prototype, "has", { value: record(WeakSet.prototype.has) }, () =>
+      withReplaced(WeakSet.prototype, "add", { value: record(WeakSet.prototype.add) }, () => {
+        request.open("GET", "a");
+        request.send();
+        request.send();
+      }),
+    );
+    expect(seen).toEqual([]);
   });
 });

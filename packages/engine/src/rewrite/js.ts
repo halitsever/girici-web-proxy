@@ -8,10 +8,31 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 export const STANDALONE_SHIM =
   'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},A:function(o){var k="location";return{get v(){return o[k]},set v(x){o[k]=x}}},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
 
+/** Bodies the generator and async constructors compile; each parses only inside a function of its own kind. */
+export type FunctionBodyKind = "generator" | "async" | "asyncGenerator";
+/** What a Function, generator or async constructor compiles. */
+export type ConstructorKind = "function" | FunctionBodyKind;
+
 export interface JsRewriteOptions {
-  kind?: "classic" | "module" | "handler";
+  kind?: "classic" | "module" | "handler" | FunctionBodyKind;
   standalone?: boolean;
 }
+
+/** A dynamic function's parameter list, as one joined string, and its body. */
+export interface FunctionSource {
+  params: string;
+  body: string;
+}
+
+// The source a constructor compiles, laid out as CreateDynamicFunction lays it out.
+const FUNCTION_HEADS: Record<ConstructorKind, string> = {
+  function: "(function anonymous(",
+  generator: "(function* anonymous(",
+  async: "(async function anonymous(",
+  asyncGenerator: "(async function* anonymous(",
+};
+const FUNCTION_MIDDLE = "\n) {\n";
+const FUNCTION_TAIL = "\n})";
 
 /** `assign` is a destructuring or for-in/of target, where `location` gets a setter that converts the URL. */
 type Role = "read" | "target" | "assign" | "binding" | "callee";
@@ -39,17 +60,12 @@ const LOCATION_SETTER = "({ set v(__g$v) { location = __g$.N(location, __g$v); }
 
 /** Routes reads and writes of `location` through the runtime's __g$ helpers; unparsable source is returned as is. */
 export function rewriteJs(source: string, options: JsRewriteOptions = {}): string {
-  if (source.length > MAX_REWRITE_LENGTH) return source;
-  if (
-    !source.includes("location") &&
-    !source.includes("eval") &&
-    !source.includes("import") &&
-    !source.includes("postMessage") &&
-    !WRAPPED_NAME.test(source)
-  ) {
-    return source;
+  if (source.length > MAX_REWRITE_LENGTH || !mayNeedRewrite(source)) return source;
+  const kind = options.kind ?? "classic";
+  if (kind === "generator" || kind === "async" || kind === "asyncGenerator") {
+    return rewriteFunction("", source, kind).body;
   }
-  const program = parse(source, options.kind ?? "classic");
+  const program = parse(source, kind);
   if (!program) return source;
   const output = new MagicString(source);
   try {
@@ -72,7 +88,61 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
   return output.toString();
 }
 
-function parse(source: string, kind: NonNullable<JsRewriteOptions["kind"]>): ESTree.Program | null {
+/** Whether `source` may name anything the rewriter changes; an escape such as `\u006f` can spell any of them. */
+function mayNeedRewrite(source: string): boolean {
+  return (
+    source.includes("location") ||
+    source.includes("eval") ||
+    source.includes("import") ||
+    source.includes("postMessage") ||
+    source.includes("\\u") ||
+    WRAPPED_NAME.test(source)
+  );
+}
+
+/**
+ * Rewrites what a Function, generator or async constructor compiles. Both parts are parsed together, as the
+ * constructor parses them, and handed back separately; input the constructor would refuse comes back as it was.
+ */
+export function rewriteFunction(params: string, body: string, kind: ConstructorKind): FunctionSource {
+  const unchanged = { params, body };
+  if (params.length + body.length > MAX_REWRITE_LENGTH || (!mayNeedRewrite(params) && !mayNeedRewrite(body))) {
+    return unchanged;
+  }
+  const head = FUNCTION_HEADS[kind];
+  const paramsStart = head.length;
+  const paramsEnd = paramsStart + params.length;
+  const bodyStart = paramsEnd + FUNCTION_MIDDLE.length;
+  const bodyEnd = bodyStart + body.length;
+  const wrapped = head + params + FUNCTION_MIDDLE + body + FUNCTION_TAIL;
+  let program: ESTree.Program;
+  try {
+    program = parseScript(wrapped, PARSE_OPTIONS);
+  } catch {
+    return unchanged;
+  }
+  // Parameters or a body that close the function early are ones the constructor refuses.
+  const statement = program.body[0];
+  const fn = statement?.type === "ExpressionStatement" ? statement.expression : undefined;
+  if (
+    program.body.length !== 1 ||
+    fn?.type !== "FunctionExpression" ||
+    fn.end !== wrapped.length - 1 ||
+    fn.body?.start !== bodyStart - 2
+  ) {
+    return unchanged;
+  }
+  const output = new MagicString(wrapped);
+  try {
+    new LocationRewriter(wrapped, output).visit(program, "read", false);
+    if (!output.hasChanged()) return unchanged;
+    return { params: output.slice(paramsStart, paramsEnd), body: output.slice(bodyStart, bodyEnd) };
+  } catch {
+    return unchanged;
+  }
+}
+
+function parse(source: string, kind: "classic" | "module" | "handler"): ESTree.Program | null {
   try {
     if (kind === "module") return parseModule(source, PARSE_OPTIONS);
     if (kind === "handler") return parseScript(source, { ...PARSE_OPTIONS, globalReturn: true });

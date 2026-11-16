@@ -1,9 +1,15 @@
 import { Parser } from "htmlparser2";
 import MagicString from "magic-string";
 import { keyword, rewriteHtml } from "../rewrite/html.ts";
-import { rewriteJs } from "../rewrite/js.ts";
+import {
+  rewriteFunction,
+  rewriteJs,
+  type ConstructorKind,
+  type FunctionBodyKind,
+  type FunctionSource,
+} from "../rewrite/js.ts";
 import { mapRefresh } from "../rewrite/refresh.ts";
-import { stripClientTag } from "../shared/client-tag.ts";
+import { blankClientConfigs, stripClientTag } from "../shared/client-tag.ts";
 import { originOf } from "../shared/primordials.ts";
 import { attributeKind, restoreAttribute } from "./attribute-values.ts";
 import type { OpenSealed } from "../shared/sealed-address.ts";
@@ -13,7 +19,10 @@ import type { UrlContext } from "./url-context.ts";
 /** The rewriters, bound to the page's current real base, so the runtime can rewrite code and markup synchronously. */
 export interface RewriteBridge {
   js(code: string): string;
-  jsBody(code: string): string;
+  /** A Function constructor body; the generator and async constructors name their own kind. */
+  jsBody(code: string, kind?: "handler" | FunctionBodyKind): string;
+  /** What a Function, generator or async constructor compiles: its joined parameters and its body. */
+  jsFunction(params: string, body: string, kind: ConstructorKind): FunctionSource;
   html(html: string): string;
   /** A srcdoc document with the runtime tag in front, since it has no address to load the runtime through. */
   srcdoc(markup: string): string;
@@ -23,10 +32,12 @@ export interface RewriteBridge {
   metaUrl(url: string): string;
 }
 
+/** `clientUrl` is the runtime's own address, the `src` of every tag `frameTag` makes. */
 export function createRewriteBridge(
   ctx: Pick<UrlContext, "origin" | "realBase" | "toProxy" | "fromProxy"> &
     Partial<Pick<UrlContext, "realUrl" | "opaque" | "openSealed">>,
   frameTag: (base: URL) => string,
+  clientUrl: string,
   blobs: Pick<BlobDocuments, "swap" | "original"> = { swap: (url) => url, original: (url) => url },
 ): RewriteBridge {
   const swapBlob = blobs.swap;
@@ -43,21 +54,26 @@ export function createRewriteBridge(
       owner: owner(),
       opaque: opaque(),
     });
-  const clientUrl = () => tagSource(frameTag(ctx.realBase()));
-  // Nested srcdoc values come back through the same path, so the tag goes at every level.
+  // Nested srcdoc values come back through the same path, so the tag goes at every level. Tags carry the page's
+  // cookies, so their configs, nested ones too, are emptied before the parser, which runs on page built-ins.
   const unsrcdoc = (markup: string): string =>
-    stripClientTag(
-      unrewriteHtmlAttributes(markup, ctx.realBase(), ctx.origin, unsrcdoc, blobs.original, ctx.openSealed),
-      clientUrl(),
+    unrewriteHtmlAttributes(
+      stripClientTag(blankClientConfigs(markup, clientUrl), clientUrl),
+      ctx.realBase(),
+      ctx.origin,
+      unsrcdoc,
+      blobs.original,
+      ctx.openSealed,
     );
   return {
     js: (code) => rewriteJs(code),
     // Function constructor bodies allow a top-level return, so they parse as a function body, not a script.
-    jsBody: (code) => rewriteJs(code, { kind: "handler" }),
+    jsBody: (code, kind = "handler") => rewriteJs(code, { kind }),
+    jsFunction: (params, body, kind) => rewriteFunction(params, body, kind),
     html,
     // A tag carried over from an earlier rewrite is dropped first, since its cookie snapshot may be stale.
     srcdoc: (markup) =>
-      rewriteHtml(stripClientTag(markup, clientUrl()), {
+      rewriteHtml(stripClientTag(markup, clientUrl), {
         url: ctx.realBase(),
         origin: ctx.origin,
         scripts: true,
@@ -73,11 +89,6 @@ export function createRewriteBridge(
     importSpecifier: (spec) => ctx.toProxy(spec),
     metaUrl: (url) => ctx.fromProxy(url),
   };
-}
-
-/** The runtime address, read from the tag itself so the bridge needs no second copy of it. */
-function tagSource(tag: string): string {
-  return /^<script src="([^"]*)"/.exec(tag)?.[1] ?? "";
 }
 
 interface PendingAttribute {

@@ -113,6 +113,7 @@ function workerContext(scope: WorkerScope, base: string | undefined): UrlContext
     // A worker never loads a second document.
     inherit: () => {},
     accepts: () => false,
+    keepsOrigin: () => false,
   };
 }
 
@@ -132,6 +133,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     rewrite: {
       js: (code) => code,
       jsBody: (code) => code,
+      jsFunction: (params, body) => ({ params, body }),
       html: (html) => html,
       srcdoc: (markup) => markup,
       unhtml: (html) => html,
