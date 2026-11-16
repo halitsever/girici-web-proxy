@@ -95,7 +95,7 @@ describe("site config", () => {
   });
 
   it("reads the settings the root wrote", async () => {
-    const prefs = { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" };
+    const prefs = { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing", lang: "tr" };
     const write = await send("/_g/prefs", {
       host: "proxy.test",
       method: "POST",

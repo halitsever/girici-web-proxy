@@ -24,8 +24,11 @@ import { DeepLinkWarning } from "./deep-link-warning.ts";
 import { errorResponse, forbiddenResponse, type ErrorPageCode } from "./error-page.ts";
 import { InstanceState } from "./instance-state.ts";
 import { buildPageResponse } from "./page-response.ts";
+import { PAGE_TEXT } from "./page-text.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
 import { createIdbKeyStore, readSealMessage, Sealing } from "./sealing.ts";
+import { pickLanguage } from "../shared/i18n/catalog.ts";
+import type { Lang } from "../shared/i18n/languages.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
 import { labelSiteOf } from "../shared/label-site.ts";
 import { navigationInitiator } from "./initiator.ts";
@@ -126,6 +129,7 @@ const siteMode = new SiteModeService({
       blockThirdPartyCookies: state.prefs.blockThirdPartyCookies,
       sealAddresses: state.prefs.sealAddresses,
       instanceSeal: state.instanceSeal,
+      lang: state.prefs.lang,
     }),
 });
 
@@ -249,7 +253,7 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
     return answerSharedWorker(event.request, url, deps);
   }
   if (own && url.pathname === CONTINUE_PATH) {
-    return sealing.ready().then(() => warning.accept(event.request, sealing.open, origin));
+    return sealing.ready().then(() => warning.accept(event.request, sealing.open, origin, pageLang()));
   }
   if (own && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
@@ -337,7 +341,12 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
         if (await warning.needed()) {
           const { pathname, search, hash } = new URL(request.url);
           const root = siteMode.state()?.root;
-          return warning.page(pathname + search + hash, route.target, root === undefined ? undefined : `${root}/`);
+          return warning.page(
+            pathname + search + hash,
+            route.target,
+            root === undefined ? undefined : `${root}/`,
+            pageLang(),
+          );
         }
       }
       // A navigation that arrives from another site host is cross-site, not a direct one.
@@ -410,6 +419,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
           address,
           uiOrigin: siteState?.root,
           sites: (siteState && siteMode.context(route.target)) ?? undefined,
+          lang: pageLang(),
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();
@@ -609,5 +619,10 @@ function fromGirici(referrer: string | null): boolean {
 /** On a site host `/` belongs to the page's site, so the way home is the root. */
 function htmlError(code: ErrorPageCode, status: number, target: URL | null): Response {
   const root = siteMode.state()?.root;
-  return errorResponse(code, status, target, undefined, root === undefined ? undefined : `${root}/`);
+  return errorResponse(code, status, target, undefined, root === undefined ? undefined : `${root}/`, pageLang());
+}
+
+/** A worker cannot read the UI's storage, so it goes by the choice the UI last sent, else the browser's languages. */
+function pageLang(): Lang {
+  return pickLanguage(PAGE_TEXT, prefs.current().lang, self.navigator.languages);
 }

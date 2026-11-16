@@ -12,5 +12,6 @@ export * from "./site-label.ts";
 export * from "./site-config.ts";
 export * from "./i18n/languages.ts";
 export * from "./i18n/text.ts";
+export * from "./i18n/catalog.ts";
 export { SEALED_PREFIX, isSealedPath, type OpenSealed } from "./sealed-address.ts";
 export { sha256 } from "./seal-cipher.ts";

@@ -1,4 +1,5 @@
 import { openDB, type IDBPDatabase } from "idb";
+import { isLangChoice } from "../shared/i18n/catalog.ts";
 import { DEFAULT_ENGINE_PREFS, PREFS_MESSAGE, PROTOCOL_VERSION, type EnginePrefs } from "../shared/protocol.ts";
 import { isUiWindow, type ClientShape, type UiClientSet } from "./route.ts";
 
@@ -67,7 +68,7 @@ export class PrefsService {
     try {
       const value = (await this.#store.load()) as Record<string, unknown> | undefined;
       if (typeof value?.blockThirdPartyCookies === "boolean") {
-        this.#current = { ...DEFAULT_ENGINE_PREFS, ...booleanPrefs(value) };
+        this.#current = { ...DEFAULT_ENGINE_PREFS, ...prefsOf(value) };
       }
     } catch {
       // A broken store leaves the defaults.
@@ -79,12 +80,13 @@ const PREF_NAMES = ["blockThirdPartyCookies", "sealAddresses", "instanceSeal", "
 /** UI pages allowed to say seen. The UI says it only when the visitor opens a site, never when a page loads. */
 const SEEN_PAGES = new Set(["/", "/settings", "/account"]);
 
-function booleanPrefs(value: Record<string, unknown>): Partial<EnginePrefs> {
+function prefsOf(value: Record<string, unknown>): Partial<EnginePrefs> {
   const prefs: Partial<EnginePrefs> = {};
   for (const name of PREF_NAMES) {
     const field = value[name];
     if (typeof field === "boolean") prefs[name] = field;
   }
+  if (isLangChoice(value.lang)) prefs.lang = value.lang;
   return prefs;
 }
 
@@ -99,7 +101,7 @@ export function readPrefsMessage(
   const fields = data as Record<string, unknown>;
   const { type, v, blockThirdPartyCookies } = fields;
   if (type !== PREFS_MESSAGE || v !== PROTOCOL_VERSION || typeof blockThirdPartyCookies !== "boolean") return null;
-  const update = booleanPrefs(fields);
+  const update = prefsOf(fields);
   // Any UI window can post; only the server's answer turns the admin's switch off.
   if (update.instanceSeal === false) delete update.instanceSeal;
   if (update.seen === false || !SEEN_PAGES.has(pageOf(source))) delete update.seen;

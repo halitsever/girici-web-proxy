@@ -9,7 +9,7 @@ const answer: SiteConfigAnswer = {
   domain: "proxy.test",
   label: "k6wjalxihe6pja6woodbryo47k",
   key: toBase64Url(new Uint8Array(32).fill(7)),
-  prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" },
+  prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing", lang: "tr" },
   instanceSeal: true,
   deepLinkWarning: false,
   seen: true,
@@ -20,6 +20,8 @@ const envelope = { [MESSAGE_ENVELOPE]: 1, o: "a", s: "b", t: "*", d: 1 };
 describe("site config readers", () => {
   it("fills each bad prefs field with its default", () => {
     expect(readSitePrefs({ toolbar: false, engine: "Ask" })).toEqual({ ...DEFAULT_SITE_PREFS, toolbar: false });
+    expect(readSitePrefs({ lang: "tr" }).lang).toBe("tr");
+    expect(readSitePrefs({ lang: "tr-TR" }).lang).toBe("auto");
     expect(readSitePrefs(null)).toEqual(DEFAULT_SITE_PREFS);
     expect(readSitePrefs("x")).toEqual(DEFAULT_SITE_PREFS);
     expect(readSitePrefs({ blockThirdPartyCookies: "no", sealAddresses: 1, engine: "toString" })).toEqual(
@@ -30,6 +32,7 @@ describe("site config readers", () => {
       sealAddresses: false,
       toolbar: true,
       engine: "DuckDuckGo",
+      lang: "auto",
     });
   });
 

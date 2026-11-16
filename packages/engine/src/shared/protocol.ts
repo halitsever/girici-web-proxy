@@ -1,4 +1,5 @@
 import { charCodeAt, exec, fromBase64, newBytes, replaceAll, strictUtf8 } from "./primordials.ts";
+import type { LangChoice } from "./i18n/catalog.ts";
 import type { SearchEngine } from "./target.ts";
 
 export const HEADER = {
@@ -82,6 +83,7 @@ export interface SitePrefs {
   sealAddresses: boolean;
   toolbar: boolean;
   engine: SearchEngine;
+  lang: LangChoice;
 }
 
 export const DEFAULT_SITE_PREFS: SitePrefs = {
@@ -89,6 +91,7 @@ export const DEFAULT_SITE_PREFS: SitePrefs = {
   sealAddresses: false,
   toolbar: true,
   engine: "DuckDuckGo",
+  lang: "auto",
 };
 
 /** The answer to `GET` and `POST` on `SITES_CONFIG_PATH`. */
@@ -126,6 +129,7 @@ export interface SiteContext {
   site: string;
   toolbar: boolean;
   engine: SearchEngine;
+  lang: LangChoice;
 }
 
 /** `POST` body on `LABEL_RPC_PATH`, as JSON; `v` is `PROTOCOL_VERSION`. */
@@ -182,6 +186,8 @@ export interface EnginePrefs {
   instanceSeal: boolean;
   /** Set once this browser has opened Girici itself, after which shared links skip the warning. */
   seen: boolean;
+  /** The UI's language, for the pages the worker writes itself. */
+  lang: LangChoice;
 }
 
 export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
@@ -189,6 +195,7 @@ export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
   sealAddresses: false,
   instanceSeal: false,
   seen: false,
+  lang: "auto",
 };
 
 /** The UI asks the service worker for a page's sealed address; the UI never holds the key. */

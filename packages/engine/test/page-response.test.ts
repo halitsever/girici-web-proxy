@@ -444,6 +444,7 @@ describe("pages on site hosts", () => {
     site: "https://site-a.test",
     toolbar: false,
     engine: "Google",
+    lang: "auto",
   };
   const onSite = (overrides: Partial<PageContext> = {}) =>
     context({

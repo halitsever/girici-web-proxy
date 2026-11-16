@@ -4,13 +4,17 @@ import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
 describe("readToolbarPrefs", () => {
   it("defaults to a visible toolbar and DuckDuckGo", () => {
-    expect(readToolbarPrefs(null)).toEqual({ toolbar: true, engine: "DuckDuckGo" });
+    expect(readToolbarPrefs(null)).toEqual({ toolbar: true, engine: "DuckDuckGo", lang: "auto" });
   });
 
   it("reads the saved choices and ignores junk", () => {
-    expect(readToolbarPrefs('{"toolbar":false,"engine":"Bing"}')).toEqual({ toolbar: false, engine: "Bing" });
+    expect(readToolbarPrefs('{"toolbar":false,"engine":"Bing"}')).toEqual({
+      toolbar: false,
+      engine: "Bing",
+      lang: "auto",
+    });
     expect(readToolbarPrefs('{"engine":"Altavista"}').engine).toBe("DuckDuckGo");
-    expect(readToolbarPrefs("{")).toEqual({ toolbar: true, engine: "DuckDuckGo" });
+    expect(readToolbarPrefs("{")).toEqual({ toolbar: true, engine: "DuckDuckGo", lang: "auto" });
   });
 
   it("parses with natives taken at load and reads only the saved fields", () => {
@@ -22,6 +26,6 @@ describe("readToolbarPrefs", () => {
     const parsed = withReplaced(JSON, "parse", { value: () => ({ toolbar: false }) }, () =>
       withPrototypeAdditions(additions, read),
     );
-    expect(parsed).toEqual({ toolbar: true, engine: "Google" });
+    expect(parsed).toEqual({ toolbar: true, engine: "Google", lang: "auto" });
   });
 });

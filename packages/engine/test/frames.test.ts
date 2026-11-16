@@ -644,6 +644,7 @@ describe("createChildConfig", () => {
       site: "https://a.test",
       toolbar: true,
       engine: "DuckDuckGo" as const,
+      lang: "auto" as const,
     };
     const childConfig = createChildConfig(ctx, () => [], steps, { v: PROTOCOL_VERSION, cookies: [], sites });
     // The host never changes under a window, so a renewed document's claim does not move its frames.

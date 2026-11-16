@@ -17,6 +17,7 @@ describe("PrefsService", () => {
       sealAddresses: false,
       instanceSeal: false,
       seen: false,
+      lang: "auto",
     });
     await prefs.set({ blockThirdPartyCookies: false });
     expect(prefs.current()).toEqual({
@@ -24,8 +25,11 @@ describe("PrefsService", () => {
       sealAddresses: false,
       instanceSeal: false,
       seen: false,
+      lang: "auto",
     });
-    expect(saved).toEqual([{ blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false, seen: false }]);
+    expect(saved).toEqual([
+      { blockThirdPartyCookies: false, sealAddresses: false, instanceSeal: false, seen: false, lang: "auto" },
+    ]);
   });
 
   it("loads a stored choice and survives a broken store", async () => {
@@ -57,6 +61,7 @@ describe("PrefsService", () => {
       sealAddresses: true,
       instanceSeal: false,
       seen: false,
+      lang: "auto",
     });
   });
 });
@@ -70,6 +75,17 @@ describe("readPrefsMessage", () => {
     expect(readPrefsMessage({ ...valid, instanceSeal: true }, ui, origin, known)).toEqual({
       blockThirdPartyCookies: false,
       instanceSeal: true,
+    });
+  });
+
+  it("keeps the UI's language and drops one it does not know", () => {
+    expect(readPrefsMessage({ ...valid, lang: "tr" }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
+      lang: "tr",
+    });
+    expect(readPrefsMessage({ ...valid, lang: "auto" }, ui, origin, known)?.lang).toBe("auto");
+    expect(readPrefsMessage({ ...valid, lang: "klingon" }, ui, origin, known)).toEqual({
+      blockThirdPartyCookies: false,
     });
   });
 

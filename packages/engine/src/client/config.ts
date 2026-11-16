@@ -7,6 +7,7 @@ import {
   type OriginSeal,
   type SiteContext,
 } from "../shared/protocol.ts";
+import { isLangChoice } from "../shared/i18n/catalog.ts";
 import { SEARCH_ENGINES, type SearchEngine } from "../shared/target.ts";
 
 export function readConfig(raw: string | null): ClientConfig {
@@ -102,6 +103,9 @@ function readSites(value: unknown): SiteContext | undefined {
   if (ownValue(SEARCH_ENGINES, engine) === undefined) return undefined;
   sites.toolbar = toolbar;
   sites.engine = engine as SearchEngine;
+  // Not part of all or nothing: a missing language only means the browser's own list.
+  const lang = ownValue(value, "lang");
+  sites.lang = isLangChoice(lang) ? lang : "auto";
   return sites as unknown as SiteContext;
 }
 

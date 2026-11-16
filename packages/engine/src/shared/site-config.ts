@@ -8,6 +8,7 @@ import {
   type SiteConfigAnswer,
   type SitePrefs,
 } from "./protocol.ts";
+import { isLangChoice } from "./i18n/catalog.ts";
 import { fromBase64Url } from "./seal-cipher.ts";
 import { isSiteLabel, parseSiteDomain } from "./site-label.ts";
 import { SEARCH_ENGINES, type SearchEngine } from "./target.ts";
@@ -28,6 +29,8 @@ export function readSitePrefs(value: unknown): SitePrefs {
   if (typeof engine === "string" && ownValue(SEARCH_ENGINES, engine) !== undefined) {
     prefs.engine = engine as SearchEngine;
   }
+  const lang = ownValue(value, "lang");
+  if (isLangChoice(lang)) prefs.lang = lang;
   return prefs;
 }
 

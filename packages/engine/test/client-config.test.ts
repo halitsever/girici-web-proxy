@@ -43,6 +43,7 @@ describe("site context", () => {
     site: "https://site-a.test",
     toolbar: false,
     engine: "Google",
+    lang: "tr",
   };
   const read = (value: unknown) => parseConfig(JSON.stringify({ v: 2, cookies: [], sites: value }))?.sites;
 
@@ -61,6 +62,7 @@ describe("site context", () => {
     ] as const) {
       expect(read({ ...sites, [field]: bad }), field).toBeUndefined();
     }
+    expect(read({ ...sites, lang: "xx" })?.lang).toBe("auto");
     expect(read("x")).toBeUndefined();
     expect(parseConfig(JSON.stringify({ v: 2, cookies: [] }))?.sites).toBeUndefined();
   });

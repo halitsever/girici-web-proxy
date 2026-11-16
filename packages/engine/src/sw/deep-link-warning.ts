@@ -1,8 +1,12 @@
+import { textFor } from "../shared/i18n/catalog.ts";
+import { DEFAULT_LANG, type Lang } from "../shared/i18n/languages.ts";
+import { fill } from "../shared/i18n/text.ts";
 import { CONTINUE_PATH } from "../shared/protocol.ts";
 import { fromBase64Url, toBase64Url } from "../shared/seal-cipher.ts";
 import type { OpenSealed } from "../shared/sealed-address.ts";
 import { errorResponse, forbiddenResponse } from "./error-page.ts";
 import type { InstanceState } from "./instance-state.ts";
+import { PAGE_TEXT } from "./page-text.ts";
 import type { PrefsService } from "./prefs.ts";
 import { realUrlOf } from "./route.ts";
 import type { KeyStore } from "./sealing.ts";
@@ -55,10 +59,10 @@ export class DeepLinkWarning {
   }
 
   /** `home` is the root's address on a site host, where `/` belongs to the page's own site. */
-  async page(to: string, target: URL, home = "/"): Promise<Response> {
+  async page(to: string, target: URL, home = "/", lang: Lang = DEFAULT_LANG): Promise<Response> {
     const signature = await crypto.subtle.sign("HMAC", await this.#cryptoKey(), utf8(to));
     const t = toBase64Url(new Uint8Array(signature));
-    return new Response(warningPage(to, t, target, home), {
+    return new Response(warningPage(to, t, target, home, lang), {
       status: 200,
       headers: {
         "content-type": "text/html; charset=utf-8",
@@ -72,7 +76,7 @@ export class DeepLinkWarning {
   }
 
   /** A Continue that fails the check still goes back to its address, where the warning shows again. */
-  async accept(request: ContinueRequest, open: OpenSealed, origin: string): Promise<Response> {
+  async accept(request: ContinueRequest, open: OpenSealed, origin: string, lang?: Lang): Promise<Response> {
     if (request.method !== "POST" || request.mode !== "navigate") return forbiddenResponse();
     let to: FormDataEntryValue | null;
     let t: FormDataEntryValue | null;
@@ -81,10 +85,10 @@ export class DeepLinkWarning {
       to = form.get("to");
       t = form.get("t");
     } catch {
-      return errorResponse("bad_request", 400, null);
+      return errorResponse("bad_request", 400, null, undefined, undefined, lang);
     }
     const address = typeof to === "string" ? proxyAddress(to, origin, open) : null;
-    if (!address || typeof to !== "string") return errorResponse("bad_request", 400, null);
+    if (!address || typeof to !== "string") return errorResponse("bad_request", 400, null, undefined, undefined, lang);
     if (typeof t === "string" && (await this.#verify(to, t))) await this.#prefs.set({ seen: true });
     return Response.redirect(address.href, 303);
   }
@@ -127,10 +131,11 @@ function utf8(text: string): Uint8Array<ArrayBuffer> {
   return new TextEncoder().encode(text);
 }
 
-function warningPage(to: string, t: string, target: URL, home: string): string {
-  const host = escapeHtml(target.host);
+function warningPage(to: string, t: string, target: URL, home: string, lang: Lang): string {
+  const text = textFor(PAGE_TEXT, lang);
+  const say = (template: string) => escapeHtml(fill(template, { host: target.host }));
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -143,15 +148,15 @@ function warningPage(to: string, t: string, target: URL, home: string): string {
     </style>
   </head>
   <body>
-    <h1>This page opens through Girici</h1>
-    <p>Girici is a web proxy. The next page comes from ${host}, not from the people who run this server. Do not type passwords into a site you did not mean to visit.</p>
+    <h1>${say(text.warningTitle)}</h1>
+    <p>${say(text.warningBody)}</p>
     <p><code>${escapeHtml(target.href)}</code></p>
     <form method="post" action="${CONTINUE_PATH}">
       <input type="hidden" name="to" value="${escapeHtml(to)}" />
       <input type="hidden" name="t" value="${escapeHtml(t)}" />
-      <button type="submit">Continue to ${host}</button>
+      <button type="submit">${say(text.warningContinue)}</button>
     </form>
-    <p><a href="${escapeHtml(home)}">Go to Girici&#39;s home page</a></p>
+    <p><a href="${escapeHtml(home)}">${say(text.warningHome)}</a></p>
   </body>
 </html>
 `;

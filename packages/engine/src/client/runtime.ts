@@ -379,6 +379,7 @@ export function install(
         __proto__: null,
         home: toolbarHome(ctx.origin, sites),
         engine: sites ? sites.engine : readToolbarPrefs(prefs).engine,
+        lang: sites ? sites.lang : readToolbarPrefs(prefs).lang,
       } as Parameters<typeof installToolbar>[5],
     );
   });

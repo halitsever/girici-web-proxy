@@ -29,6 +29,7 @@ describe("installDocument on a site host", () => {
     site: "https://site-a.test",
     toolbar: true,
     engine: "DuckDuckGo",
+    lang: "auto",
   };
 
   /** The referrer a page reads when the browser reports `native`. */

@@ -18,6 +18,7 @@ export async function syncSitePrefs(settings: Settings, fetcher: typeof fetch = 
     sealAddresses: settings.sealAddresses,
     toolbar: settings.toolbar,
     engine: settings.engine,
+    lang: settings.lang,
   };
   try {
     await fetcher(PREFS_PATH, {
