@@ -47,6 +47,8 @@ test("stays hidden when the Settings switch is off", async ({ page }) => {
 
 test("clears the current site from the toolbar", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/storage?set=a");
+  // In subdomain mode the page's script runs only after the boot page reloads, which openThroughUi does not wait for.
+  await expect(page.locator("#value")).toHaveText("a");
   await page.goto("/~/https/site-a.test/storage");
   await expect(page.locator("#value")).toHaveText("a");
   await page.getByRole("button", { name: "Girici toolbar" }).click();
