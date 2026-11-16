@@ -188,8 +188,8 @@ for (const [name, button] of [
     const popupEvent = page.waitForEvent("popup");
     await page.click(button);
     const popup = await popupEvent;
-    await popup.waitForLoadState();
-    expect(popup.url()).toMatch(SEALED);
+    // Another site's page reaches the popup through a blank first page.
+    await popup.waitForURL(SEALED);
     await expect(popup.locator("#results")).not.toBeEmpty();
     expect(JSON.parse((await popup.locator("#results").textContent()) ?? "{}")).toEqual({
       runtime: true,

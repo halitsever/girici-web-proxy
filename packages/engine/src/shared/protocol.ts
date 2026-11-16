@@ -1,3 +1,4 @@
+import { charCodeAt, exec, fromBase64, newBytes, replaceAll, strictUtf8 } from "./primordials.ts";
 import type { SearchEngine } from "./target.ts";
 
 export const HEADER = {
@@ -18,11 +19,15 @@ export const HEADER = {
 /** Bumped whenever the runtime and the service worker stop understanding each other's messages. */
 export const PROTOCOL_VERSION = 2;
 export const COOKIE_RPC_PATH = "/_g/rpc/cookie";
+/** The most script cookie writes one RPC carries; the worker refuses a longer batch. */
+export const COOKIE_BATCH_LIMIT = 50;
 export const WS_PREP_PATH = "/_g/rpc/ws-prep";
 export const SITE_DATA_RPC_PATH = "/_g/rpc/site-data";
 /** A page announces each worker it starts here; the worker names the same nonce when it loads the runtime. */
 export const WORKER_RPC_PATH = "/_g/rpc/worker";
 export const WORKER_NONCE_PARAM = "n";
+/** A SharedWorker's script address, which tabs of one site share so the browser joins them to one instance. */
+export const SHARED_WORKER_PATH = "/_g/rpc/shared-worker";
 // Only the service worker calls these two; pages never need them.
 export const POT_PATH = "/_g/pot";
 export const WS_SEAL_PATH = "/_g/ws-seal";
@@ -32,6 +37,13 @@ export const COOKIE_MESSAGE = "girici:cookies";
 // Under /_g/ so the service worker passes them through instead of re-encoding them as proxy targets.
 export const LOGIN_PATH = "/_g/login";
 export const SETUP_PATH = "/_g/setup";
+/** The browser check page; a UI route, so the worker lets its window call the check API. */
+export const CHALLENGE_PATH = "/_g/challenge";
+export const POW_PATH = "/_g/pow";
+/** The shared-link warning posts here; the service worker answers it and the server never sees it. */
+export const CONTINUE_PATH = "/_g/rpc/continue";
+/** Outside /_g/, so a proxied page's own /metrics stays the site's; the worker keeps browsers away from ours. */
+export const METRICS_PATH = "/metrics";
 
 // Subdomain mode. The root takes the UI's settings and runs the site list and the clearing chain.
 export const PREFS_PATH = "/_g/prefs";
@@ -162,12 +174,15 @@ export interface EnginePrefs {
   sealAddresses: boolean;
   /** The admin's switch, which turns sealing on for every visitor. */
   instanceSeal: boolean;
+  /** Set once this browser has opened Girici itself, after which shared links skip the warning. */
+  seen: boolean;
 }
 
 export const DEFAULT_ENGINE_PREFS: EnginePrefs = {
   blockThirdPartyCookies: true,
   sealAddresses: false,
   instanceSeal: false,
+  seen: false,
 };
 
 /** The UI asks the service worker for a page's sealed address; the UI never holds the key. */
@@ -229,7 +244,9 @@ export type RelayErrorCode =
   | "auth"
   | "rate_limited"
   | "blocked"
-  | "proxy";
+  | "proxy"
+  | "quota"
+  | "challenge";
 
 /** base64url keeps any bytes, such as non-ASCII cookie values, legal inside an HTTP header. */
 export function encodeHeaderValue(value: string): string {
@@ -239,12 +256,19 @@ export function encodeHeaderValue(value: string): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+const BASE64URL = /^[A-Za-z0-9_-]*$/;
+const URL_SAFE_CHARS = /[-_]/g;
+const NativeTypeError = TypeError;
+
+/** Natives taken at load only, since this runs inside page calls. */
 export function decodeHeaderValue(value: string): string {
-  if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new TypeError("Header value is not base64url");
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(base64 + "=".repeat((4 - (base64.length % 4)) % 4));
-  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  if (exec(BASE64URL, value) === null) throw new NativeTypeError("Header value is not base64url");
+  let base64 = replaceAll(value, URL_SAFE_CHARS, (char) => (char === "-" ? "+" : "/"));
+  while (base64.length % 4 !== 0) base64 += "=";
+  const binary = fromBase64(base64);
+  const bytes = newBytes(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = charCodeAt(binary, index);
+  return strictUtf8(bytes);
 }
 
 export function encodeHeaderList(pairs: ReadonlyArray<readonly [string, string]>): string {

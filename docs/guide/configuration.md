@@ -21,8 +21,14 @@ stops the server with a message naming the variable.
 | `GIRICI_YT_POTOKEN` | `true` | Whether the server mints YouTube poTokens. Set to `false` to disable. |
 | `GIRICI_SITE_DOMAIN` | unset | Turns on [subdomain mode](/guide/subdomain-mode): the UI stays on this host and every proxied site gets its own host under it. A host name with a port only if visitors type one, such as `proxy.example`; leave off `:443`. |
 | `GIRICI_SITE_SECRET` | generated, kept in the database | The secret behind subdomain mode's host names; 32 or more characters (`openssl rand -hex 32`). Set the same value on every replica, and never change it. |
+| `GIRICI_BANDWIDTH_LIMIT` | `0` (off) | Bytes each visitor may move per minute, such as `50MB`. A response that runs over the limit is cut off (see [Bandwidth limits](#bandwidth-limits)). The signed-in admin is never limited. |
+| `GIRICI_DAILY_QUOTA` | `0` (off) | Bytes each visitor may move per day, such as `2GB`, enforced the same way. Counts reset at midnight UTC and when Girici restarts. |
+| `GIRICI_METRICS_TOKEN` | unset | Turns on `/metrics` for Prometheus, answered only with `Authorization: Bearer <token>`. 16 or more letters, digits or `-._~+/`, with optional `=` at the end. |
+| `GIRICI_POW_DIFFICULTY` | `16` | How hard the browser check is, 1 to 24; each step doubles the work. The check itself is switched on in Settings. |
 
 Booleans accept `true`/`1`/`yes`/`on` and their negatives; any other value stops startup.
+
+Sizes take `B`, `KB`, `MB`, `GB` or `TB` (powers of 1024, any case); a bare number is bytes.
 
 ## Trust proxy
 
@@ -57,6 +63,31 @@ By default every proxied site runs on Girici's own origin. With `GIRICI_SITE_DOM
 host of its own, such as `<label>.proxy.example`, and the browser keeps sites apart by itself. The mode needs DNS and a
 certificate for `*.proxy.example`, and it shows a label per site in DNS lookups. [Subdomain mode](/guide/subdomain-mode)
 covers setup, the rules for the domain and what changes for visitors.
+
+## Bandwidth limits
+
+`GIRICI_BANDWIDTH_LIMIT` and `GIRICI_DAILY_QUOTA` limit how much traffic each visitor moves through a public
+instance. A visitor is a client address, the same key the rate limit uses, so behind a reverse proxy set
+[`GIRICI_TRUST_PROXY`](#trust-proxy) first. IPv6 clients share a budget per /64.
+
+Both count the bodies Girici relays, downloads and uploads alike, plus WebSocket messages both ways. Headers and
+Girici's own pages and scripts are not counted.
+
+The per-minute limit is a bucket that holds one minute's worth and refills continuously. A request starts while
+any budget is left. Both budgets are also checked as each piece of a response, upload or WebSocket message passes,
+so a visitor cannot go over them with one long download or many at once. The piece that runs over is not relayed:
+the response breaks off with a network error, so the browser never mistakes a cut-off file for a whole one. The
+visitor then waits until the bucket climbs back above zero.
+
+The daily quota counts from midnight UTC and starts over at the next one.
+
+Once either budget is spent, relay requests get `429` with a `Retry-After` header, and pages show a notice
+saying when to try again. New WebSockets are refused the same way, and an open one closes with code 1008 when it
+goes over. The signed-in admin is never refused or cut, and their traffic does not count against the address they
+share with visitors.
+
+The counts live in memory: a restart resets them, and each replica counts on its own. Responses the browser
+serves from its own cache cost nothing and count nothing.
 
 ## Data directory
 

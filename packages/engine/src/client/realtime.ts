@@ -3,7 +3,7 @@ import type { Realm } from "./url-context.ts";
 const deleteProperty = Reflect.deleteProperty;
 
 // WebRTC can expose the user's real address, and these two transports have no relay.
-// WebSocket is not here: it is replaced by the relay shim in installWebSocket.
+// WebSocket is not here: pages and workers both get the relay shim from installWebSocket.
 const REMOVED = ["RTCPeerConnection", "webkitRTCPeerConnection", "WebSocketStream", "WebTransport"];
 
 /** Remove the realtime APIs Girici cannot safely proxy, so a page falls back instead of leaking around it. */

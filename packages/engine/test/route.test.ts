@@ -7,6 +7,7 @@ import {
   isGuardedPath,
   isHostReservedPath,
   isNetworkInEitherMode,
+  isUiRoute,
   isUiWindow,
   realUrlOf,
   requestClientUrl,
@@ -132,6 +133,25 @@ describe("reservedAccess", () => {
     const nav = { mode: "navigate" as RequestMode, destination: "document" as RequestDestination, method: "GET" };
     expect(reservedAccess("/_g/admin/settings", call, ui, origin, known, true)).toBe("deny");
     expect(reservedAccess("/_g/login", nav, undefined, origin, known, true)).toBe("deny");
+  });
+
+  it("treats the browser check as a UI page and its API as the UI's", () => {
+    expect(isUiRoute(new URL(`${origin}/_g/challenge?next=x`), origin)).toBe(true);
+    expect(isGuardedPath("/_g/pow")).toBe(true);
+    expect(reservedAccess("/_g/pow", call, ui, origin, known)).toBe("allow");
+    const page = { id: "ui-1", type: "window", frameType: "top-level", url: `${origin}/~/https/evil.test/` };
+    expect(reservedAccess("/_g/pow", call, page, origin, known)).toBe("deny");
+  });
+
+  it("lets nothing in the browser reach the metrics", () => {
+    for (const path of ["/metrics", "/Metrics/", "/metrics/"]) expect(isGuardedPath(path), path).toBe(true);
+    expect(reservedAccess("/metrics", call, ui, origin, known)).toBe("deny");
+    const nav = { mode: "navigate" as RequestMode, destination: "document" as RequestDestination, method: "GET" };
+    expect(reservedAccess("/metrics", nav, undefined, origin, known)).toBe("deny");
+  });
+
+  it("leaves the warning's Continue to the worker's own handler", () => {
+    expect(isGuardedPath("/_g/rpc/continue")).toBe(false);
   });
 });
 

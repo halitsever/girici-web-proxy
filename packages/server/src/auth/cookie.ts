@@ -112,6 +112,18 @@ export function clearSession(res: Response, siteDomain?: SiteDomain): void {
 }
 
 /** The page's own scheme, from the Origin these same-origin POSTs carry; a TLS terminator hides it from req. */
-function servedOverHttps(req: Request): boolean {
+export function servedOverHttps(req: Request): boolean {
   return URL.parse(req.get("origin") ?? "")?.protocol === "https:";
+}
+
+export function parseCookies(header: string | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!header) return out;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    const name = part.slice(0, eq).trim();
+    if (name) out[name] = part.slice(eq + 1).trim();
+  }
+  return out;
 }

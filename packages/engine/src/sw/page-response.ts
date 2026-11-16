@@ -6,6 +6,7 @@ import { clientTag } from "../shared/client-tag.ts";
 import { encodeUrl } from "../shared/codec.ts";
 import {
   encodeHeaderValue,
+  CHALLENGE_PATH,
   HEADER,
   LOGIN_PATH,
   PROTOCOL_VERSION,
@@ -100,7 +101,7 @@ const REWRITTEN_TYPES: Record<BodyKind, string> = {
 };
 
 export async function buildPageResponse(result: TransportResult, ctx: PageContext): Promise<Response> {
-  if (!result.ok) return failure(result.code, result.status, ctx);
+  if (!result.ok) return failure(result.code, result.status, ctx, result.retryAfter);
   const { status, headers: envelope } = result.response;
   let body = result.response.body;
 
@@ -161,7 +162,7 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
     length: envelope.find(([name]) => name === "content-length")?.[1] ?? null,
   };
   if (kind === "html" && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
-    return errorResponse("runtime", 503, ctx.target, homeOf(ctx));
+    return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx));
   }
   const text = decodeText(await new Response(body).arrayBuffer(), contentType);
   headers.set("content-type", REWRITTEN_TYPES[kind]);
@@ -228,19 +229,30 @@ function redirectTo(location: string, status: number, ctx: PageContext): Respons
   return Response.redirect(web ? new URL(address(resolved), ctx.origin).href : resolved.href, status);
 }
 
-function failure(code: RelayErrorCode, status: number, ctx: PageContext): Response {
+const WAITS: ReadonlySet<RelayErrorCode> = new Set(["quota", "rate_limited"]);
+
+function failure(code: RelayErrorCode, status: number, ctx: PageContext, retryAfter?: number): Response {
   if (!ctx.navigation) return Response.error();
-  if (code === "auth") {
-    // Sign-in lives on the root, so a sealed address there must name this host to come back.
-    const login = new URL(LOGIN_PATH, ctx.uiOrigin ?? ctx.origin);
-    const sealed = ctx.address?.(ctx.target);
-    const back = sealed !== undefined && ctx.uiOrigin ? new URL(sealed, ctx.origin).href : sealed;
-    login.searchParams.set("next", back ?? ctx.target.href);
-    return Response.redirect(login.href, 303);
-  }
-  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, homeOf(ctx));
+  if (code === "auth") return Response.redirect(uiPageFor(LOGIN_PATH, ctx), 303);
+  // The challenge page refuses to be framed, so only a top-level load can be sent there.
+  if (code === "challenge" && ctx.destination === "document")
+    return Response.redirect(uiPageFor(CHALLENGE_PATH, ctx), 303);
+  const wait = WAITS.has(code) ? retryAfter : undefined;
+  return errorResponse(code, status >= 400 && status <= 599 ? status : 502, ctx.target, wait, homeOf(ctx));
 }
 
 function homeOf(ctx: PageContext): string | undefined {
   return ctx.uiOrigin === undefined ? undefined : `${ctx.uiOrigin}/`;
+}
+
+/**
+ * A UI page that sends the visitor back afterwards, to the sealed address when the load was sealed. UI pages live on
+ * the root, so a sealed address must name this host to come back.
+ */
+function uiPageFor(path: string, ctx: PageContext): string {
+  const page = new URL(path, ctx.uiOrigin ?? ctx.origin);
+  const sealed = ctx.address?.(ctx.target);
+  const back = sealed !== undefined && ctx.uiOrigin ? new URL(sealed, ctx.origin).href : sealed;
+  page.searchParams.set("next", back ?? ctx.target.href);
+  return page.href;
 }

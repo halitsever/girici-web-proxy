@@ -75,7 +75,9 @@ export class PrefsService {
   }
 }
 
-const PREF_NAMES = ["blockThirdPartyCookies", "sealAddresses", "instanceSeal"] as const;
+const PREF_NAMES = ["blockThirdPartyCookies", "sealAddresses", "instanceSeal", "seen"] as const;
+/** UI pages allowed to say seen. The UI says it only when the visitor opens a site, never when a page loads. */
+const SEEN_PAGES = new Set(["/", "/settings", "/account"]);
 
 function booleanPrefs(value: Record<string, unknown>): Partial<EnginePrefs> {
   const prefs: Partial<EnginePrefs> = {};
@@ -100,5 +102,15 @@ export function readPrefsMessage(
   const update = booleanPrefs(fields);
   // Any UI window can post; only the server's answer turns the admin's switch off.
   if (update.instanceSeal === false) delete update.instanceSeal;
+  if (update.seen === false || !SEEN_PAGES.has(pageOf(source))) delete update.seen;
   return update;
+}
+
+/** Normalized as isUiRoute does, since the server answers these paths in any letter case. */
+function pageOf(source: ClientShape | null): string {
+  try {
+    return new URL(source?.url ?? "").pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  } catch {
+    return "";
+  }
 }

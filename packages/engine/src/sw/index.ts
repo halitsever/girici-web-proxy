@@ -1,4 +1,5 @@
 import {
+  CONTINUE_PATH,
   COOKIE_MESSAGE,
   COOKIE_RPC_PATH,
   HEADER,
@@ -6,6 +7,7 @@ import {
   LOGIN_PATH,
   POT_PATH,
   PROTOCOL_VERSION,
+  SHARED_WORKER_PATH,
   SITE_DATA_RPC_PATH,
   SITES_CONFIG_PATH,
   TOP_SITE_QUERY,
@@ -18,10 +20,12 @@ import { createIdbClientRecords } from "./client-records.ts";
 import { cookieDeliveries } from "./cookie-broadcast.ts";
 import { createIdbCookieStore } from "./cookies/idb-store.ts";
 import { CookieService, type CookieRequestContext } from "./cookies/jar.ts";
+import { DeepLinkWarning } from "./deep-link-warning.ts";
 import { errorResponse, forbiddenResponse, type ErrorPageCode } from "./error-page.ts";
+import { InstanceState } from "./instance-state.ts";
 import { buildPageResponse } from "./page-response.ts";
 import { createIdbPrefsStore, PrefsService, readPrefsMessage } from "./prefs.ts";
-import { createIdbKeyStore, readInstanceSeal, readSealMessage, Sealing } from "./sealing.ts";
+import { createIdbKeyStore, readSealMessage, Sealing } from "./sealing.ts";
 import { isSealedPath } from "../shared/sealed-address.ts";
 import { labelSiteOf } from "../shared/label-site.ts";
 import { navigationInitiator } from "./initiator.ts";
@@ -39,13 +43,14 @@ import {
   type SiteRouting,
 } from "./route.ts";
 import { CookieRpc } from "./rpc.ts";
+import { announceSharedStart, answerSharedWorker, SharedWorkerStarts } from "./shared-workers.ts";
 import { callerOf, handleSiteData } from "./site-data.ts";
 import { createIdbSiteStore, SiteModeService } from "./site-mode.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
-import { buildWsPrep, sealWsPrep } from "./ws-prep.ts";
+import { buildWsPrep, sealWsPrep, wsCaller } from "./ws-prep.ts";
 import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
 
@@ -80,15 +85,15 @@ const cookies = new CookieService(createIdbCookieStore());
 const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
 const sealing = new Sealing(createIdbKeyStore(), prefs);
-// The admin's switch reaches open tabs within a minute without a UI tab telling the worker.
-const INSTANCE_SEAL_INTERVAL = 60_000;
-let instanceSealCheckedAt = -Infinity;
+const instance = new InstanceState(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" }), prefs);
+const warning = new DeepLinkWarning({ prefs, instance, keys: createIdbKeyStore("warning") });
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
     new Set((await self.clients.matchAll({ type: "window", includeUncontrolled: true })).map((client) => client.id)),
 });
 const workers = new WorkerRegistry(clientRecords);
+const sharedStarts = new SharedWorkerStarts();
 // A UI tab can message the worker before the activation that records it has finished.
 let seeding: Promise<void> = Promise.resolve();
 const topSiteDeps: TopSiteDeps = {
@@ -129,7 +134,7 @@ self.addEventListener("activate", (event) => {
   // A site host has no UI tabs to record, and its instance switch comes with its config.
   seeding = inSingleMode(() => {
     const seeded = seedUiClients();
-    refreshInstanceSeal(true);
+    instance.refresh(true);
     return seeded;
   });
   const cleanup = caches
@@ -150,16 +155,6 @@ async function seedUiClients(): Promise<void> {
   } catch {
     // An unseeded tab gains UI authority on its next load.
   }
-}
-
-/** Fire and forget; a failed check keeps the switch the worker last heard. */
-function refreshInstanceSeal(force = false): void {
-  const now = Date.now();
-  if (!force && now - instanceSealCheckedAt < INSTANCE_SEAL_INTERVAL) return;
-  instanceSealCheckedAt = now;
-  void readInstanceSeal(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" })).then(
-    (instanceSeal) => (instanceSeal === null ? undefined : prefs.set({ instanceSeal })),
-  );
 }
 
 async function uiReady(): Promise<void> {
@@ -195,7 +190,7 @@ self.addEventListener("message", (event) => {
         if (!update) return;
         await prefs.set(update);
         // The UI cannot turn the admin's switch off, only have the worker ask the server again.
-        if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) refreshInstanceSeal(true);
+        if ((event.data as { instanceSeal?: unknown }).instanceSeal === false) instance.refresh(true);
         // The UI waits for this answer before navigating, so the next page already sees the new choice.
         answer?.postMessage({ ok: true });
       }),
@@ -245,6 +240,12 @@ function respond(event: FetchEvent, site: boolean): Promise<Response> | null {
   if (site && own && url.pathname === LABEL_RPC_PATH && post) {
     return handleLabelRpc(event.request, (target) => siteMode.hostOf(target));
   }
+  if (own && url.pathname === SHARED_WORKER_PATH) {
+    return answerSharedWorker(event.request, url, { origin, runtimePath: WORKER_PATH, starts: sharedStarts });
+  }
+  if (own && url.pathname === CONTINUE_PATH) {
+    return sealing.ready().then(() => warning.accept(event.request, sealing.open, origin));
+  }
   if (own && isGuardedPath(url.pathname)) {
     if (event.request.mode === "navigate") {
       // A navigation has no client yet, so only its shape is judged.
@@ -285,7 +286,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
   const identity = await identityOf(event, client);
   const clientUrl = requestClientUrl({ client, identity }, origin);
   const topLevelGet = navigation && request.destination === "document" && request.method === "GET";
-  if (topLevelGet && !site) refreshInstanceSeal();
+  if (topLevelGet && !site) instance.refresh();
   // Fresh settings reach an open site on its next page load, read beside the page itself.
   const pageConfig = site && topLevelGet ? siteMode.forPage() : undefined;
   // A navigation needs the label key to tell which host its target lives on.
@@ -324,6 +325,12 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
     case "signin":
       return signIn(route.target);
     case "proxy": {
+      // Checked before any relay request, so a shared link's first load shows the warning and nothing else. A site
+      // host never reads the instance state the warning depends on.
+      if (!site && navigation && request.destination === "document" && (await warning.needed())) {
+        const { pathname, search, hash } = new URL(request.url);
+        return warning.page(pathname + search + hash, route.target);
+      }
       // A navigation that arrives from another site host is cross-site, not a direct one.
       const initiator =
         navigation && site
@@ -477,10 +484,11 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await Promise.all([cookies.ready(), sealing.ready()]);
   const client = await clientOf(event);
   const identity = await identityOf(event, client);
-  const pageUrl =
-    client?.type === "window"
-      ? realUrlOf(client.url, self.location.origin, sealing.open)
-      : identity && new URL(identity.page);
+  const caller = wsCaller(
+    client?.type,
+    client?.type === "window" ? realUrlOf(client.url, self.location.origin, sealing.open) : null,
+    identity,
+  );
   let rawUrl: unknown;
   try {
     rawUrl = ((await event.request.json()) as { url?: unknown }).url;
@@ -491,7 +499,7 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
   const prep = await buildWsPrep(
     cookies,
     rawUrl,
-    pageUrl,
+    caller,
     async (target) => !(await cookiesBlocked(event, client, target)),
   );
   if (!prep) return new Response(null, { status: 400 });
@@ -529,7 +537,14 @@ async function handleCookieRpc(event: FetchEvent): Promise<Response> {
  * never the body, decides the identity the nonce binds to.
  */
 async function handleWorkerRpc(event: FetchEvent): Promise<Response> {
-  return answerAnnouncement(event.request, event.clientId, () => callerIdentity(event), workers);
+  const shared = { origin: self.location.origin, starts: sharedStarts };
+  return answerAnnouncement(
+    event.request,
+    event.clientId,
+    () => callerIdentity(event),
+    workers,
+    (path, nonce, identity) => announceSharedStart(path, nonce, identity, shared),
+  );
 }
 
 /** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */
@@ -565,5 +580,5 @@ async function clientOf(event: FetchEvent): Promise<Client | undefined> {
 /** On a site host `/` belongs to the page's site, so the way home is the root. */
 function htmlError(code: ErrorPageCode, status: number, target: URL | null): Response {
   const root = siteMode.state()?.root;
-  return errorResponse(code, status, target, root === undefined ? undefined : `${root}/`);
+  return errorResponse(code, status, target, undefined, root === undefined ? undefined : `${root}/`);
 }

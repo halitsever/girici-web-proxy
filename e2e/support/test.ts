@@ -4,8 +4,10 @@ import { sep } from "node:path";
 import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
 import { labelSiteOf } from "../../packages/engine/src/shared/label-site.ts";
 import { siteLabel } from "../../packages/engine/src/shared/site-label.ts";
+import { GATES_PORT, QUOTA_PORT } from "../fixtures/servers.ts";
 import { SITES, SITE_SECRET } from "./site-mode.ts";
 
+export { METRICS_TOKEN } from "../fixtures/servers.ts";
 export { PRIVATE_SITES, SITES, SITE_SECRET } from "./site-mode.ts";
 
 const TRAP_LOG = "http://127.0.0.1:41999/log";
@@ -46,6 +48,15 @@ export async function enableSealing(page: Page): Promise<void> {
   await page.reload();
 }
 
+/** Linux WebKit sometimes never commits a navigation that switches browsing context groups (WebKit bug 327297). */
+export function retryWebKitInCi(): void {
+  // Retries are set before a project is known, so other browsers fail a retry at once.
+  test.describe.configure({ retries: process.env.CI ? 1 : 0 });
+  test.beforeEach(({ browserName }, testInfo) => {
+    if (testInfo.retry > 0 && browserName !== "webkit") throw new Error("only WebKit gets a retry");
+  });
+}
+
 export async function openThroughUi(page: Page, url: string): Promise<void> {
   await page.goto("/");
   const input = page.getByLabel("URL or search");
@@ -60,6 +71,10 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
 }
 
 export const INSTANCE = "http://127.0.0.1:41002";
+/** Public, warning off, browser check on at difficulty 4. */
+export const GATES = `http://127.0.0.1:${GATES_PORT}`;
+/** Public, warning off, 1 MB a minute per visitor. */
+export const QUOTA = `http://127.0.0.1:${QUOTA_PORT}`;
 
 const LABEL_KEY = new Uint8Array(hkdfSync("sha256", SITE_SECRET, "girici", "girici/v1 label", 32));
 

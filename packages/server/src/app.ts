@@ -1,5 +1,5 @@
 import { WS_SEAL_PATH } from "@girici/engine/shared";
-import express, { type Express, type RequestHandler } from "express";
+import express, { type Express, type RequestHandler, type Router } from "express";
 import { authGate } from "./auth/gate.ts";
 import type { AuthStore } from "./auth/store.ts";
 import type { BrandStore } from "./brand/store.ts";
@@ -7,6 +7,7 @@ import { compileTrust, type TrustFn } from "./http/client-ip.ts";
 import { errorHandler } from "./http/error-handler.ts";
 import type { Limiter } from "./http/rate-limit.ts";
 import { relayLimit, warnUntrustedForwarding } from "./http/relay-limit.ts";
+import { NO_OBSERVER, relayAnswers, type RelayObserver } from "./http/relay-observer.ts";
 import { securityHeaders, siteHeaders } from "./http/security-headers.ts";
 import { serviceWorkerScriptGuard } from "./http/sw-script-guard.ts";
 import type { Logger } from "./log.ts";
@@ -43,7 +44,15 @@ export interface AppOptions {
   setupToken?: string;
   /** Subdomain mode; without it every host gets every route. */
   sites?: SiteSetup;
+  observer?: RelayObserver;
+  powGate?: RequestHandler;
+  bandwidthGate?: RequestHandler;
+  metricsRouter?: Router;
+  statusRouter?: Router;
+  powRouter?: Router;
 }
+
+const pass: RequestHandler = (_req, _res, next) => next();
 
 export function createApp({
   webDistDir,
@@ -59,6 +68,12 @@ export function createApp({
   poToken,
   setupToken,
   sites,
+  observer = NO_OBSERVER,
+  powGate = pass,
+  bandwidthGate = pass,
+  metricsRouter,
+  statusRouter,
+  powRouter,
 }: AppOptions): Express {
   const app = express();
   app.disable("x-powered-by");
@@ -71,6 +86,7 @@ export function createApp({
   app.use(siteHeaders());
   app.use(serviceWorkerScriptGuard());
   app.use(healthRouter(authStore, logger));
+  if (metricsRouter) app.use(metricsRouter);
   app.use(robotsRouter());
   // In subdomain mode the root serves people and site hosts serve proxied sites; other hosts get nothing more.
   const root = (handler: RequestHandler) => onHosts(["single", "root"], handler);
@@ -82,17 +98,23 @@ export function createApp({
   app.use(
     root(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand, sites?.domain)),
   );
+  if (statusRouter) app.use(root(statusRouter));
+  // Ungated: a visitor the browser check refuses must still reach the check.
+  if (powRouter) app.use(root(powRouter));
+  // First on the data path, so the observer hears every gate's refusal as well as the relay's own answers.
+  app.use("/_g/r", site(relayAnswers(observer)));
   // Gate the proxy data path, the poToken minter and WebSocket seals; navigations reach the SW as an auth error
   // and redirect to login. Public access opens them; nothing else here is gated.
-  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], site(authGate(authStore)));
+  app.use(["/_g/r", "/_g/pot", WS_SEAL_PATH], site(authGate(authStore)), site(powGate));
   app.use(
     "/_g/r",
     site(warnUntrustedForwarding(trustFn, logger)),
     site(relayLimit({ limiter: limiter ?? null, store: authStore })),
+    site(bandwidthGate),
   );
   if (poToken) app.use(site(poRouter({ minter: poToken })));
   app.use(site(wsSealRouter(authStore)));
-  app.use(site(relayRouter({ ...relay, logger })));
+  app.use(site(relayRouter({ ...relay, logger, observer })));
   app.use(root(uiRouter(webDistDir, authStore)));
   if (sites) app.use(onHosts(["site"], siteHostRouter(sites, authStore)));
   app.use(site(engineRouter(engineBundlesDir)));

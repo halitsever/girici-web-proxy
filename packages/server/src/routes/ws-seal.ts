@@ -38,6 +38,8 @@ function readSealInput(body: unknown): SealInput | null {
   const { url, origin, cookie } = (body ?? {}) as Record<string, unknown>;
   const target = typeof url === "string" ? URL.parse(url) : null;
   if (!target || (target.protocol !== "ws:" && target.protocol !== "wss:")) return null;
+  // An opaque Origin is a worker no page vouched for, which gets no cookie either.
+  if (origin === "null") return cookie === null ? { target, origin, cookie } : null;
   const page = typeof origin === "string" ? URL.parse(origin) : null;
   if (!page || (page.protocol !== "http:" && page.protocol !== "https:") || page.origin !== origin) return null;
   if (cookie !== null && (typeof cookie !== "string" || cookie.length > MAX_COOKIE || /[\r\n\0]/.test(cookie))) {

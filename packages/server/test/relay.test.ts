@@ -1,7 +1,9 @@
 import { request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from "node:http";
 import { gzipSync } from "node:zlib";
 import { decodeHeaderList, encodeHeaderList, encodeHeaderValue } from "@girici/engine/shared";
+import type { RequestHandler } from "express";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { NO_OBSERVER, type RelayObserver } from "../src/http/relay-observer.ts";
 import { HostBlocklist } from "../src/upstream/blocklist.ts";
 import { createTestCert, relayFetch, startRelay, startUpstream, type TestCert } from "./helpers/upstream.ts";
 
@@ -20,7 +22,14 @@ afterEach(async () => {
 
 async function setup(
   handler: Handler,
-  options: { trustCa?: boolean; maxRequestBody?: number; headersTimeout?: number; blocked?: string[] } = {},
+  options: {
+    trustCa?: boolean;
+    maxRequestBody?: number;
+    headersTimeout?: number;
+    blocked?: string[];
+    observer?: RelayObserver;
+    before?: RequestHandler;
+  } = {},
 ) {
   const upstream = await startUpstream(handler, cert);
   const relay = await startRelay({
@@ -29,6 +38,8 @@ async function setup(
     maxRequestBody: options.maxRequestBody,
     headersTimeout: options.headersTimeout,
     blocklist: options.blocked ? new HostBlocklist(options.blocked, []) : undefined,
+    observer: options.observer,
+    before: options.before,
   });
   cleanups.push(relay.close, upstream.close);
   return { upstream, base: relay.base };
@@ -64,6 +75,49 @@ describe("relay", () => {
       ["set-cookie", "b=2"],
     ]);
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("reports the bytes it relays each way to its observer", async () => {
+    const seen: Array<[string, number, string]> = [];
+    const observer = {
+      ...NO_OBSERVER,
+      bytes: (key: string, count: number, direction: string) => seen.push([key, count, direction]),
+    };
+    const { base } = await setup(
+      (req, res) => {
+        req.resume();
+        req.on("end", () => res.end("hello world"));
+      },
+      { observer },
+    );
+    const res = await relayFetch(base, "https/site-a.test/up", {
+      method: "POST",
+      body: "12345",
+      headers: { origin: base },
+    });
+    await res.text();
+    const total = (direction: string) => seen.filter(([, , d]) => d === direction).reduce((sum, [, n]) => sum + n, 0);
+    expect(total("up")).toBe(5);
+    expect(total("down")).toBe(11);
+    expect(new Set(seen.map(([key]) => key))).toEqual(new Set(["127.0.0.1"]));
+  });
+
+  it("never lets the browser cache a relay response that sets a cookie of ours", async () => {
+    const handler: Handler = (_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain", "cache-control": "max-age=600" });
+      res.end("x");
+    };
+    const marked = await setup(handler, {
+      before: (_req, res, next) => {
+        res.cookie("girici-visitor", "x");
+        next();
+      },
+    });
+    const res = await relayFetch(marked.base, "https/site-a.test/");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(res.headers.getSetCookie()).toEqual(["girici-visitor=x; Path=/"]);
+    const plain = await setup(handler);
+    expect((await relayFetch(plain.base, "https/site-a.test/")).headers.get("cache-control")).toBe("max-age=600");
   });
 
   it("never follows redirects", async () => {

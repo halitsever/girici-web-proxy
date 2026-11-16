@@ -151,3 +151,40 @@ describe("sealed addresses", () => {
     }
   });
 });
+
+describe("keepsOrigin", () => {
+  const master = new MasterSealer(new Uint8Array(32).fill(5));
+  const sealA = master.originSeal("https://a.test");
+  const sealB = master.originSeal("https://b.test");
+  const opener = { origin: proxy, base: "https://a.test/opener" };
+
+  /** A blank popup the opener adopted, then the document the browser put into that same window. */
+  function reused(href: string) {
+    const win = fakeWin("about:blank");
+    const ctx = createUrlContext(win, opener);
+    win.location.href = href;
+    return ctx;
+  }
+
+  it("keeps the window for a page of the origin it was given", () => {
+    expect(reused(`${proxy}/~/https/a.test/next`).keepsOrigin(undefined)).toBe(true);
+    const sealed = `${proxy}${createOriginSealer(sealA)!.seal(new URL("https://a.test/next"))}`;
+    expect(reused(sealed).keepsOrigin(undefined, sealA)).toBe(true);
+  });
+
+  it("gives up the window for another origin's page, whatever seal or context it offers", () => {
+    expect(reused(`${proxy}/~/https/b.test/`).keepsOrigin(opener, sealA)).toBe(false);
+    expect(reused(`${proxy}/~/https/www.a.test/`).keepsOrigin(opener)).toBe(false);
+    const sealed = `${proxy}${createOriginSealer(sealB)!.seal(new URL("https://b.test/x"))}`;
+    expect(reused(sealed).keepsOrigin(opener, sealB)).toBe(false);
+    expect(reused(sealed).keepsOrigin(opener, sealA)).toBe(false);
+    expect(reused(sealed).keepsOrigin(opener)).toBe(false);
+  });
+
+  it("judges a page without a proxy address of its own by the context it inherits", () => {
+    const blob = reused("blob:http://proxy.test/1");
+    expect(blob.keepsOrigin(opener)).toBe(true);
+    expect(blob.keepsOrigin({ origin: proxy, base: "https://b.test/" })).toBe(false);
+    expect(blob.keepsOrigin(undefined)).toBe(false);
+  });
+});

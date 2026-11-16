@@ -1,6 +1,6 @@
 import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { installWebSocket } from "../src/client/websocket.ts";
+import { installWebSocket, type WebSocketRealm } from "../src/client/websocket.ts";
 import type { Realm, UrlContext } from "../src/client/url-context.ts";
 import { withPrototypeAdditions, withReplaced } from "./replaced-builtins.ts";
 
@@ -74,6 +74,52 @@ describe("installWebSocket", () => {
     const inner = MockWs.instances[0]!;
     expect(inner.url).toBe("ws://localhost:3000/_g/ws");
     expect(inner.protocols).toEqual(["girici.v1"]);
+  });
+
+  it("reads its address as the browser does: relative to the base, http as ws, no other scheme or fragment", async () => {
+    const win = makeWin();
+    (win as unknown as { DOMException: unknown }).DOMException = DOMException;
+    installWebSocket(win, { ...ctx, realBase: () => new URL("https://discord.com/app/") } as UrlContext);
+    expect(new win.WebSocket("socket?x=1").url).toBe("wss://discord.com/app/socket?x=1");
+    expect(new win.WebSocket("https://gateway.discord.gg/").url).toBe("wss://gateway.discord.gg/");
+    expect(new win.WebSocket(new URL("http://gateway.discord.gg/a")).url).toBe("ws://gateway.discord.gg/a");
+    await flush();
+    MockWs.instances.length = 0;
+    for (const bad of [
+      "ftp://gateway.discord.gg/",
+      "wss://gateway.discord.gg/#x",
+      "wss://gateway.discord.gg/#",
+      "http://[",
+    ]) {
+      let thrown: unknown = null;
+      try {
+        new win.WebSocket(bad);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown, bad).toBeInstanceOf(DOMException);
+      expect((thrown as DOMException).name, bad).toBe("SyntaxError");
+    }
+    expect(() => new win.WebSocket(Symbol("x") as never)).toThrow(TypeError);
+    await flush();
+    expect(MockWs.instances).toHaveLength(0);
+  });
+
+  it("installs on a worker scope's globals, without a window", async () => {
+    const realm: WebSocketRealm = {
+      WebSocket: MockWs as unknown as typeof WebSocket,
+      fetch: (async () => ({ ok: true, json: async () => ({ seal: "S" }) })) as unknown as typeof fetch,
+      EventTarget,
+      Event,
+      MessageEvent,
+      CloseEvent: TestCloseEvent as unknown as typeof CloseEvent,
+      Blob,
+    };
+    installWebSocket(realm, { origin: ctx.origin, realUrl: ctx.realUrl });
+    MockWs.instances.length = 0;
+    new realm.WebSocket("wss://gateway.discord.gg/");
+    await flush();
+    expect(MockWs.instances[0]?.url).toBe("ws://localhost:3000/_g/ws");
   });
 
   it("asks for the seal at an absolute URL", async () => {

@@ -10,6 +10,7 @@ import {
   toBase64Url,
   utf8Bytes,
 } from "../src/shared/seal-cipher.ts";
+import * as shared from "../src/shared/index.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
 
 const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
@@ -21,6 +22,10 @@ describe("seal cipher", () => {
       const data = randomBytes(size);
       expect(hex(sha256(data)), String(size)).toBe(createHash("sha256").update(data).digest("hex"));
     }
+  });
+
+  it("offers the same hash to the UI through the shared entry point", () => {
+    expect(shared.sha256).toBe(sha256);
   });
 
   it("computes HMAC-SHA256 as RFC 4231 and node:crypto do", () => {

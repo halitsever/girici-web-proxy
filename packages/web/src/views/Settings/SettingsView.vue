@@ -10,9 +10,11 @@ import {
   getAdminSettings,
   getAuthState,
   saveBlockedHosts,
+  setInstanceSwitch,
   setPublicAccess,
   setSealAddresses,
   type AuthState,
+  type InstanceSwitch,
 } from "@/lib/auth";
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
@@ -30,6 +32,7 @@ import {
 import { loadSettings, saveSettings } from "@/lib/settings";
 import { isSiteMode, syncSettings } from "@/lib/sites";
 import { SEARCH_ENGINES, toProxyPath, type SearchEngine } from "@/lib/target";
+import StatusPanel from "./StatusPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -43,6 +46,21 @@ const publicAccess = ref(false);
 const publicError = ref("");
 const instanceSeal = ref(false);
 const instanceSealError = ref("");
+const SWITCH_ROWS: ReadonlyArray<{ name: InstanceSwitch; label: string; help: string }> = [
+  {
+    name: "deepLinkWarning",
+    label: "Warn before shared links",
+    help: "Someone who opens a proxied page from a link, before ever opening a site from Girici's home page, first sees a notice that the page comes through this proxy. Applies while public access is on.",
+  },
+  {
+    name: "proofOfWork",
+    label: "Browser check for visitors",
+    help: "Browsers solve a short puzzle before their first page, and again when their address changes. It slows down bots that abuse the proxy. Applies while public access is on; you are never checked.",
+  },
+];
+// The server's defaults until the admin settings load.
+const instanceSwitches = ref<Record<InstanceSwitch, boolean>>({ deepLinkWarning: true, proofOfWork: false });
+const instanceSwitchErrors = ref<Record<InstanceSwitch, string>>({ deepLinkWarning: "", proofOfWork: "" });
 // Kept in memory only, so it is gone once the page closes.
 const adminPassword = ref("");
 const blockedText = ref("");
@@ -104,6 +122,22 @@ async function onToggleInstanceSeal(on: boolean) {
   } catch (e) {
     instanceSeal.value = previous;
     instanceSealError.value = e instanceof Error ? e.message : "Could not change address encryption.";
+  }
+}
+
+async function onToggleInstanceSwitch(name: InstanceSwitch, on: boolean) {
+  instanceSwitchErrors.value[name] = "";
+  if (!adminPassword.value) {
+    instanceSwitchErrors.value[name] = "Enter your current password first.";
+    return;
+  }
+  const previous = instanceSwitches.value[name];
+  instanceSwitches.value[name] = on;
+  try {
+    instanceSwitches.value[name] = (await setInstanceSwitch(name, on, adminPassword.value))[name];
+  } catch (e) {
+    instanceSwitches.value[name] = previous;
+    instanceSwitchErrors.value[name] = e instanceof Error ? e.message : "Could not change the setting.";
   }
 }
 
@@ -293,6 +327,7 @@ onMounted(async () => {
     const admin = await getAdminSettings();
     blockedText.value = admin.blockedHosts.join("\n");
     envBlocked.value = admin.envBlockedHosts;
+    instanceSwitches.value = { deepLinkWarning: admin.deepLinkWarning, proofOfWork: admin.proofOfWork };
   } catch {
     // The editor starts empty; saving still reports its own errors.
   }
@@ -427,6 +462,24 @@ onMounted(async () => {
           @update:model-value="onToggleInstanceSeal"
         />
       </div>
+      <div
+        v-for="row in SWITCH_ROWS"
+        :key="row.name"
+        class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]"
+      >
+        <div>
+          <p class="text-[14px] font-medium">{{ row.label }}</p>
+          <p class="text-[13px] text-muted-foreground">{{ row.help }}</p>
+          <p v-if="instanceSwitchErrors[row.name]" class="mt-1 text-[13px] text-gi-danger">
+            {{ instanceSwitchErrors[row.name] }}
+          </p>
+        </div>
+        <Switch
+          :model-value="instanceSwitches[row.name]"
+          :aria-label="row.label"
+          @update:model-value="(on: boolean) => onToggleInstanceSwitch(row.name, on)"
+        />
+      </div>
       <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
         <div>
           <p class="text-[14px] font-medium">Instance</p>
@@ -484,6 +537,8 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <StatusPanel v-if="authed" />
 
     <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
       <div class="flex items-center justify-between px-5 py-4">

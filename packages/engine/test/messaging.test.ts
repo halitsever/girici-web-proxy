@@ -6,6 +6,7 @@ import {
   CROSS_SITE_TIMEOUT_MS,
   installMessaging,
   post,
+  type Send,
 } from "../src/client/messaging.ts";
 import { installToStringMask } from "../src/client/native-mask.ts";
 import { createSiteLabels, type SiteLabels } from "../src/client/site-labels.ts";
@@ -16,6 +17,7 @@ import type { MessageEnvelope, SiteContext } from "../src/shared/protocol.ts";
 import { toBase64Url } from "../src/shared/seal-cipher.ts";
 import { siteLabel } from "../src/shared/site-label.ts";
 import { REPLACED_BUILTINS, withReplaced } from "./replaced-builtins.ts";
+import { spyBuiltins } from "./spied-builtins.ts";
 
 describe("post", () => {
   it("delivers a message for the sender's own origin ('/') only to a window of that origin", () => {
@@ -24,6 +26,22 @@ describe("post", () => {
     post(send, "https://a.test", "http://proxy.test", "same", "/", [], "https://a.test");
     post(send, "https://b.test", "http://proxy.test", "other", "/", [], "https://a.test");
     expect(sent).toEqual([["same", "http://proxy.test"]]);
+  });
+
+  it("passes options on with their own fields only, so the native reads nothing from the page's Object.prototype", async () => {
+    const delivered: unknown[] = [0];
+    // Reads what the native dictionary conversion reads.
+    const send = (_message: unknown, options: { targetOrigin?: unknown; transfer?: unknown }) => {
+      void options.transfer;
+      delivered[0] = options;
+    };
+    const options = { targetOrigin: "*", note: "s3cr3t" };
+    const seen = await spyBuiltins("s3cr3t", () => {
+      post(send as Send, "https://a.test", "http://proxy.test", "hi", options, [], "https://a.test");
+    });
+    expect(seen).toEqual([]);
+    expect(delivered[0]).toEqual({ targetOrigin: "*", note: "s3cr3t" });
+    expect(Object.getPrototypeOf(delivered[0])).toBeNull();
   });
 });
 

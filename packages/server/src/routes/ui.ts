@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import { LOGIN_PATH, SETUP_PATH } from "@girici/engine/shared";
+import { CHALLENGE_PATH, LOGIN_PATH, SETUP_PATH } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
 import { sessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { PERMISSIONS_POLICY, UI_CSP } from "../http/security-headers.ts";
 
 // The UI is a single-page app; these client routes all load the same shell.
-const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH];
+const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH, CHALLENGE_PATH];
 
 export function uiRouter(webDistDir: string, store: AuthStore): Router {
   const router = Router();

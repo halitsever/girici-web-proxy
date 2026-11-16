@@ -53,6 +53,20 @@ describe("AuthStore settings", () => {
     expect(s.rotateSessionSecret()).not.toBe(secret);
   });
 
+  it("warns about shared links by default and checks no browser until asked", () => {
+    const s = store();
+    expect(s.deepLinkWarning()).toBe(true);
+    expect(s.proofOfWork()).toBe(false);
+    s.setDeepLinkWarning(false);
+    s.setProofOfWork(true);
+    expect(s.deepLinkWarning()).toBe(false);
+    expect(s.proofOfWork()).toBe(true);
+    s.setDeepLinkWarning(true);
+    s.setProofOfWork(false);
+    expect(s.deepLinkWarning()).toBe(true);
+    expect(s.proofOfWork()).toBe(false);
+  });
+
   it("defaults public access off and toggles it", () => {
     const s = store();
     expect(s.publicAccess()).toBe(false);

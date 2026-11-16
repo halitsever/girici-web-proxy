@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { errorPage, errorResponse, forbiddenResponse, SANDBOX_CSP } from "../src/sw/error-page.ts";
+import { errorPage, errorResponse, forbiddenResponse, SANDBOX_CSP, waitText } from "../src/sw/error-page.ts";
 
 describe("errorPage", () => {
   it("explains a rate limit", () => {
@@ -23,11 +23,34 @@ describe("errorPage", () => {
   });
 
   it("links home to the root on a site host", () => {
-    expect(errorPage("connect", null, "https://proxy.test/")).toContain('href="https://proxy.test/"');
+    expect(errorPage("connect", null, undefined, "https://proxy.test/")).toContain('href="https://proxy.test/"');
     expect(errorPage("connect", null)).toContain('href="/"');
-    expect(errorPage("connect", null, 'https://proxy.test/"><b>')).toContain(
+    expect(errorPage("connect", null, undefined, 'https://proxy.test/"><b>')).toContain(
       'href="https://proxy.test/&#34;&#62;&#60;b&#62;"',
     );
+  });
+
+  it("explains a spent data allowance with the wait", () => {
+    expect(errorPage("quota", new URL("https://a.test/"), 120)).toContain(
+      "used up its data allowance on this Girici server. Try again in 2 minutes.",
+    );
+    expect(errorPage("quota", null, 30)).toContain("Try again in a minute.");
+    expect(errorPage("quota", null, 7200)).toContain("Try again in 2 hours.");
+    expect(errorPage("quota", null)).toContain("Try again later.");
+    expect(errorResponse("quota", 429, null, 90).headers.get("retry-after")).toBe("90");
+    expect(errorPage("challenge", new URL("https://a.test/"))).toContain("check this browser before it opens a.test");
+  });
+});
+
+describe("waitText", () => {
+  it("rounds a wait to minutes below an hour and a half, and to hours beyond", () => {
+    expect(waitText(undefined)).toBe("later");
+    expect(waitText(1)).toBe("in a minute");
+    expect(waitText(90)).toBe("in a minute");
+    expect(waitText(91)).toBe("in 2 minutes");
+    expect(waitText(89 * 60)).toBe("in 89 minutes");
+    expect(waitText(90 * 60)).toBe("in 2 hours");
+    expect(waitText(10 * 3600)).toBe("in 10 hours");
   });
 });
 
@@ -42,7 +65,7 @@ describe("errorResponse", () => {
   });
 
   it("takes the home link it is given", async () => {
-    const res = errorResponse("connect", 502, null, "https://proxy.test/");
+    const res = errorResponse("connect", 502, null, undefined, "https://proxy.test/");
     expect(await res.text()).toContain('href="https://proxy.test/"');
   });
 });
@@ -53,5 +76,11 @@ describe("forbiddenResponse", () => {
     expect(res.status).toBe(403);
     expect(res.headers.get("content-security-policy")).toBe(SANDBOX_CSP);
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  it("names its type, so a refused navigation shows a page instead of starting a download", async () => {
+    const res = forbiddenResponse();
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(await res.text()).toBe("Forbidden");
   });
 });

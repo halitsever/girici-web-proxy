@@ -290,7 +290,7 @@ class HtmlRewriter {
 }
 
 /** Bare specifiers in "imports" stay keys; URL values and scope prefixes have to point at the proxy. */
-function rewriteImportMap(text: string, base: URL, origin: string, opaque: boolean): string {
+export function rewriteImportMap(text: string, base: URL, origin: string, opaque: boolean): string {
   let map: unknown;
   try {
     map = JSON.parse(text);

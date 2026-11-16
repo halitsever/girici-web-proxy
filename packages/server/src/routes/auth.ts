@@ -100,6 +100,8 @@ interface AuthState {
   sealAddresses: boolean;
   /** The site domain's `value` in subdomain mode, so the UI knows which mode it runs in. */
   siteDomain: string | null;
+  /** Effective: a private instance lets no visitor in, so it never warns. */
+  deepLinkWarning: boolean;
   admin?: { username: string; name: string; email: string };
 }
 
@@ -109,12 +111,14 @@ function isAuthed(store: AuthStore, req: Request): boolean {
 
 function state(store: AuthStore, authed: boolean, siteDomain: SiteDomain | undefined): AuthState {
   const admin = store.admin();
+  const isPublic = store.publicAccess();
   return {
     setup: admin === null,
     authed,
-    public: store.publicAccess(),
+    public: isPublic,
     sealAddresses: store.sealAddresses(),
     siteDomain: siteDomain?.value ?? null,
+    deepLinkWarning: isPublic && store.deepLinkWarning(),
     admin: authed && admin ? { username: admin.username, name: admin.name, email: admin.email } : undefined,
   };
 }

@@ -38,6 +38,15 @@ pages usually reach each other, but not for all of them. These gaps are known an
   `Object.assign(window, { location: url })`, reaches the real one. Such a page can navigate outside the proxy.
 - **Rewriters run in the page realm.** The code that rewrites a page's scripts and HTML runs in the same JavaScript
   world as the page. A hostile page can interfere with it and with the built-ins it relies on.
+- **Shared workers are found by address.** A page that reaches the browser's own `SharedWorker` can connect to
+  another site's running shared worker. Within a few seconds of a page of that site connecting to it, it can also
+  start that worker again.
+- **Windows that start blank.** A page from another site that loads in a frame the embedding page created blank (its
+  address set before insertion, or parser-inserted and adopted before its first page arrives) still runs on hooks
+  from the embedding page's JavaScript world. So does one that a server redirect brings into a popup the opener
+  opened for one of its own pages, and in Chromium one that a link or form opens in a new named window when the page
+  stops the click or submit event from reaching Girici. Only per-site origin isolation, described below, separates
+  these fully.
 - **The origin private file system is not partitioned.** `navigator.storage.getDirectory()` returns one folder that
   every site shares.
 - **Blob URLs are shared.** A site that learns another site's `blob:` URL can read it.
@@ -119,6 +128,12 @@ With **Public access** on, anyone can send traffic from your server's IP. Expect
 checks on that address. Keep the rate limit on, use the blocked sites list, and put Girici behind a reverse proxy
 with a correct `GIRICI_TRUST_PROXY` value (see [Reverse proxies](/guide/reverse-proxy)), or every visitor shares one
 rate limit.
+
+- The [shared-link warning](/guide/admin-and-auth#shared-link-warning) tells a visitor who arrives by link that the
+  page comes from another site through a proxy. It does not prove that site is genuine: the address bar shows your
+  server, so a phishing page looks as trustworthy as the real one.
+- The [browser check](/guide/admin-and-auth#browser-check) raises the cost of automated abuse. It does not stop a
+  determined client, which can solve the puzzle like any browser.
 
 ## Out of scope
 

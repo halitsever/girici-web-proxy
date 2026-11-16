@@ -14,7 +14,7 @@ const SETTINGS: Settings = {
 };
 
 function authState(siteDomain: string | null): AuthState {
-  return { setup: false, authed: false, public: true, sealAddresses: false, siteDomain };
+  return { setup: false, authed: false, public: true, sealAddresses: false, siteDomain, deepLinkWarning: false };
 }
 
 function recordFetch() {
