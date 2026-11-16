@@ -21,6 +21,7 @@ import express, { Router, type NextFunction, type Request, type Response } from 
 import { addSiteSession, isAdminCookie, siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import { isOwnHost } from "../http/origin.ts";
+import { requestLang, SERVER_TEXT, serverText } from "../http/page-text.ts";
 import {
   clearPage,
   hashClearNonce,
@@ -45,9 +46,7 @@ import {
 import { requestHost, siteHostFor } from "../sites/hosts.ts";
 import type { SiteSetup } from "../sites/keys.ts";
 
-export const SEALED_GONE =
-  "Addresses encrypted before this server moved sites to their own addresses do not open any more. " +
-  "Open the site again from Girici.";
+export const SEALED_GONE = SERVER_TEXT.en.sealedGone;
 
 /** Takes over a root worker left from single-origin mode and removes it, so the root never proxies. */
 export const RETIRE_WORKER =
@@ -70,7 +69,8 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
     res.setHeader("Cache-Control", "no-store");
     // Each site host seals with its own key, so nothing here can open these.
     if (isSealedPath(req.originalUrl)) {
-      sendInert(res, 404, SEALED_GONE);
+      res.vary("Accept-Language");
+      sendInert(res, 404, serverText(requestLang(req)).sealedGone);
       return;
     }
     const target = decodeUrl(req.originalUrl);
@@ -216,15 +216,16 @@ export function siteHostRouter(setup: SiteSetup, store: AuthStore): Router {
       return;
     }
     res.set({ "Content-Security-Policy": CLEAR_CSP, "Cache-Control": "no-store" });
+    const lang = requestLang(req, readPrefsCookie(req.headers.cookie, keys).lang);
     // WebKit can leave the storage a proxied page wrote when the clearing page comes from another host's page, so the
     // hop first lands here and then loads itself again.
     if (req.query.b !== "1") {
-      res.type("html").send(clearPage(`${req.originalUrl}&b=1`));
+      res.type("html").send(clearPage(`${req.originalUrl}&b=1`, lang));
       return;
     }
     // Never "cookies": that would clear the whole domain, sessions and settings included.
     res.setHeader("Clear-Site-Data", '"cache", "storage"');
-    res.type("html").send(clearPage(hopAfter(plan, signedQuery(req), index, setup)));
+    res.type("html").send(clearPage(hopAfter(plan, signedQuery(req), index, setup), lang));
   });
 
   return router;

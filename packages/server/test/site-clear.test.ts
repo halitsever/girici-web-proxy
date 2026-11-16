@@ -189,4 +189,10 @@ describe("clear plans", () => {
     expect(html).toContain("Clearing site data…");
     expect(html.startsWith("<!doctype html>")).toBe(true);
   });
+
+  it("writes the clear page in Turkish", () => {
+    const html = clearPage("/next", "tr");
+    expect(html).toContain('<html lang="tr">');
+    expect(html).toContain("<p>Site verileri temizleniyor…</p>");
+  });
 });

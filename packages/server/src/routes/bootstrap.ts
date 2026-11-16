@@ -1,30 +1,32 @@
 import { labelSiteOf } from "@girici/engine/label-site";
-import { decodeUrl, escapeAttribute, siteLabel, type SiteDomain } from "@girici/engine/shared";
+import { decodeUrl, DEFAULT_LANG, escapeAttribute, siteLabel, type Lang, type SiteDomain } from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
 import { siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
+import { requestLang, SERVER_TEXT, serverText } from "../http/page-text.ts";
 import { requestHost, siteHostFor } from "../sites/hosts.ts";
 import type { SiteSetup } from "../sites/keys.ts";
 
-const BOOT_PAGE = `<!doctype html>
-<html lang="en">
+function bootPage(lang: Lang): string {
+  const text = serverText(lang);
+  return `<!doctype html>
+<html lang="${lang}">
   <head>
     <meta charset="utf-8" />
     <title>Girici</title>
     <script src="/_g/boot.js" defer></script>
   </head>
   <body>
-    <p id="girici-boot">Starting Girici...</p>
-    <noscript>Girici needs JavaScript.</noscript>
+    <p id="girici-boot">${text.starting}</p>
+    <noscript>${text.needsScript}</noscript>
   </body>
 </html>
 `;
+}
 const BOOT_CSP = "default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 const INERT_CSP = "sandbox; default-src 'none'";
-const NOT_ACTIVE = "Girici is not active in this tab. Reload the page.";
 
-export const FRESH_POST =
-  "Girici has not opened this site in this browser yet. Open the site once, then send the form again.";
+export const FRESH_POST = SERVER_TEXT.en.freshPost;
 
 const URLENCODED = "application/x-www-form-urlencoded";
 const PLAIN_TEXT = "text/plain";
@@ -40,7 +42,7 @@ export function bootCsp(domain: SiteDomain, formAction: "'none'" | "'self'" = "'
 }
 
 /** The boot page plus the posted fields, which boot.js submits again once the worker controls the tab. */
-export function replayPage(fields: Array<[string, string]>, enctype: string): string {
+export function replayPage(fields: Array<[string, string]>, enctype: string, lang: Lang = DEFAULT_LANG): string {
   const inputs = fields
     .map(
       ([name, value]) =>
@@ -49,7 +51,7 @@ export function replayPage(fields: Array<[string, string]>, enctype: string): st
     .join("");
   // No action: the form posts back to the address it came from.
   const form = `<form id="girici-replay" method="post" enctype="${enctype}" hidden>${inputs}\n    </form>`;
-  return BOOT_PAGE.replace("  </body>", `    ${form}\n  </body>`);
+  return bootPage(lang).replace("  </body>", `    ${form}\n  </body>`);
 }
 
 /** Proxy URLs only reach the server when no service worker controls the tab, so this page installs one. */
@@ -65,7 +67,8 @@ export function bootstrapRouter(setup?: SiteSetup, store?: AuthStore): Router {
       res.setHeader("Content-Security-Policy", setup ? bootCsp(setup.domain) : BOOT_CSP);
       // A popup that lands here before its service worker runs keeps its opener.
       res.removeHeader("Cross-Origin-Opener-Policy");
-      res.type("html").send(BOOT_PAGE);
+      res.vary("Accept-Language");
+      res.type("html").send(bootPage(requestLang(req)));
       return;
     }
     if (setup && req.method === "POST" && isDocumentRequest(req, setup)) {
@@ -81,17 +84,18 @@ export function bootstrapRouter(setup?: SiteSetup, store?: AuthStore): Router {
           // replay holds whatever the app-wide default becomes.
           res.setHeader("Referrer-Policy", "no-referrer");
           res.removeHeader("Cross-Origin-Opener-Policy");
-          res.type("html").send(replayPage(formFields(req.body, enctype), enctype));
+          res.vary("Accept-Language");
+          res.type("html").send(replayPage(formFields(req.body, enctype), enctype, requestLang(req)));
         });
         return;
       }
       // A multipart body may hold files, which a page cannot put back into a form.
-      sendInert(res, FRESH_POST);
+      sendInert(res, serverText(requestLang(req)).freshPost);
       return;
     }
     // Anything else comes from a page the service worker already controls, where the bootstrap would only reload.
     // Sandboxed, a frame or object that lands here leaves no same-origin window to script.
-    sendInert(res, NOT_ACTIVE);
+    sendInert(res, serverText(requestLang(req)).notActive);
   });
   return router;
 }
@@ -108,6 +112,7 @@ function moveToSiteHost(req: Request, res: Response, setup: SiteSetup): boolean 
 }
 
 function sendInert(res: Response, text: string): void {
+  res.vary("Accept-Language");
   res.setHeader("Content-Security-Policy", INERT_CSP);
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.status(404).type("text/plain").send(text);

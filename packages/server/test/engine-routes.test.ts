@@ -77,6 +77,19 @@ describe("engine, bootstrap and legacy routes", () => {
     );
   });
 
+  it("writes the bootstrap page in the browser's language", async () => {
+    const english = await fetch(`${base}/~/https/example.com/`, { headers: { "sec-fetch-dest": "document" } });
+    expect(await english.text()).toContain('<html lang="en">');
+    expect(english.headers.get("vary")).toContain("Accept-Language");
+    const res = await fetch(`${base}/~/https/example.com/`, {
+      headers: { "sec-fetch-dest": "document", "accept-language": "tr-TR,tr;q=0.9,en;q=0.8" },
+    });
+    const html = await res.text();
+    expect(html).toContain('<html lang="tr">');
+    expect(html).toContain('<p id="girici-boot">Girici başlatılıyor...</p>');
+    expect(html).toContain("<noscript>Girici için JavaScript gerekiyor.</noscript>");
+  });
+
   it("answers nested document loads with an inert page instead of the bootstrap", async () => {
     for (const dest of ["iframe", "frame", "object", "embed"]) {
       const res = await fetch(`${base}/~/https/example.com/`, {
