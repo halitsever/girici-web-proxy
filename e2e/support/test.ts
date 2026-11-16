@@ -55,6 +55,8 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
   await page.waitForURL(/\/~\//);
   // A site host's first visit shows the bootstrap page at the same address before the page itself loads.
   await expect(page.locator("#girici-boot")).toHaveCount(0);
+  // The count is also 0 while the reload's new document is still empty, before the runtime has run.
+  await page.waitForLoadState("load");
 }
 
 export const INSTANCE = "http://127.0.0.1:41002";
