@@ -77,6 +77,9 @@ export function bootstrapRouter(setup?: SiteSetup, store?: AuthStore): Router {
             return;
           }
           res.setHeader("Content-Security-Policy", bootCsp(setup.domain, "'self'"));
+          // The worker counts a post without a referrer as cross-site, as the original may have been; kept here so the
+          // replay holds whatever the app-wide default becomes.
+          res.setHeader("Referrer-Policy", "no-referrer");
           res.removeHeader("Cross-Origin-Opener-Policy");
           res.type("html").send(replayPage(formFields(req.body, enctype), enctype));
         });

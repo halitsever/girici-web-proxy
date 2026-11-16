@@ -155,6 +155,7 @@ describe("site hosts", () => {
     expect(html).toContain('<script src="/_g/boot.js" defer></script>');
     expect(res.headers["content-security-policy"]).toContain("form-action 'self'");
     expect(res.headers["content-security-policy"]).not.toContain("form-action 'none'");
+    expect(res.headers["referrer-policy"]).toBe("no-referrer");
   });
 
   it("keeps the order and repeats of replayed fields, plain text forms too", async () => {
