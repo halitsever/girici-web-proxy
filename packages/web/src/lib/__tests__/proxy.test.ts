@@ -116,6 +116,7 @@ describe("openProxied", () => {
     const steps: string[] = [];
     await openProxied("/~/https/a.test/", {
       siteMode: false,
+      markSeen: async () => void steps.push("seen"),
       start: async () => void steps.push("start"),
       seal: async (path) => {
         steps.push(`seal ${path}`);
@@ -126,10 +127,11 @@ describe("openProxied", () => {
     expect(steps).toEqual(["start", "seal /~/https/a.test/", "assign /~/x/L.B"]);
   });
 
-  it("opens a site through the root address without the service worker", async () => {
+  it("marks the visitor as seen and opens a site through the root address without the service worker", async () => {
     const steps: string[] = [];
     await openProxied("/~/https/site-a.test/", {
       siteMode: true,
+      markSeen: async () => void steps.push("seen"),
       start: async () => void steps.push("start"),
       seal: async (path) => {
         steps.push(`seal ${path}`);
@@ -137,7 +139,7 @@ describe("openProxied", () => {
       },
       assign: (url) => void steps.push(`assign ${url}`),
     });
-    expect(steps).toEqual(["assign /~/https/site-a.test/"]);
+    expect(steps).toEqual(["seen", "assign /~/https/site-a.test/"]);
   });
 });
 

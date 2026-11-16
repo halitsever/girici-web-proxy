@@ -50,6 +50,9 @@ export function readSiteConfigAnswer(value: unknown): SiteConfigAnswer | null {
     key,
     prefs: readSitePrefs(ownValue(value, "prefs")),
     instanceSeal,
+    // A copy stored before these fields existed warns, as the worker does until the server has answered.
+    deepLinkWarning: ownValue(value, "deepLinkWarning") !== false,
+    seen: ownValue(value, "seen") === true,
   } as SiteConfigAnswer;
 }
 

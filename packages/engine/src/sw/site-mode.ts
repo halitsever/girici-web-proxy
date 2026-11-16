@@ -34,6 +34,8 @@ export interface SiteState {
   key: Uint8Array | null;
   prefs: SitePrefs;
   instanceSeal: boolean;
+  deepLinkWarning: boolean;
+  seen: boolean;
 }
 
 export interface SiteStore {
@@ -251,6 +253,8 @@ export class SiteModeService {
       key,
       prefs: { ...answer.prefs },
       instanceSeal: answer.instanceSeal,
+      deepLinkWarning: answer.deepLinkWarning,
+      seen: answer.seen,
     };
   }
 

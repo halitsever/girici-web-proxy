@@ -1,4 +1,4 @@
-import { parseSiteDomain, PREFS_PATH, SITE_LABEL_LENGTH, type SitePrefs } from "@girici/engine/shared";
+import { parseSiteDomain, PREFS_PATH, SITE_LABEL_LENGTH, SITES_SEEN_PATH, type SitePrefs } from "@girici/engine/shared";
 import type { AuthState } from "./auth";
 import { syncEnginePrefs } from "./engine-prefs";
 import type { Settings } from "./settings";
@@ -27,6 +27,15 @@ export async function syncSitePrefs(settings: Settings, fetcher: typeof fetch = 
     });
   } catch {
     // Sites keep the last settings that arrived; the next change or UI load posts again.
+  }
+}
+
+/** A visitor who opens a site from Girici's own pages has seen what it is, so no site host warns them. */
+export async function markSeen(fetcher: typeof fetch = fetch): Promise<void> {
+  try {
+    await fetcher(SITES_SEEN_PATH, { method: "POST" });
+  } catch {
+    // The site host then shows the warning once, and its Continue covers that host.
   }
 }
 

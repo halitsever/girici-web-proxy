@@ -50,6 +50,8 @@ export const PREFS_PATH = "/_g/prefs";
 export const SITES_LIST_PATH = "/_g/sites/list";
 export const SITES_PLAN_PATH = "/_g/sites/plan";
 export const SITES_DONE_PATH = "/_g/sites/done";
+/** The root's UI posts here before it opens a site, so no site host shows that visitor the shared-link warning. */
+export const SITES_SEEN_PATH = "/_g/sites/seen";
 /** The root sends the clearing chain back to `/settings?cleared=<n>`. */
 export const SITES_CLEARED_PARAM = "cleared";
 // Each site host answers its own config and clears its own data; no route is shared through CORS.
@@ -100,6 +102,10 @@ export interface SiteConfigAnswer {
   key: string | null;
   prefs: SitePrefs;
   instanceSeal: boolean;
+  /** Effective: the instance is public and the admin left the shared-link warning on. */
+  deepLinkWarning: boolean;
+  /** The visitor opened a site from Girici's own pages. */
+  seen: boolean;
 }
 
 /** `POST` body on `SITES_CONFIG_PATH`, as JSON: the worker names the site it serves so the root can list it. */

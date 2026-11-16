@@ -2,7 +2,7 @@ import { getAuthState } from "./auth";
 import { syncEnginePrefs } from "./engine-prefs";
 import { sealPath } from "./seal";
 import { loadSettings } from "./settings";
-import { isSiteMode } from "./sites";
+import { isSiteMode, markSeen } from "./sites";
 
 export type ServiceWorkerSupport = "ok" | "insecure" | "unsupported";
 
@@ -28,6 +28,8 @@ export async function startEngine(): Promise<void> {
 export interface OpenEnv {
   /** The root then redirects to the site's host, whose own worker seals the address. */
   siteMode: boolean;
+  /** Subdomain mode's counterpart of `start`, which tells the site hosts the visitor came through the UI. */
+  markSeen(): Promise<void>;
   start(): Promise<void>;
   seal(path: string): Promise<string>;
   assign(url: string): void;
@@ -37,6 +39,7 @@ export interface OpenEnv {
 export async function openProxied(path: string, env?: OpenEnv): Promise<void> {
   const open = env ?? (await browserOpenEnv());
   if (open.siteMode) {
+    await open.markSeen();
     open.assign(path);
     return;
   }
@@ -48,6 +51,7 @@ async function browserOpenEnv(): Promise<OpenEnv> {
   const state = await getAuthState().catch(() => null);
   return {
     siteMode: isSiteMode(state),
+    markSeen: () => markSeen(),
     start: startEngine,
     seal: (path) => sealPath(path),
     assign: (url) => window.location.assign(url),

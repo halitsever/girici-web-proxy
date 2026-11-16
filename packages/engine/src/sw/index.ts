@@ -86,7 +86,11 @@ const rpc = new CookieRpc(cookies);
 const prefs = new PrefsService(createIdbPrefsStore());
 const sealing = new Sealing(createIdbKeyStore(), prefs);
 const instance = new InstanceState(() => fetch(`${self.location.origin}/_g/auth/state`, { cache: "no-store" }), prefs);
-const warning = new DeepLinkWarning({ prefs, instance, keys: createIdbKeyStore("warning") });
+const warning = new DeepLinkWarning({
+  prefs,
+  instance: { deepLinkWarning: warningOn },
+  keys: createIdbKeyStore("warning"),
+});
 const clientRecords = createIdbClientRecords();
 const ui = new UiClients(clientRecords, {
   liveIds: async () =>
@@ -325,11 +329,15 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
     case "signin":
       return signIn(route.target);
     case "proxy": {
-      // Checked before any relay request, so a shared link's first load shows the warning and nothing else. A site
-      // host never reads the instance state the warning depends on.
-      if (!site && navigation && request.destination === "document" && (await warning.needed())) {
-        const { pathname, search, hash } = new URL(request.url);
-        return warning.page(pathname + search + hash, route.target);
+      // Checked before any relay request, so a shared link's first load shows the warning and nothing else.
+      if (navigation && request.destination === "document" && !(site && fromGirici(referrer))) {
+        // A site host hears the switch with its config, which a top-level load refreshes.
+        if (pageConfig) await pageConfig;
+        if (await warning.needed()) {
+          const { pathname, search, hash } = new URL(request.url);
+          const root = siteMode.state()?.root;
+          return warning.page(pathname + search + hash, route.target, root === undefined ? undefined : `${root}/`);
+        }
       }
       // A navigation that arrives from another site host is cross-site, not a direct one.
       const initiator =
@@ -575,6 +583,26 @@ async function clientOf(event: FetchEvent): Promise<Client | undefined> {
   if (!event.clientId) return undefined;
   const timeout = new Promise<undefined>((resolve) => setTimeout(resolve, CLIENT_LOOKUP_TIMEOUT));
   return Promise.race([self.clients.get(event.clientId), timeout]);
+}
+
+/** A site host learns the admin's switch, and whether the visitor came through the UI, from its config. */
+async function warningOn(): Promise<boolean> {
+  if (siteMode.settled() !== "site") return instance.deepLinkWarning();
+  const state = siteMode.state();
+  return state ? state.deepLinkWarning && !state.seen : true;
+}
+
+/** A load from the root or another site host is browsing inside Girici, not a link shared from outside. */
+function fromGirici(referrer: string | null): boolean {
+  const domain = siteMode.state()?.domain;
+  if (!domain || !referrer) return false;
+  let host: string;
+  try {
+    host = new URL(referrer).host;
+  } catch {
+    return false;
+  }
+  return host === domain.value || host.endsWith(`.${domain.value}`);
 }
 
 /** On a site host `/` belongs to the page's site, so the way home is the root. */

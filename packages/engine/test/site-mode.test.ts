@@ -18,6 +18,8 @@ const answer: SiteConfigAnswer = {
   key: toBase64Url(new Uint8Array(32).fill(7)),
   prefs: DEFAULT_SITE_PREFS,
   instanceSeal: false,
+  deepLinkWarning: true,
+  seen: false,
 };
 
 function memoryStore(initial?: unknown): SiteStore & { value: unknown } {
@@ -101,7 +103,7 @@ describe("SiteModeService", () => {
     const service = make({ respond: () => Response.json({ ...answer, prefs, instanceSeal: true }), applied });
     await service.ready();
     expect(applied).toHaveLength(1);
-    expect(applied[0]).toMatchObject({ prefs, instanceSeal: true, root: "https://proxy.test" });
+    expect(applied[0]).toMatchObject({ prefs, instanceSeal: true, root: "https://proxy.test", deepLinkWarning: true });
   });
 
   it("keeps the stored config when a refresh fails, and fails an install that has none", async () => {

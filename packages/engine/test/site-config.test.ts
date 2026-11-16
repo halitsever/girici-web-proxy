@@ -11,6 +11,8 @@ const answer: SiteConfigAnswer = {
   key: toBase64Url(new Uint8Array(32).fill(7)),
   prefs: { blockThirdPartyCookies: false, sealAddresses: true, toolbar: false, engine: "Bing" },
   instanceSeal: true,
+  deepLinkWarning: false,
+  seen: true,
 };
 
 const envelope = { [MESSAGE_ENVELOPE]: 1, o: "a", s: "b", t: "*", d: 1 };
@@ -34,6 +36,15 @@ describe("site config readers", () => {
   it("reads a site config answer and refuses a malformed one", () => {
     expect(readSiteConfigAnswer(JSON.parse(JSON.stringify(answer)))).toEqual(answer);
     expect(readSiteConfigAnswer({ ...answer, key: null })).toEqual({ ...answer, key: null });
+    // A copy stored before the warning fields existed warns until the next answer says otherwise.
+    const older: Partial<SiteConfigAnswer> = { ...answer };
+    delete older.deepLinkWarning;
+    delete older.seen;
+    expect(readSiteConfigAnswer(older)).toMatchObject({ deepLinkWarning: true, seen: false });
+    expect(readSiteConfigAnswer({ ...answer, deepLinkWarning: "no", seen: "yes" })).toMatchObject({
+      deepLinkWarning: true,
+      seen: false,
+    });
     for (const bad of [
       { ...answer, v: 2 },
       { ...answer, label: 5 },

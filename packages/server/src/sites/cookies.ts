@@ -12,6 +12,9 @@ export const PLAIN_SITES_COOKIE = "girici-sites";
 /** Ties a clear plan to the browser that asked for it. */
 export const CLEAR_COOKIE = "__Secure-girici-clear";
 export const PLAIN_CLEAR_COOKIE = "girici-clear";
+/** Set by the root's UI before it opens a site, so the site hosts skip the shared-link warning. */
+export const SEEN_COOKIE = "__Secure-girici-seen";
+export const PLAIN_SEEN_COOKIE = "girici-seen";
 /** Leaves room under the browsers' 4096-byte cookie limit for the name and attributes. */
 export const VISITED_LIMIT_BYTES = 3000;
 
@@ -23,6 +26,7 @@ const COOKIE_NAMES = {
   prefs: [PREFS_COOKIE, PLAIN_PREFS_COOKIE],
   sites: [SITES_COOKIE, PLAIN_SITES_COOKIE],
   clear: [CLEAR_COOKIE, PLAIN_CLEAR_COOKIE],
+  seen: [SEEN_COOKIE, PLAIN_SEEN_COOKIE],
 } as const;
 
 export function signPrefs(prefs: SitePrefs, keys: SiteKeys): string {
@@ -31,6 +35,15 @@ export function signPrefs(prefs: SitePrefs, keys: SiteKeys): string {
 
 export function signVisited(sites: readonly string[], keys: SiteKeys): string {
   return signValue(keys.cookies, "sites", sites);
+}
+
+export function signSeen(keys: SiteKeys): string {
+  return signValue(keys.cookies, "seen", true);
+}
+
+/** Only a value this server signed counts, so a page cannot skip the warning with a cookie of its own. */
+export function readSeen(cookieHeader: string | undefined, keys: SiteKeys): boolean {
+  return cookieValues(cookieHeader, COOKIE_NAMES.seen).some((value) => openValue(keys.cookies, "seen", value) === true);
 }
 
 /**

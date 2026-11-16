@@ -9,6 +9,7 @@ import {
   SITES_CLEARED_PARAM,
   SITES_CONFIG_PATH,
   SITES_DONE_PATH,
+  SITES_SEEN_PATH,
   SITES_LIST_PATH,
   SITES_PLAN_PATH,
   siteLabel,
@@ -33,9 +34,11 @@ import {
 import {
   readClearNonces,
   readPrefsCookie,
+  readSeen,
   readVisited,
   rememberSite,
   signPrefs,
+  signSeen,
   signVisited,
   siteCookie,
 } from "../sites/cookies.ts";
@@ -106,6 +109,12 @@ export function siteRootRouter(setup: SiteSetup, store: AuthStore): Router {
     res.status(204).end();
   });
 
+  // Same-origin only, so no page elsewhere can mark the visitor as one who came through the UI.
+  router.post(SITES_SEEN_PATH, ownOrigin, (req, res) => {
+    res.setHeader("Set-Cookie", siteCookie("seen", signSeen(keys), domain, isHttps(req)));
+    res.status(204).end();
+  });
+
   router.get(SITES_LIST_PATH, (req, res) => {
     const sites = readVisited(req.headers.cookie, keys).map((site) => ({ site, host: hostOfSite(site, setup) }));
     res.setHeader("Cache-Control", "no-store");
@@ -173,6 +182,8 @@ export function siteHostRouter(setup: SiteSetup, store: AuthStore): Router {
       key: browse ? Buffer.from(keys.label).toString("base64url") : null,
       prefs: { ...readPrefsCookie(req.headers.cookie, keys) },
       instanceSeal: store.sealAddresses(),
+      deepLinkWarning: store.publicAccess() && store.deepLinkWarning(),
+      seen: readSeen(req.headers.cookie, keys),
     };
   };
   const answer = (res: Response, body: SiteConfigAnswer) => {

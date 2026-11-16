@@ -46,6 +46,8 @@ describe("site config", () => {
       key: null,
       prefs: DEFAULT_SITE_PREFS,
       instanceSeal: false,
+      deepLinkWarning: false,
+      seen: false,
     });
     const siteToken = createSiteSessionToken(store.admin()!.id, store.sessionSecret());
     const signedIn = await send("/_g/sites/config", { host: siteA, headers: { cookie: `girici-site=${siteToken}` } });
@@ -60,6 +62,36 @@ describe("site config", () => {
     };
     expect(body.key).toBe(Buffer.from(setup.keys.label).toString("base64url"));
     expect(body.instanceSeal).toBe(true);
+  });
+
+  it("tells site hosts the warning switch, and that a visitor came through the root's UI", async () => {
+    store.setDeepLinkWarning(true);
+    const config = async (cookie?: string) =>
+      (await (await send("/_g/sites/config", { host: siteA, headers: cookie ? { cookie } : {} })).json()) as {
+        deepLinkWarning: boolean;
+        seen: boolean;
+      };
+    expect(await config()).toMatchObject({ deepLinkWarning: true, seen: false });
+    store.setPublicAccess(false);
+    expect((await config()).deepLinkWarning).toBe(false);
+    store.setPublicAccess(true);
+
+    expect((await send("/_g/sites/seen", { host: "proxy.test", method: "POST" })).status).toBe(403);
+    const marked = await send("/_g/sites/seen", {
+      host: "proxy.test",
+      method: "POST",
+      headers: { origin: "https://proxy.test" },
+    });
+    expect(marked.status).toBe(204);
+    expect(marked.cookies[0]).toMatch(
+      /^__Secure-girici-seen=[^;]+; Max-Age=\d+; Domain=proxy\.test; Path=\/_g\/sites;/,
+    );
+    const value = marked.cookies[0]!.split(";")[0]!.split("=").slice(1).join("=");
+    expect((await config(`__Secure-girici-seen=${value}`)).seen).toBe(true);
+    expect((await config("girici-seen=forged.value")).seen).toBe(false);
+    expect(
+      (await send("/_g/sites/seen", { host: siteA, method: "POST", headers: { origin: `https://${siteA}` } })).status,
+    ).toBe(404);
   });
 
   it("reads the settings the root wrote", async () => {

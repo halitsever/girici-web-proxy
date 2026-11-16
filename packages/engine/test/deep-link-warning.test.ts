@@ -93,6 +93,11 @@ describe("DeepLinkWarning", () => {
     expect(html).toContain('<a href="/">Go to Girici&#39;s home page</a>');
   });
 
+  it("links home to the root on a site host", async () => {
+    const html = await (await warning().w.page("/~/https/site-a.test/", target, "https://proxy.test/")).text();
+    expect(html).toContain('<a href="https://proxy.test/">Go to Girici&#39;s home page</a>');
+  });
+
   it("escapes every value it writes into the page", async () => {
     const to = "/~/https/site-a.test/it's?a=1&b=<x>";
     const res = await warning().w.page(to, new URL("https://site-a.test/it's?a=1&b=<x>"));
