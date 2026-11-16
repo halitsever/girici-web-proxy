@@ -49,7 +49,9 @@ export const NO_SCRIPT_TEXT: ScriptText = Object.freeze({
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
 const ELEMENT_NODE = 1;
+const ATTRIBUTE_NODE = 2;
 const TEXT_NODE = 3;
+const CDATA_NODE = 4;
 const DOCUMENT_NODE = 9;
 const FRAGMENT_NODE = 11;
 
@@ -166,7 +168,7 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
    * A connected script that has not run yet runs all of its text once more goes in, so the new text is joined to what
    * it holds and rewritten as one. Text Girici did not write is left alone: it may already be rewritten.
    */
-  const textInto = (nodes: unknown[], target: unknown): void => {
+  const textInto = (nodes: unknown[], target: unknown, first = false): void => {
     if (!data || !isScript(target) || attribute(target, "src") !== null) return;
     const before = ownText(target);
     if (before === null) return;
@@ -194,7 +196,7 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
       for (let child = 0; child < length; child++) if (nodeType(children[child]) === TEXT_NODE) take(children[child]);
     }
     if (added === "") return;
-    const whole = before + added;
+    const whole = first ? added + before : before + added;
     const next = remember(target, kindOf(target), whole);
     if (next === whole && before === "") return;
     // Emptied first, so the script holds only the rewrite once the insertion lands.
@@ -242,10 +244,63 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
     apply(mapSet, records, [script, { __proto__: null, native, original: text, kind } as ScriptRecord]);
     if (native !== text && textContent?.set) apply(textContent.set, script, [native]);
   };
-  hookTypeChanges(win, isScript, attribute, typeChange);
+  const attrChange = hookTypeChanges(win, isScript, attribute, typeChange);
   hookSurroundContents(win, isScript, attribute);
 
-  const hook = (proto: object | undefined, name: string, convert: (value: unknown) => string): void => {
+  /** Changing the data of a script's text runs the script again, so text going into an empty one is rewritten. */
+  const dataInto = (text: unknown, value: string): string => {
+    const type = nodeType(text);
+    if ((type !== TEXT_NODE && type !== CDATA_NODE) || !parentOf || value === "") return value;
+    const script = apply(parentOf, text, []);
+    if (!isScript(script) || attribute(script, "src") !== null || nativeText(script) !== "") return value;
+    return remember(script, kindOf(script), value);
+  };
+  /** The value an Attr or a Text gets through a Node setter. */
+  const nodeWrite = (target: unknown, value: string): string => {
+    if (nodeType(target) === ATTRIBUTE_NODE) attrChange(target, value);
+    return dataInto(target, value);
+  };
+  const characterData = win.CharacterData?.prototype;
+  const dataSetter = characterData && ownDescriptor(characterData, "data");
+  if (characterData && dataSetter?.set) {
+    const set = dataSetter.set;
+    define(characterData, "data", {
+      ...dataSetter,
+      set: maskNative(function (this: unknown, value: unknown) {
+        apply(set, this, [dataInto(this, value === null ? "" : stringOf(value))]);
+      }, set),
+    });
+  }
+  // The string each one inserts, by its position in the call.
+  const edits: Array<[string, number]> = [
+    ["appendData", 0],
+    ["insertData", 1],
+    ["replaceData", 2],
+  ];
+  for (let index = 0; index < edits.length; index++) {
+    const edit = edits[index] as [string, number];
+    const at = edit[1];
+    wrapMethod(characterData, edit[0], function (native, args) {
+      if (args.length > at) args[at] = dataInto(this, stringOf(args[at]));
+      return apply(native, this, args);
+    });
+  }
+  // Only the positions inside the element put text into it.
+  wrapMethod(element, "insertAdjacentText", function (native, args) {
+    if (args.length < 2 || !isScript(this)) return apply(native, this, args);
+    const where = lowerCase((args[0] = stringOf(args[0])));
+    const nodes = [(args[1] = stringOf(args[1]))];
+    if (where === "afterbegin" || where === "beforeend") textInto(nodes, this, where === "afterbegin");
+    args[1] = nodes[0];
+    return apply(native, this, args);
+  });
+
+  const hook = (
+    proto: object | undefined,
+    name: string,
+    convert: (value: unknown) => string,
+    other?: (target: unknown, value: string) => string,
+  ): void => {
     const descriptor = proto && ownDescriptor(proto, name);
     const get = descriptor?.get;
     const set = descriptor?.set;
@@ -258,7 +313,9 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
         return typeof value === "string" ? read(this, value) : value;
       }, get),
       set: maskNative(function (this: unknown, value: unknown) {
-        apply(set, this, [isScript(this) ? write(this, convert(value)) : value]);
+        if (isScript(this)) value = write(this, convert(value));
+        else if (other) value = other(this, convert(value));
+        apply(set, this, [value]);
       }, set),
     });
   };
@@ -266,36 +323,59 @@ export function installScriptText(win: Realm, rewrite: ScriptRewriters): ScriptT
   const toContent = (value: unknown) => (value === null || value === undefined ? "" : stringOf(value));
   const toInnerText = (value: unknown) => (value === null ? "" : stringOf(value));
   const script = win.HTMLScriptElement?.prototype;
-  hook(node, "textContent", toContent);
+  hook(node, "textContent", toContent, nodeWrite);
   hook(win.HTMLElement?.prototype, "innerText", toInnerText);
   // Trusted Types gives script elements their own textContent and innerText, which shadow the two above.
   hook(script, "textContent", toContent);
   hook(script, "innerText", toInnerText);
   hook(script, "text", stringOf);
+  // A script ignores nodeValue, so only Attr and Text nodes see the change.
+  const nodeValue = ownDescriptor(node, "nodeValue");
+  const setValue = nodeValue?.set;
+  if (nodeValue && setValue)
+    define(node, "nodeValue", {
+      ...nodeValue,
+      set: maskNative(function (this: unknown, value: unknown) {
+        apply(setValue, this, [nodeType(this) === 0 ? value : nodeWrite(this, toContent(value))]);
+      }, setValue),
+    });
 
   return { isScript, write, read, check };
 }
 
 type AnyFunction = (this: unknown, ...args: unknown[]) => unknown;
 
-/** The calls that change a script's `type`: its property and the attribute methods named "type". */
+/** Puts `hooked` in place of the method `name`; it gets the native and the call's own argument list. */
+function wrapMethod(
+  proto: object | undefined,
+  name: string,
+  hooked: (this: unknown, native: AnyFunction, args: unknown[]) => unknown,
+): void {
+  const descriptor = proto && ownDescriptor(proto, name);
+  const native = descriptor?.value as AnyFunction | undefined;
+  if (!proto || typeof native !== "function") return;
+  const wrapped = function (this: unknown, ...args: unknown[]): unknown {
+    return apply(hooked, this, [native, args]);
+  };
+  define(proto, name, { ...descriptor, value: maskNative(wrapped, native) });
+}
+
+/**
+ * The calls that change a script's `type`: its property, the attribute methods and the Attr nodes named "type".
+ * Returns the check for an Attr whose value a Node setter changes.
+ */
 function hookTypeChanges(
   win: Realm,
   isScript: (target: unknown) => boolean,
   attribute: (script: unknown, name: string) => string | null,
   change: (script: unknown, next: string | null) => void,
-): void {
+): (attr: unknown, value: string) => void {
   const element = win.Element.prototype;
-  const wrap = (proto: object | undefined, name: string, before: (self: unknown, args: unknown[]) => void) => {
-    const descriptor = proto && ownDescriptor(proto, name);
-    const native = descriptor?.value as AnyFunction | undefined;
-    if (!proto || typeof native !== "function") return;
-    const hooked = function (this: unknown, ...args: unknown[]): unknown {
+  const wrap = (proto: object | undefined, name: string, before: (self: unknown, args: unknown[]) => void) =>
+    wrapMethod(proto, name, function (native, args) {
       if (isScript(this)) before(this, args);
       return apply(native, this, args);
-    };
-    define(proto, name, { ...descriptor, value: maskNative(hooked, native) });
-  };
+    });
   /** Converted once here, so the native call does not run a page's toString a second time. */
   const named = (args: unknown[], index: number): boolean => {
     const name = (args[index] = stringOf(args[index]));
@@ -325,15 +405,103 @@ function hookTypeChanges(
   const script = win.HTMLScriptElement?.prototype;
   const property = script && ownDescriptor(script, "type");
   const set = property?.set;
-  if (!script || !property || !set) return;
-  define(script, "type", {
-    ...property,
-    set: maskNative(function (this: unknown, value: unknown) {
-      const next = stringOf(value);
-      if (isScript(this)) change(this, next);
-      apply(set, this, [next]);
-    }, set),
+  if (script && property && set)
+    define(script, "type", {
+      ...property,
+      set: maskNative(function (this: unknown, value: unknown) {
+        const next = stringOf(value);
+        if (isScript(this)) change(this, next);
+        apply(set, this, [next]);
+      }, set),
+    });
+  return hookTypeNodes(win, change);
+}
+
+/** An Attr node changes a script's `type` through its value, the element's node methods or the attributes map. */
+function hookTypeNodes(win: Realm, change: (script: unknown, next: string | null) => void) {
+  const attr = win.Attr?.prototype;
+  const localNameOf = inheritedGetter(attr, "localName");
+  const namespaceOf = inheritedGetter(attr, "namespaceURI");
+  const ownerOf = inheritedGetter(attr, "ownerElement");
+  const valueOf = inheritedGetter(attr, "value");
+  if (!attr || !localNameOf || !namespaceOf || !ownerOf || !valueOf) return () => {};
+  const isType = (node: unknown): boolean => {
+    try {
+      return apply(namespaceOf, node, []) === null && apply(localNameOf, node, []) === "type";
+    } catch {
+      // Not an Attr: the native call throws for it.
+      return false;
+    }
+  };
+  const owner = (node: unknown) => apply(ownerOf, node, []) as unknown;
+  /** An Attr owned by another element is refused, so only a free one or the element's own changes it. */
+  const attach = (target: unknown, node: unknown): void => {
+    if (!isType(node)) return;
+    const current = owner(node);
+    if (current === null || current === target) change(target, apply(valueOf, node, []) as string);
+  };
+  const element = win.Element.prototype;
+  wrapMethod(element, "setAttributeNode", function (native, args) {
+    attach(this, args[0]);
+    return apply(native, this, args);
   });
+  wrapMethod(element, "setAttributeNodeNS", function (native, args) {
+    attach(this, args[0]);
+    return apply(native, this, args);
+  });
+  wrapMethod(element, "removeAttributeNode", function (native, args) {
+    if (isType(args[0]) && owner(args[0]) === this) change(this, null);
+    return apply(native, this, args);
+  });
+
+  // A map names no element, but every Attr in it does; an empty one holds no type to change from.
+  const map = win.NamedNodeMap?.prototype;
+  const item = map?.item as AnyFunction | undefined;
+  const getNamed = map?.getNamedItem as AnyFunction | undefined;
+  const getNamedNS = map?.getNamedItemNS as AnyFunction | undefined;
+  if (map && item && getNamed && getNamedNS) {
+    const mapOwner = (self: unknown) => {
+      const first = apply(item, self, [0]);
+      return first ? owner(first) : null;
+    };
+    const setNamed = function (this: unknown, native: AnyFunction, args: unknown[]): unknown {
+      const target = mapOwner(this);
+      if (target) attach(target, args[0]);
+      return apply(native, this, args);
+    };
+    wrapMethod(map, "setNamedItem", setNamed);
+    wrapMethod(map, "setNamedItemNS", setNamed);
+    wrapMethod(map, "removeNamedItem", function (native, args) {
+      if (args.length > 0) {
+        const found = apply(getNamed, this, [(args[0] = stringOf(args[0]))]);
+        if (found && isType(found)) change(owner(found), null);
+      }
+      return apply(native, this, args);
+    });
+    wrapMethod(map, "removeNamedItemNS", function (native, args) {
+      const plain = args[0] === null || args[0] === undefined || args[0] === "";
+      if (args.length > 1 && plain && (args[1] = stringOf(args[1])) === "type") {
+        const found = apply(getNamedNS, this, [null, "type"]);
+        if (found) change(owner(found), null);
+      }
+      return apply(native, this, args);
+    });
+  }
+
+  const value = ownDescriptor(attr, "value");
+  const set = value?.set;
+  if (value && set)
+    define(attr, "value", {
+      ...value,
+      set: maskNative(function (this: unknown, next: unknown) {
+        const text = stringOf(next);
+        if (isType(this)) change(owner(this), text);
+        apply(set, this, [text]);
+      }, set),
+    });
+  return (node: unknown, next: string): void => {
+    if (isType(node)) change(owner(node), next);
+  };
 }
 
 /**

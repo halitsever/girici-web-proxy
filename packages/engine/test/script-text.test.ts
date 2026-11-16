@@ -38,6 +38,12 @@ function fakeDom() {
       self.writtenAs?.push(self.attributes?.type ?? null);
       this.stored = String(value);
     }
+    get nodeValue(): string | null {
+      return this.kind === 1 ? null : this.stored;
+    }
+    set nodeValue(value: string) {
+      if (this.kind !== 1) this.stored = String(value);
+    }
   }
   class FakeCharacterData extends FakeNode {
     get data(): string {
@@ -45,6 +51,87 @@ function fakeDom() {
     }
     set data(value: string) {
       this.stored = String(value);
+    }
+    appendData(value: string): void {
+      this.stored += value;
+    }
+    insertData(offset: number, value: string): void {
+      this.stored = this.stored.slice(0, offset) + value + this.stored.slice(offset);
+    }
+    replaceData(offset: number, count: number, value: string): void {
+      this.stored = this.stored.slice(0, offset) + value + this.stored.slice(offset + count);
+    }
+  }
+  /** Its value lives in the owner's attributes while it has one. */
+  class FakeAttr extends FakeNode {
+    readonly name: string;
+    owner: FakeElement | null;
+    loose = "";
+    constructor(name: string, owner: FakeElement | null = null) {
+      super(2);
+      this.name = name;
+      this.owner = owner;
+      Object.defineProperty(this, "stored", {
+        get: () => (this.owner ? (this.owner.attributes[this.name] ?? "") : this.loose),
+        set: (value: string) => {
+          if (this.owner) this.owner.attributes[this.name] = value;
+          else this.loose = value;
+        },
+      });
+    }
+    get localName(): string {
+      return this.name;
+    }
+    get namespaceURI(): null {
+      return null;
+    }
+    get ownerElement(): FakeElement | null {
+      return this.owner;
+    }
+    get value(): string {
+      return this.stored;
+    }
+    set value(value: string) {
+      this.stored = String(value);
+    }
+  }
+  const attach = (owner: FakeElement, attr: FakeAttr) => {
+    const value = attr.stored;
+    attr.owner = owner;
+    attr.stored = value;
+  };
+  const detach = (attr: FakeAttr) => {
+    attr.loose = attr.stored;
+    if (attr.owner) delete attr.owner.attributes[attr.name];
+    attr.owner = null;
+  };
+  class FakeNamedNodeMap {
+    readonly #owner: FakeElement;
+    constructor(owner: FakeElement) {
+      this.#owner = owner;
+    }
+    item(index: number): FakeAttr | null {
+      const name = Object.keys(this.#owner.attributes)[index];
+      return name === undefined ? null : new FakeAttr(name, this.#owner);
+    }
+    getNamedItem(name: string): FakeAttr | null {
+      return this.#owner.getAttributeNode(name);
+    }
+    getNamedItemNS(_namespace: string | null, name: string): FakeAttr | null {
+      return this.#owner.getAttributeNode(name);
+    }
+    // Each calls the element's own steps directly, as the browser does, not its hooked methods.
+    setNamedItem(attr: FakeAttr): void {
+      attach(this.#owner, attr);
+    }
+    setNamedItemNS(attr: FakeAttr): void {
+      attach(this.#owner, attr);
+    }
+    removeNamedItem(name: string): void {
+      if (name in this.#owner.attributes) detach(new FakeAttr(name, this.#owner));
+    }
+    removeNamedItemNS(_namespace: string | null, name: string): void {
+      if (name in this.#owner.attributes) detach(new FakeAttr(name, this.#owner));
     }
   }
   class FakeText extends FakeCharacterData {
@@ -99,6 +186,27 @@ function fakeDom() {
     }
     querySelectorAll(): FakeNodeList {
       return scriptsIn(this.children);
+    }
+    /** Stands in for the `attributes` map, which the fake keeps as a plain record. */
+    namedMap(): FakeNamedNodeMap {
+      return new FakeNamedNodeMap(this);
+    }
+    getAttributeNode(name: string): FakeAttr | null {
+      return name in this.attributes ? new FakeAttr(name, this) : null;
+    }
+    setAttributeNode(attr: FakeAttr): void {
+      attach(this, attr);
+    }
+    setAttributeNodeNS(attr: FakeAttr): void {
+      attach(this, attr);
+    }
+    removeAttributeNode(attr: FakeAttr): void {
+      detach(attr);
+    }
+    /** The script's text stands in for its children, so only the inner positions change it. */
+    insertAdjacentText(where: string, text: string): void {
+      if (where.toLowerCase() === "beforeend") this.stored += String(text);
+      if (where.toLowerCase() === "afterbegin") this.stored = String(text) + this.stored;
     }
   }
   class FakeHTMLElement extends FakeElement {
@@ -157,6 +265,8 @@ function fakeDom() {
     HTMLScriptElement: FakeHTMLScriptElement,
     DocumentFragment: FakeDocumentFragment,
     NodeList: FakeNodeList,
+    Attr: FakeAttr,
+    NamedNodeMap: FakeNamedNodeMap,
   } as unknown as Realm;
   const scripts = installScriptText(win, {
     classic: (code) => `[js:${code}]`,
@@ -189,6 +299,11 @@ function fakeDom() {
       return text;
     },
     nativeText: (node: FakeNode) => node.stored,
+    attr(name: string, value: string) {
+      const attr = new FakeAttr(name) as FakeAttr & { textContent: string; nodeValue: string };
+      attr.loose = value;
+      return attr;
+    },
   };
   return { dom, scripts: scripts as ScriptText, protos: { FakeElement, FakeNode, FakeCharacterData } };
 }
@@ -384,6 +499,91 @@ describe("installScriptText", () => {
     expect(() => stays.setAttribute("type", symbol)).toThrow(TypeError);
     expect(() => (stays.type = symbol)).toThrow(TypeError);
     expect(() => (stays.text = symbol)).toThrow(TypeError);
+  });
+
+  it("rewrites a connected data block whose type changes through an Attr node", () => {
+    const { dom } = fakeDom();
+    type Script = ReturnType<typeof dom.script>;
+    const typeNode = (script: Script) => script.getAttributeNode("type") as ReturnType<typeof dom.attr>;
+    const switches: Array<[string, (script: Script) => void, string]> = [
+      ["removeNamedItem", (script) => script.namedMap().removeNamedItem("type"), "[js:x]"],
+      ["removeNamedItemNS", (script) => script.namedMap().removeNamedItemNS(null, "type"), "[js:x]"],
+      ["setNamedItem", (script) => script.namedMap().setNamedItem(dom.attr("type", "module")), "[mod:x]"],
+      ["setNamedItemNS", (script) => script.namedMap().setNamedItemNS(dom.attr("type", "")), "[js:x]"],
+      ["setAttributeNode", (script) => script.setAttributeNode(dom.attr("type", "module")), "[mod:x]"],
+      ["setAttributeNodeNS", (script) => script.setAttributeNodeNS(dom.attr("type", "")), "[js:x]"],
+      ["removeAttributeNode", (script) => script.removeAttributeNode(typeNode(script)), "[js:x]"],
+      ["Attr.value", (script) => (typeNode(script).value = ""), "[js:x]"],
+      ["Attr.nodeValue", (script) => (typeNode(script).nodeValue = "module"), "[mod:x]"],
+      ["Attr.textContent", (script) => (typeNode(script).textContent = "text/javascript"), "[js:x]"],
+    ];
+    for (const [name, change, native] of switches) {
+      const script = dom.script({ connected: true, type: "text/plain", stored: "x" });
+      change(script);
+      expect(dom.nativeText(script), name).toBe(native);
+      expect(script.writtenAs, name).toEqual(["text/plain"]);
+      expect(script.textContent, name).toBe("x");
+    }
+    // Owned by another element, the native call refuses it.
+    const other = dom.script({ connected: true, type: "module" });
+    const taken = dom.script({ connected: true, type: "text/plain", stored: "x" });
+    taken.setAttributeNode(other.getAttributeNode("type") as never);
+    const data = dom.script({ connected: true, type: "text/plain", stored: "x" });
+    data.namedMap().setNamedItem(dom.attr("type", "application/json"));
+    (data.getAttributeNode("type") as ReturnType<typeof dom.attr>).value = "text/x-template";
+    expect([dom.nativeText(taken), dom.nativeText(data)]).toEqual(["x", "x"]);
+  });
+
+  it("rewrites text inserted into a script by insertAdjacentText", () => {
+    const { dom } = fakeDom();
+    const empty = dom.script({ connected: true });
+    empty.insertAdjacentText("BeforeEnd", "location");
+    expect(dom.nativeText(empty)).toBe("[js:location]");
+    expect(empty.textContent).toBe("location");
+    const own = dom.script({ connected: true });
+    own.text = ".href";
+    own.insertAdjacentText("afterbegin", "location");
+    expect(dom.nativeText(own)).toBe("[js:location.href]");
+    expect(own.text).toBe("location.href");
+    const outside = dom.script({ connected: true });
+    outside.insertAdjacentText("beforebegin", "location");
+    const data = dom.script({ connected: true, type: "application/json" });
+    data.insertAdjacentText("beforeend", '{"a":1}');
+    expect([dom.nativeText(outside), dom.nativeText(data)]).toEqual(["", '{"a":1}']);
+  });
+
+  it("rewrites text set into the empty text node of a script", () => {
+    const { dom } = fakeDom();
+    type Text = ReturnType<typeof dom.text> & { nodeValue: string; textContent: string };
+    const changes: Array<[string, (text: Text) => void]> = [
+      ["data", (text) => (text.data = "location")],
+      ["nodeValue", (text) => (text.nodeValue = "location")],
+      ["textContent", (text) => (text.textContent = "location")],
+      ["appendData", (text) => text.appendData("location")],
+      ["insertData", (text) => text.insertData(0, "location")],
+      ["replaceData", (text) => text.replaceData(0, 0, "location")],
+    ];
+    for (const [name, change] of changes) {
+      const script = dom.script({ connected: true });
+      const text = dom.text("") as Text;
+      text.parent = script;
+      change(text);
+      expect(dom.nativeText(text), name).toBe("[js:location]");
+      // The text the script then holds.
+      script.stored = text.stored;
+      expect(script.textContent, name).toBe("location");
+    }
+    const full = dom.script({ connected: true, stored: "a" });
+    const inFull = dom.text("a");
+    inFull.parent = full;
+    inFull.appendData("b");
+    const loose = dom.text("") as Text;
+    loose.data = "location";
+    const block = dom.script({ connected: true, type: "application/json" });
+    const inBlock = dom.text("") as Text;
+    inBlock.parent = block;
+    inBlock.data = "location";
+    expect([inFull.stored, loose.stored, inBlock.stored]).toEqual(["ab", "location", "location"]);
   });
 
   it("ignores values that are not nodes", () => {
