@@ -242,7 +242,9 @@ export function createWindowGuard(
       if ((value as { location: { href: string } }).location.href !== "about:blank") return undefined;
       const element = apply(frameElementOf, value, []) as Element | null;
       if (!element || apply(getAttribute, element, ["srcdoc"]) !== null) return undefined;
-      return openedOrigin(apply(getAttribute, element, ["src"]), ctx.origin, ctx.realBase());
+      // An object names its page in data, every other frame element in src.
+      const address = apply(getAttribute, element, ["src"]) ?? apply(getAttribute, element, ["data"]);
+      return openedOrigin(address, ctx.origin, ctx.realBase());
     } catch {
       return undefined;
     }
