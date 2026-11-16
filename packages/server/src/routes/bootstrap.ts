@@ -1,5 +1,13 @@
 import { labelSiteOf } from "@girici/engine/label-site";
-import { decodeUrl, DEFAULT_LANG, escapeAttribute, siteLabel, type Lang, type SiteDomain } from "@girici/engine/shared";
+import {
+  decodeUrl,
+  DEFAULT_LANG,
+  directionOf,
+  escapeAttribute,
+  siteLabel,
+  type Lang,
+  type SiteDomain,
+} from "@girici/engine/shared";
 import express, { Router, type Request, type Response } from "express";
 import { siteSessionAdmin } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
@@ -10,7 +18,7 @@ import type { SiteSetup } from "../sites/keys.ts";
 function bootPage(lang: Lang): string {
   const text = serverText(lang);
   return `<!doctype html>
-<html lang="${lang}">
+<html lang="${lang}" dir="${directionOf(lang)}">
   <head>
     <meta charset="utf-8" />
     <title>Girici</title>

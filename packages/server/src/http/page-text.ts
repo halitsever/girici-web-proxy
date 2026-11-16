@@ -1,5 +1,15 @@
 import { parseAcceptLanguage, pickLanguage, textFor, type Catalogs, type Lang } from "@girici/engine/shared";
 import type { Request } from "express";
+import { serverText as es } from "./locales/es.ts";
+import { serverText as ptBR } from "./locales/pt-BR.ts";
+import { serverText as fr } from "./locales/fr.ts";
+import { serverText as de } from "./locales/de.ts";
+import { serverText as ru } from "./locales/ru.ts";
+import { serverText as fa } from "./locales/fa.ts";
+import { serverText as ar } from "./locales/ar.ts";
+import { serverText as zhCN } from "./locales/zh-CN.ts";
+import { serverText as id } from "./locales/id.ts";
+import { serverText as vi } from "./locales/vi.ts";
 
 /** Plain text, since the HTML pages place it as written. */
 export interface ServerText {
@@ -32,6 +42,16 @@ export const SERVER_TEXT: Catalogs<ServerText> = {
       "Siteyi Girici'den yeniden açın.",
     clearing: "Site verileri temizleniyor…",
   },
+  es,
+  "pt-BR": ptBR,
+  fr,
+  de,
+  ru,
+  fa,
+  ar,
+  "zh-CN": zhCN,
+  id,
+  vi,
 };
 
 /**

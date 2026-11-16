@@ -1,6 +1,16 @@
 import type { Catalogs } from "../shared/i18n/catalog.ts";
 import type { PluralForms } from "../shared/i18n/text.ts";
 import type { RelayErrorCode } from "../shared/protocol.ts";
+import { pageText as es } from "./locales/es.ts";
+import { pageText as ptBR } from "./locales/pt-BR.ts";
+import { pageText as fr } from "./locales/fr.ts";
+import { pageText as de } from "./locales/de.ts";
+import { pageText as ru } from "./locales/ru.ts";
+import { pageText as fa } from "./locales/fa.ts";
+import { pageText as ar } from "./locales/ar.ts";
+import { pageText as zhCN } from "./locales/zh-CN.ts";
+import { pageText as id } from "./locales/id.ts";
+import { pageText as vi } from "./locales/vi.ts";
 
 /** A runtime that failed verification, or an address this browser cannot open, is not a relay error. */
 export type ErrorPageCode = RelayErrorCode | "runtime" | "sealed";
@@ -89,4 +99,4 @@ const tr: PageText = {
   warningHome: "Girici ana sayfasına git",
 };
 
-export const PAGE_TEXT: Catalogs<PageText> = { en, tr };
+export const PAGE_TEXT: Catalogs<PageText> = { en, tr, es, "pt-BR": ptBR, fr, de, ru, fa, ar, "zh-CN": zhCN, id, vi };

@@ -1,5 +1,5 @@
 import { textFor } from "../shared/i18n/catalog.ts";
-import { DEFAULT_LANG, type Lang } from "../shared/i18n/languages.ts";
+import { DEFAULT_LANG, directionOf, type Lang } from "../shared/i18n/languages.ts";
 import { fill } from "../shared/i18n/text.ts";
 import { CONTINUE_PATH } from "../shared/protocol.ts";
 import { fromBase64Url, toBase64Url } from "../shared/seal-cipher.ts";
@@ -135,7 +135,7 @@ function warningPage(to: string, t: string, target: URL, home: string, lang: Lan
   const text = textFor(PAGE_TEXT, lang);
   const say = (template: string) => escapeHtml(fill(template, { host: target.host }));
   return `<!doctype html>
-<html lang="${lang}">
+<html lang="${lang}" dir="${directionOf(lang)}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
