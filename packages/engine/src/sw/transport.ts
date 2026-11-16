@@ -22,9 +22,11 @@ const CONNECT_ERROR: TransportResult = { ok: false, code: "connect", status: 502
 
 export class HttpRelayTransport implements Transport {
   readonly #fetch: FetchLike;
+  readonly #abortOnCancel: boolean;
 
-  constructor(fetchImpl: FetchLike = (url, init) => fetch(url, init)) {
+  constructor(fetchImpl: FetchLike = (url, init) => fetch(url, init), abortOnCancel = isFirefox()) {
     this.#fetch = fetchImpl;
+    this.#abortOnCancel = abortOnCancel;
   }
 
   async send(request: Request, ctx: RelayContext & { cookie: string | null }): Promise<TransportResult> {
@@ -49,14 +51,19 @@ export class HttpRelayTransport implements Transport {
           status: Number(relay.headers.get(HEADER.status) ?? relay.status),
           headers: decodeHeaderList(relay.headers.get(HEADER.headers) ?? ""),
           setCookies: setCookie ? decodeHeaderList(setCookie).map(([, value]) => value) : [],
-          // Navigations keep the native body: if Firefox stops an idle worker mid-download, a wrapped body ends as if complete.
-          body: relay.body && !ctx.isNavigation ? abortOnCancel(relay.body, abort) : relay.body,
+          // A stopped Firefox worker ends a wrapped body as if complete, so navigations keep the native one. Media keeps
+          // the wrapper: each seek cancels a body, and the element asks again for any range it still lacks.
+          body: relay.body && this.#abortOnCancel && !ctx.isNavigation ? abortOnCancel(relay.body, abort) : relay.body,
         },
       };
     } catch {
       return CONNECT_ERROR;
     }
   }
+}
+
+function isFirefox(): boolean {
+  return typeof navigator !== "undefined" && /\bFirefox\//.test(navigator.userAgent);
 }
 
 function followAbort(signal: AbortSignal): AbortController {
