@@ -44,26 +44,26 @@ describe("openInstanceTools", () => {
   it("wires no bandwidth check while both budgets are off", () => {
     const { app, ws } = tools();
     expect(app.bandwidthGate).toBeUndefined();
-    expect(ws.allowFrame).toBeUndefined();
+    expect(ws.meterFrame).toBeUndefined();
     expect(ws.upgradeGates).toHaveLength(1);
   });
 
   it("runs the browser check before the bandwidth gate on a WebSocket upgrade", () => {
     const { ws, store } = tools({ bandwidthLimit: 1000 });
     store.setProofOfWork(true);
-    ws.observer.bytes("k", 5000, "down");
+    ws.meterFrame?.("k", 5000);
     expect(ws.upgradeGates.map((gate) => gate(visitor, "k"))).toEqual([
       { code: "challenge", status: 403 },
       { code: "quota", status: 429, retryAfter: expect.any(Number) },
     ]);
   });
 
-  it("feeds one meter from the relay observer to the HTTP gate and the frame check", async () => {
+  it("shares one meter between the frame check and the HTTP gate", async () => {
     const { app, ws, store } = tools({ dailyQuota: 1000 });
     const key = clientKey("127.0.0.1");
-    expect(ws.allowFrame?.(key)).toBe(true);
+    expect(ws.meterFrame?.(key, 0)).toBe(true);
+    expect(ws.meterFrame?.(key, 5000)).toBe(false);
     ws.observer.bytes(key, 5000, "down");
-    expect(ws.allowFrame?.(key)).toBe(false);
 
     const dir = mkdtempSync(join(tmpdir(), "girici-tools-"));
     const server: Server = createServer(

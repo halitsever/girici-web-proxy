@@ -6,7 +6,7 @@ import { createSessionToken, SESSION_COOKIE } from "../src/auth/cookie.ts";
 import { AuthStore } from "../src/auth/store.ts";
 import { openDb } from "../src/db/open.ts";
 import { createLogger } from "../src/log.ts";
-import { bandwidthUpgradeGate, ByteMeter, meterObserver } from "../src/http/bandwidth.ts";
+import { bandwidthUpgradeGate, ByteMeter } from "../src/http/bandwidth.ts";
 import { compileTrust } from "../src/http/client-ip.ts";
 import { tokenBucket } from "../src/http/rate-limit.ts";
 import type { RelayObserver } from "../src/http/relay-observer.ts";
@@ -429,7 +429,7 @@ describe("open-instance seams", () => {
     const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
     store.setPublicAccess(true);
     let allowed = true;
-    const url = await relayServer(await echoUpstream(), { authStore: store, allowFrame: () => allowed });
+    const url = await relayServer(await echoUpstream(), { authStore: store, meterFrame: () => allowed });
     const ws = connect(url, originOf(url));
     await opened(ws);
     ws.send(JSON.stringify({ u: "ws://ws.test/" }));
@@ -527,8 +527,7 @@ describe("open-instance seams", () => {
     const url = await relayServer(await echoUpstream(), {
       authStore: store,
       upgradeGates: [bandwidthUpgradeGate({ meter, store })],
-      allowFrame: (key) => meter.check(key).ok,
-      observer: meterObserver(meter),
+      meterFrame: (key, bytes) => meter.spend(key, bytes),
     });
     const ws = connect(url, originOf(url));
     await opened(ws);
@@ -551,6 +550,24 @@ describe("open-instance seams", () => {
     expect((await openMessage(own)).t).toBe("open");
     own.send("y".repeat(1000));
     expect(await nextMessage(own)).toBe("y".repeat(1000));
+  });
+
+  it("does not count the admin's frames against their address", async () => {
+    const store = new AuthStore(openDb(":memory:"));
+    const admin = store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
+    store.setPublicAccess(true);
+    const meter = new ByteMeter({ perMinute: 64, perDay: 0 });
+    const url = await relayServer(await echoUpstream(), {
+      authStore: store,
+      meterFrame: (key, bytes) => meter.spend(key, bytes),
+    });
+    const own = connect(url, originOf(url), `${SESSION_COOKIE}=${createSessionToken(admin.id, store.sessionSecret())}`);
+    await opened(own);
+    own.send(JSON.stringify({ u: "ws://ws.test/" }));
+    expect((await openMessage(own)).t).toBe("open");
+    own.send("y".repeat(1000));
+    expect(await nextMessage(own)).toBe("y".repeat(1000));
+    expect(meter.size).toBe(0);
   });
 });
 

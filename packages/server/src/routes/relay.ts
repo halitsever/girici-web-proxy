@@ -3,10 +3,11 @@ import { pipeline } from "node:stream/promises";
 import { encodeHeaderList, HEADER, targetFromRelayPath } from "@girici/engine/shared";
 import { Router, type Request, type Response } from "express";
 import { request, type Dispatcher } from "undici";
+import { spendOf } from "../http/bandwidth.ts";
 import { clientKey } from "../http/client-ip.ts";
 import { isOwnHost } from "../http/origin.ts";
 import { sendRelayError } from "../http/relay-error.ts";
-import { ByteCounter, NO_OBSERVER, type RelayObserver } from "../http/relay-observer.ts";
+import { ByteCounter, type Direction, NO_OBSERVER, type RelayObserver } from "../http/relay-observer.ts";
 import type { Logger } from "../log.ts";
 import type { HostBlocklist } from "../upstream/blocklist.ts";
 import { RelayRequestError, relayErrorFor } from "../upstream/errors.ts";
@@ -67,6 +68,11 @@ async function relay(
 
   const observer = options.observer ?? NO_OBSERVER;
   const key = clientKey(req.ip ?? "?");
+  const spend = spendOf(res);
+  const count = (bytes: number, direction: Direction): boolean => {
+    observer.bytes(key, bytes, direction);
+    return spend === undefined || spend(bytes);
+  };
   const controller = new AbortController();
   res.on("close", () => {
     if (!res.writableFinished) controller.abort();
@@ -80,7 +86,7 @@ async function relay(
     const body =
       method === "GET" || method === "HEAD"
         ? undefined
-        : req.pipe(new ByteLimit(options.maxRequestBody, (bytes) => observer.bytes(key, bytes, "up")));
+        : req.pipe(new ByteLimit(options.maxRequestBody, (bytes) => count(bytes, "up")));
     const headers = buildUpstreamHeaders(req.headers);
     // Presigned storage URLs and many other upload endpoints refuse chunked bodies.
     const length = req.get("content-length");
@@ -114,10 +120,15 @@ async function relay(
       res.end();
       return;
     }
-    await pipeline(upstream.body, new ByteCounter((bytes) => observer.bytes(key, bytes, "down")), res);
+    await pipeline(upstream.body, new ByteCounter((bytes) => count(bytes, "down")), res);
   } catch (error) {
-    if (controller.signal.aborted) return;
     const { code, status } = relayErrorFor(error);
+    // A network error, so the browser never takes a cut-off body for a whole one.
+    if (code === "quota") {
+      res.destroy();
+      return;
+    }
+    if (controller.signal.aborted) return;
     options.logger.debug(`relay ${code} ${target.host}`);
     onProxyFailure(error);
     if (res.headersSent) {
@@ -144,9 +155,9 @@ function relayStatus(status: number): number {
 class ByteLimit extends Transform {
   #seen = 0;
   readonly #limit: number;
-  readonly #count: ((bytes: number) => void) | undefined;
+  readonly #count: (bytes: number) => boolean;
 
-  constructor(limit: number, count?: (bytes: number) => void) {
+  constructor(limit: number, count: (bytes: number) => boolean) {
     super();
     this.#limit = limit;
     this.#count = count;
@@ -154,8 +165,8 @@ class ByteLimit extends Transform {
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
     this.#seen += chunk.length;
-    this.#count?.(chunk.length);
-    if (this.#seen > this.#limit) callback(new RelayRequestError("too_large", 413));
+    if (!this.#count(chunk.length)) callback(new RelayRequestError("quota", 429));
+    else if (this.#seen > this.#limit) callback(new RelayRequestError("too_large", 413));
     else callback(null, chunk);
   }
 }

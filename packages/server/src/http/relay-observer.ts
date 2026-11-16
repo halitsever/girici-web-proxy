@@ -1,6 +1,7 @@
 import { Transform, type TransformCallback } from "node:stream";
 import { HEADER, type RelayErrorCode } from "@girici/engine/shared";
 import type { RequestHandler } from "express";
+import { RelayRequestError } from "../upstream/errors.ts";
 
 export type RelayKind = "http" | "ws";
 export type Direction = "down" | "up";
@@ -45,16 +46,17 @@ export function relayAnswers(observer: RelayObserver): RequestHandler {
   };
 }
 
+/** Fails the stream instead of passing a chunk once count answers false. */
 export class ByteCounter extends Transform {
-  readonly #count: (bytes: number) => void;
+  readonly #count: (bytes: number) => boolean;
 
-  constructor(count: (bytes: number) => void) {
+  constructor(count: (bytes: number) => boolean) {
     super();
     this.#count = count;
   }
 
   override _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-    this.#count(chunk.length);
-    callback(null, chunk);
+    if (this.#count(chunk.length)) callback(null, chunk);
+    else callback(new RelayRequestError("quota", 429));
   }
 }

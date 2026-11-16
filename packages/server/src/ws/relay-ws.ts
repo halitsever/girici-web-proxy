@@ -72,8 +72,8 @@ export interface WsRelayOptions {
   observer?: RelayObserver;
   /** Run in order after the auth check and before the rate limiter; the first refusal answers the upgrade. */
   upgradeGates?: readonly UpgradeGate[];
-  /** Asked after each frame is counted; false closes the client with 1008 "quota". The admin is never cut. */
-  allowFrame?: (key: string) => boolean;
+  /** Counts each frame against its client's budget; false closes the client with 1008 "quota". Skipped for the admin. */
+  meterFrame?: (key: string, bytes: number) => boolean;
 }
 
 export interface WsRelayHandle {
@@ -90,7 +90,7 @@ interface BridgeOptions extends WsRelayOptions {
   observer: RelayObserver;
 }
 
-/** One client socket: its rate-limit key, and whether allowFrame may cut it. */
+/** One client socket: its rate-limit key, and whether meterFrame counts and may cut it. */
 interface Connection {
   key: string;
   limited: boolean;
@@ -297,9 +297,9 @@ export function attachWsRelay(server: Server, options: WsRelayOptions): WsRelayH
       refuse(socket, 429, 1);
       return;
     }
-    // Checked once here, so an admin's socket is never cut mid-stream.
+    // Checked once here, so an admin's socket is never counted or cut.
     const limited =
-      options.allowFrame !== undefined && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie));
+      options.meterFrame !== undefined && !(options.authStore && isAdminCookie(options.authStore, req.headers.cookie));
     wss.handleUpgrade(req, socket, head, (client) => {
       // Counted only once upgraded: a handshake ws rejects never reaches this callback to give its slot back.
       if (!perClient.take(ip, maxPerIp)) {
@@ -425,11 +425,11 @@ function connectUpstream(
   upstream.once("upgrade", (res: IncomingMessage) => {
     setCookies = res.headers["set-cookie"] ?? [];
   });
-  const allowFrame = options.allowFrame;
-  /** Counts first, so the frame that crosses a budget still costs its bytes, and is then dropped, not relayed. */
+  const meterFrame = options.meterFrame;
+  /** The frame that crosses a budget still costs its bytes, and is then dropped, not relayed. */
   const passes = (bytes: number, direction: Direction): boolean => {
     options.observer.bytes(conn.key, bytes, direction);
-    if (!conn.limited || !allowFrame || allowFrame(conn.key)) return true;
+    if (!conn.limited || !meterFrame || meterFrame(conn.key, bytes)) return true;
     client.close(1008, "quota");
     return false;
   };

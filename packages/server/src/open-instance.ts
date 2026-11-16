@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { AppOptions } from "./app.ts";
 import type { AuthStore } from "./auth/store.ts";
 import type { Config } from "./config.ts";
-import { bandwidthGate, bandwidthUpgradeGate, ByteMeter, meterObserver } from "./http/bandwidth.ts";
+import { bandwidthGate, bandwidthUpgradeGate, ByteMeter } from "./http/bandwidth.ts";
 import { observeAll, type RelayObserver } from "./http/relay-observer.ts";
 import type { Logger } from "./log.ts";
 import { powGate, powUpgradeGate } from "./pow/gate.ts";
@@ -16,7 +16,7 @@ import type { UpgradeGate, WsRelayOptions } from "./ws/relay-ws.ts";
 export interface OpenInstanceTools {
   app: Required<Pick<AppOptions, "observer" | "powGate" | "powRouter" | "statusRouter">> &
     Pick<AppOptions, "bandwidthGate" | "metricsRouter">;
-  ws: Required<Pick<WsRelayOptions, "observer" | "upgradeGates">> & Pick<WsRelayOptions, "allowFrame">;
+  ws: Required<Pick<WsRelayOptions, "observer" | "upgradeGates">> & Pick<WsRelayOptions, "meterFrame">;
   /** Stopped before the database closes, since the last write goes there. */
   statsFlush: StatsFlush;
 }
@@ -53,10 +53,7 @@ export function openInstanceTools({
     config.bandwidthLimit > 0 || config.dailyQuota > 0
       ? new ByteMeter({ perMinute: config.bandwidthLimit, perDay: config.dailyQuota })
       : null;
-  if (meter) {
-    observers.push(meterObserver(meter));
-    upgradeGates.push(bandwidthUpgradeGate({ meter, store }));
-  }
+  if (meter) upgradeGates.push(bandwidthUpgradeGate({ meter, store }));
 
   const observer = observeAll(observers);
   return {
@@ -78,7 +75,7 @@ export function openInstanceTools({
         },
       }),
     },
-    ws: { observer, upgradeGates, allowFrame: meter ? (key) => meter.check(key).ok : undefined },
+    ws: { observer, upgradeGates, meterFrame: meter ? (key, bytes) => meter.spend(key, bytes) : undefined },
     statsFlush,
   };
 }

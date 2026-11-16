@@ -33,9 +33,20 @@ describe("ByteCounter", () => {
   it("passes chunks through unchanged and counts their bytes", async () => {
     const counts: number[] = [];
     const out = Readable.from([Buffer.from("hello "), Buffer.from("world")]).pipe(
-      new ByteCounter((bytes) => counts.push(bytes)),
+      new ByteCounter((bytes) => counts.push(bytes) > 0),
     );
     expect(await text(out)).toBe("hello world");
     expect(counts).toEqual([6, 5]);
+  });
+
+  it("fails without passing the chunk the count refuses", async () => {
+    const passed: string[] = [];
+    const counter = new ByteCounter((bytes) => bytes < 5);
+    counter.on("data", (chunk: Buffer) => passed.push(chunk.toString()));
+    const failed = new Promise((resolve) => counter.once("error", resolve));
+    counter.write(Buffer.from("ab"));
+    counter.write(Buffer.from("world"));
+    expect(await failed).toMatchObject({ code: "quota" });
+    expect(passed).toEqual(["ab"]);
   });
 });

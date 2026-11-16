@@ -1,9 +1,8 @@
-import type { RequestHandler } from "express";
+import type { RequestHandler, Response } from "express";
 import { isAdminCookie } from "../auth/gate.ts";
 import type { AuthStore } from "../auth/store.ts";
 import type { UpgradeGate } from "../ws/relay-ws.ts";
 import { clientKey } from "./client-ip.ts";
-import { NO_OBSERVER, type RelayObserver } from "./relay-observer.ts";
 import { sendRelayError } from "./relay-error.ts";
 
 export type MeterResult = { ok: true } | { ok: false; retryAfter: number; scope: "minute" | "day" };
@@ -66,9 +65,24 @@ export class ByteMeter {
   }
 
   add(key: string, bytes: number): void {
-    if (this.#perMinute === 0 && this.#perDay === 0) return;
     const at = this.#now();
     this.#sweep(at);
+    this.#record(key, bytes, at);
+  }
+
+  /** Counts and answers in one step without a sweep, since it runs on every relayed chunk. */
+  spend(key: string, bytes: number): boolean {
+    const usage = this.#record(key, bytes, this.#now());
+    if (!usage) return true;
+    return (this.#perMinute === 0 || usage.tokens > 0) && (this.#perDay === 0 || usage.used < this.#perDay);
+  }
+
+  get size(): number {
+    return this.#usage.size;
+  }
+
+  #record(key: string, bytes: number, at: number): Usage | null {
+    if (this.#perMinute === 0 && this.#perDay === 0) return null;
     const today = dayOf(at);
     let usage = this.#usage.get(key);
     if (!usage) {
@@ -86,10 +100,7 @@ export class ByteMeter {
       }
       usage.used += bytes;
     }
-  }
-
-  get size(): number {
-    return this.#usage.size;
+    return usage;
   }
 
   #refilled(usage: Usage, at: number): number {
@@ -114,16 +125,30 @@ interface GateOptions {
   store: AuthStore;
 }
 
-/** The admin is never refused, so the session is checked only once the meter says no. */
+/** Counts a relayed chunk against its client's budget; false means the transfer must stop. */
+export type Spend = (bytes: number) => boolean;
+
+/** Set by bandwidthGate on every request it lets through except the admin's. */
+export function spendOf(res: Response): Spend | undefined {
+  return res.locals.spend as Spend | undefined;
+}
+
+/** The admin is neither refused nor counted, so visitors sharing their address keep their own budget. */
 export function bandwidthGate({ meter, store }: GateOptions): RequestHandler {
   return (req, res, next) => {
-    const result = meter.check(clientKey(req.ip ?? "?"));
-    if (result.ok || isAdminCookie(store, req.headers.cookie)) {
+    if (isAdminCookie(store, req.headers.cookie)) {
       next();
       return;
     }
-    res.setHeader("Retry-After", String(result.retryAfter));
-    sendRelayError(res, "quota", 429);
+    const key = clientKey(req.ip ?? "?");
+    const result = meter.check(key);
+    if (!result.ok) {
+      res.setHeader("Retry-After", String(result.retryAfter));
+      sendRelayError(res, "quota", 429);
+      return;
+    }
+    res.locals.spend = ((bytes) => meter.spend(key, bytes)) satisfies Spend;
+    next();
   };
 }
 
@@ -133,9 +158,4 @@ export function bandwidthUpgradeGate({ meter, store }: GateOptions): UpgradeGate
     if (result.ok || isAdminCookie(store, req.headers.cookie)) return null;
     return { code: "quota", status: 429, retryAfter: result.retryAfter };
   };
-}
-
-/** Both directions share one budget: either way the bytes cross this server's link. */
-export function meterObserver(meter: ByteMeter): RelayObserver {
-  return { ...NO_OBSERVER, bytes: (key, count) => meter.add(key, count) };
 }
