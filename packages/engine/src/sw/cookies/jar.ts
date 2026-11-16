@@ -1,5 +1,5 @@
 import { getDomain } from "tldts";
-import { Cookie, CookieJar, MemoryCookieStore } from "tough-cookie";
+import { Cookie, CookieJar, MemoryCookieStore, canonicalDomain, defaultPath } from "tough-cookie";
 import type { CookieSnapshot } from "../../shared/protocol.ts";
 import { allowsCredentials, sameSiteContext, type SameSiteContext } from "./policy.ts";
 
@@ -214,6 +214,15 @@ function usedAt(cookie: Cookie): number {
 
 function keyOf(cookie: Cookie): string {
   return `${cookie.domain ?? ""}|${cookie.path ?? ""}|${cookie.key}`;
+}
+
+/** The jar slot a script cookie would land in, so writes to the same cookie can be ordered against each other. */
+export function scriptCookieKey(documentUrl: URL, header: string): string | null {
+  const parsed = Cookie.parse(header);
+  if (!parsed) return null;
+  const domain = parsed.domain ? canonicalDomain(parsed.domain) : canonicalDomain(documentUrl.hostname);
+  const path = parsed.path?.startsWith("/") ? parsed.path : defaultPath(documentUrl.pathname);
+  return `${domain ?? ""}|${path}|${parsed.key}`;
 }
 
 export function siteOf(hostname: string): string {
