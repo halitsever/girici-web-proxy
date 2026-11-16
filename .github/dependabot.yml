@@ -16,6 +16,10 @@ updates:
       development:
         dependency-type: development
         update-types: [minor, patch]
+    ignore:
+      # typescript-eslint and vue-tsc do not run on TypeScript 7 yet.
+      - dependency-name: typescript
+        versions: [">=7.0.0"]
 
   - package-ecosystem: github-actions
     directory: /
