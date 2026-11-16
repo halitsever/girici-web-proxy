@@ -157,6 +157,17 @@ function fakeRealm() {
       this.windowName = value;
     },
   });
+  // Like the name accessor, these read whichever window they are applied to; a frame names its parent and element.
+  Object.defineProperty(top, "parent", {
+    get(this: { parentWindow?: unknown }) {
+      return this.parentWindow === undefined ? this : this.parentWindow;
+    },
+  });
+  Object.defineProperty(top, "frameElement", {
+    get(this: { element?: unknown }) {
+      return this.element ?? null;
+    },
+  });
   return { win: top as unknown as Realm, ctors, top, make, node, calls };
 }
 
@@ -463,13 +474,34 @@ describe("installFrames", () => {
     expect(win.open("/~/https/b.test/y", "s")).toBe(blank);
   });
 
-  it("counts an adopted window it did not open as one the browser may keep", () => {
+  it("counts an adopted popup it did not open as one the browser may keep", () => {
     const named = namedWindows();
-    const frame = named.make("f");
-    Object.defineProperty(frame, "__g$", { value: {} });
+    const popup = named.make("f");
+    Object.defineProperty(popup, "__g$", { value: {} });
     const { win } = setup(undefined, undefined, undefined, named.open);
-    expect(win.open("/~/https/b.test/x", "f")).not.toBe(frame);
-    expect(frame.windowName).toBe("");
+    expect(win.open("/~/https/b.test/x", "f")).not.toBe(popup);
+    expect(popup.windowName).toBe("");
+  });
+
+  it("sends a page aimed at a blank named frame into that frame", () => {
+    const named = namedWindows();
+    const { win, top, adopter } = setup(undefined, undefined, undefined, named.open);
+    const frame = Object.assign(named.make("tds"), { parentWindow: top, element: {} });
+    Object.defineProperty(frame, "__g$", { value: {} });
+    expect(win.open("/~/https/b.test/acs", "tds")).toBe(frame);
+    adopter.prepareTarget("tds", "https://b.test");
+    expect(frame.windowName).toBe("tds");
+    expect(frame.sent).toEqual(["/~/https/b.test/acs"]);
+    expect(named.calls).toEqual([
+      ["", "tds"],
+      ["", "tds"],
+    ]);
+    expect(named.windows).toEqual([frame]);
+    // A frame whose element another origin hides still names its parent.
+    const hidden = Object.assign(named.make("x"), { parentWindow: {} });
+    Object.defineProperty(hidden, "__g$", { value: {} });
+    expect(win.open("/~/https/b.test/acs", "x")).toBe(hidden);
+    expect(hidden.windowName).toBe("x");
   });
 
   it("leaves the name on the kept window when the browser blocks the fresh one", () => {
