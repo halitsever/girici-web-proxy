@@ -44,6 +44,7 @@ import { installStorageIsolation } from "./storage-isolation.ts";
 import { createMessageSender, installMessaging } from "./messaging.ts";
 import { createSiteMessaging, type LabelLookup } from "./site-messages.ts";
 import { installPermissions } from "./permissions.ts";
+import { installReflection, type ReflectionEnv } from "./reflection.ts";
 import { installMasking } from "./masking.ts";
 import { installServiceWorkerMask } from "./sw-mask.ts";
 import { captureToolbarNatives, createToolbarKeys, installToolbar, shouldShowToolbar, toolbarHome } from "./toolbar.ts";
@@ -111,6 +112,8 @@ export function install(
   const container = () => (awaiting ? null : readContainer());
   const nativeLocation = win.location;
   const isLocation = locationCheck(nativeLocation);
+  const isWindow = windowCheck(win);
+  const isDocument = documentCheck(win);
   const ownLocation = locationCalls(nativeLocation, invoke, blobs.swap);
   const steps = new DocumentSteps();
   if (awaiting) {
@@ -230,6 +233,7 @@ export function install(
         return false;
       }
     },
+    isWindow,
     navigationUrl: (raw) => blobs.swap(ctx.toProxy(raw)),
     rewrite,
     indirectEval: (code) => (0, win.eval)(code as string),
@@ -249,6 +253,7 @@ export function install(
   const childConfig = createChildConfig(ctx, () => cookies.snapshot(), steps, config);
 
   let owners: BlobOwners | undefined;
+  let ownDocument: unknown = win.document;
   const installSteps: Array<[string, () => void]> = [
     ["document", () => (resetDomain = installDocument(win, ctx, sites))],
     // Early, so the window.open it wraps is still the browser's and the HTML sinks below can reach it.
@@ -332,6 +337,19 @@ export function install(
       },
     ],
     ["windows", () => installWindowLinks(win, ctx, guard)],
+    [
+      "reflection",
+      () =>
+        installReflection(win, {
+          __proto__: null,
+          settle: helpers.V,
+          navigate: (target, url) => helpers.S(target, "location", url),
+          isWindowOrDocument: (value) => isWindow(value) || isDocument(value),
+          nativeLocation,
+          // Compared with the document held for this page, since reading it on each hot call would cost a getter.
+          isOwn: (value) => value === win || value === ownDocument,
+        } as ReflectionEnv),
+    ],
     ["permissions", () => installPermissions(win)],
     ["masking", () => installMasking(win, ctx)],
     ["realtime", () => installRealtimeBlock(win)],
@@ -355,7 +373,10 @@ export function install(
     current = next;
     inheritedAnnounce = next.inherit ? announce : undefined;
   });
-  steps.add("document", () => resetDomain());
+  steps.add("document", () => {
+    ownDocument = win.document;
+    resetDomain();
+  });
   steps.add("cookies", (next) => cookies.reset(next));
   steps.add("context", (next) => ctx.inherit(next.inherit, next.seal));
   // The document may be of another site now, so windows handed out as is to the last one are judged again.
@@ -507,6 +528,50 @@ export function locationCheck(location: object): (value: unknown) => boolean {
     } catch {
       return false;
     }
+  };
+}
+
+/** A window's own `window` getter returns it and throws for anything else, a Proxy included, without running traps. */
+function windowCheck(win: Realm): (value: unknown) => boolean {
+  const windowOf = ownDescriptor(win, "window")?.get;
+  return remembered(
+    (value) => {
+      try {
+        return apply(windowOf as () => unknown, value, []) === value;
+      } catch {
+        return false;
+      }
+    },
+    !windowOf,
+    win,
+  );
+}
+
+/** Document's own URL getter throws for anything but a document, so no page getter or trap runs. */
+function documentCheck(win: Realm): (value: unknown) => boolean {
+  const urlOf = win.Document ? ownDescriptor(win.Document.prototype, "URL")?.get : undefined;
+  return remembered((value) => {
+    try {
+      apply(urlOf as () => unknown, value, []);
+      return true;
+    } catch {
+      return false;
+    }
+  }, !urlOf);
+}
+
+/** An object stays what it is, so each answer is kept: the check throws for most values, and a throw is slow on hot reads. */
+function remembered(check: (value: object) => boolean, never: boolean, self?: object): (value: unknown) => boolean {
+  const seen = new NativeWeakMap<object, boolean>();
+  return (value) => {
+    if (self !== undefined && value === self) return true;
+    if (typeof value !== "object" || value === null || never) return false;
+    let known = apply(mapGet, seen, [value]) as boolean | undefined;
+    if (known === undefined) {
+      known = check(value);
+      apply(mapSet, seen, [value, known]);
+    }
+    return known;
   };
 }
 

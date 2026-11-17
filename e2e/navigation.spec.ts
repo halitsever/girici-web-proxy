@@ -21,6 +21,30 @@ for (const id of ["assign", "href", "replace"]) {
   });
 }
 
+for (const id of [
+  "computed-href",
+  "computed-set",
+  "reflect-set",
+  "reflect-get",
+  "object-assign",
+  "descriptor",
+  "with",
+]) {
+  test(`keeps the ${id} location write inside the proxy`, async ({ page }) => {
+    await page.click(`#${id}`);
+    await expect(page).toHaveURL(/\/~\/https\/site-b\.test\/$/);
+    await expect(page.locator("h1")).toHaveText("Site B");
+  });
+}
+
+test("hands out another site's frame by index only as a wrapper", async ({ page }) => {
+  await expect(page.frameLocator("#frame").locator("body")).not.toBeEmpty();
+  await page.click("#frame-index");
+  await expect(page.locator("#frame-access")).toHaveText(
+    JSON.stringify(["SecurityError", "SecurityError", "SecurityError"]),
+  );
+});
+
 test("opens windows through the proxy", async ({ page }) => {
   const popup = page.waitForEvent("popup");
   await page.click("#open");

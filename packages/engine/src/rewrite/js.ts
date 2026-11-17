@@ -6,7 +6,7 @@ export const MAX_REWRITE_LENGTH = 20 * 1024 * 1024;
 /** Lets a rewritten script run in workers and frames that never got the runtime; there the helpers pass values through. */
 // Indirect eval goes through a local so re-rewriting the shim catches neither a bare nor a global eval (R10).
 export const STANDALONE_SHIM =
-  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},A:function(o){var k="location";return{get v(){return o[k]},set v(x){o[k]=x}}},D:function(o){return o},E:function(v){return v},ev:function(c){var e=globalThis["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v}});';
+  'globalThis.__g$||(globalThis.__g$={L:function(v){return v},N:function(t,v){return v},S:function(o,k,v){return o[k]=v},A:function(o){var k="location";return{get v(){return o[k]},set v(x){o[k]=x}}},D:function(o){return o},E:function(v){return v},ev:function(c){var g=globalThis,e=g["eval"];return e(c)},I:function(v){return v},H:function(v){return v},M:function(v){return v},P:function(v){return v},W:function(v){return v},V:function(v){return v},K:function(o,k){if(typeof k!=="symbol")k=String(k);return{get v(){return o[k]},set v(x){o[k]=x}}}});';
 
 /** Bodies the generator and async constructors compile; each parses only inside a function of its own kind. */
 export type FunctionBodyKind = "generator" | "async" | "asyncGenerator";
@@ -38,7 +38,7 @@ const FUNCTION_TAIL = "\n})";
 type Role = "read" | "target" | "assign" | "binding" | "callee";
 
 const PARSE_OPTIONS = { ranges: true, webcompat: true, next: true } as const;
-const HELPERS = new Set(["L", "N", "S", "A", "D", "E", "ev", "I", "H", "M", "P", "W"]);
+const HELPERS = new Set(["L", "N", "S", "A", "D", "E", "ev", "I", "H", "M", "P", "W", "V", "K"]);
 const GLOBAL_NAMES = new Set(["window", "globalThis", "self"]);
 const WINDOW_REFS = new Set(["top", "parent", "opener", "frames"]);
 const WINDOW_LIKE = new Set([
@@ -52,7 +52,10 @@ const WINDOW_LIKE = new Set([
   "contentWindow",
   "defaultView",
 ]);
+/** Objects whose computed members can hold a Location or another window: windows, documents and global `this`. */
+const RECEIVERS = new Set([...WINDOW_LIKE, "document"]);
 const WRAPPED_NAME = /location|top|parent|opener|frames/;
+const RECEIVER_NAME = /window|self|globalThis|document|this|top|parent|opener|frames|contentWindow|defaultView/;
 const LOGICAL = new Set(["&&=", "||=", "??="]);
 const LINE_BREAK = /[\n\r\u2028\u2029]/;
 // A setter keeps a local binding named `location` working, while a real Location gets the converted URL.
@@ -69,7 +72,7 @@ export function rewriteJs(source: string, options: JsRewriteOptions = {}): strin
   if (!program) return source;
   const output = new MagicString(source);
   try {
-    new LocationRewriter(source, output).visit(program, "read", false);
+    new LocationRewriter(source, output, kind === "classic").visit(program, "read", false);
   } catch {
     // Pathologically deep code can overflow the stack; serving it unrewritten beats failing the page.
     return source;
@@ -96,7 +99,8 @@ function mayNeedRewrite(source: string): boolean {
     source.includes("import") ||
     source.includes("postMessage") ||
     source.includes("\\u") ||
-    WRAPPED_NAME.test(source)
+    WRAPPED_NAME.test(source) ||
+    ((source.includes("[") || source.includes("...")) && RECEIVER_NAME.test(source))
   );
 }
 
@@ -134,7 +138,7 @@ export function rewriteFunction(params: string, body: string, kind: ConstructorK
   }
   const output = new MagicString(wrapped);
   try {
-    new LocationRewriter(wrapped, output).visit(program, "read", false);
+    new LocationRewriter(wrapped, output, false).visit(program, "read", false);
     if (!output.hasChanged()) return unchanged;
     return { params: output.slice(paramsStart, paramsEnd), body: output.slice(bodyStart, bodyEnd) };
   } catch {
@@ -162,10 +166,14 @@ function parse(source: string, kind: "classic" | "module" | "handler"): ESTree.P
 class LocationRewriter {
   readonly #source: string;
   readonly #output: MagicString;
+  /** Whether `this` here is the global object: a classic script's top level, outside any function or class. */
+  readonly #globalThis: boolean;
+  #depth = 0;
 
-  constructor(source: string, output: MagicString) {
+  constructor(source: string, output: MagicString, globalThis: boolean) {
     this.#source = source;
     this.#output = output;
+    this.#globalThis = globalThis;
   }
 
   visit(node: ESTree.Node | null | undefined, role: Role, inChain: boolean): void {
@@ -227,7 +235,10 @@ class LocationRewriter {
         return;
       case "NewExpression":
         // `new __g$.L(x).y()` would construct the helper, so a callee that gets wrapped is parenthesised first.
-        if (this.#source.slice(start(node.callee), end(node.callee)).match(WRAPPED_NAME)) {
+        if (
+          this.#source.slice(start(node.callee), end(node.callee)).match(WRAPPED_NAME) ||
+          this.#hasComputedAccess(node.callee)
+        ) {
           this.#output.appendRight(start(node.callee), "(");
           this.#output.appendLeft(end(node.callee), ")");
         }
@@ -242,7 +253,9 @@ class LocationRewriter {
         this.#assignment(node);
         return;
       case "UpdateExpression":
-        if (isLocationIdentifier(node.argument)) {
+        if (node.argument.type === "MemberExpression" && this.#isComputedAccess(node.argument)) {
+          this.#computedTarget(node.argument as ESTree.MemberExpression);
+        } else if (isLocationIdentifier(node.argument)) {
           // Converted like `location = location + 1`, with the number the page's operator would make.
           const step = node.operator === "++" ? "+" : "-";
           this.#output.overwrite(start(node), end(node), `(location = __g$.N(location, +__g$.L(location) ${step} 1))`);
@@ -264,7 +277,12 @@ class LocationRewriter {
         return;
       case "VariableDeclarator":
         this.visit(node.id, "binding", false);
-        if (node.init && node.id.type === "ObjectPattern" && hasWrappedKey(node.id) && !isHelperCall(node.init)) {
+        if (
+          node.init &&
+          node.id.type === "ObjectPattern" &&
+          (hasWrappedKey(node.id) || (this.#isReceiver(node.init) && hasDynamicKey(node.id))) &&
+          !isHelperCall(node.init)
+        ) {
           this.#call("__g$.D(", ")", node.init);
         }
         this.visit(node.init, "read", false);
@@ -282,6 +300,10 @@ class LocationRewriter {
             const name = property.value.name;
             this.#output.overwrite(start(property), end(property), `${name}: __g$.W(${name})`);
           } else {
+            // A spread copies every own value, Location and named frames included.
+            if (property.type === "SpreadElement" && this.#isReceiver(property.argument)) {
+              this.#call("__g$.D(", ")", property.argument);
+            }
             this.visit(property, "read", false);
           }
         }
@@ -314,14 +336,21 @@ class LocationRewriter {
         return;
       case "FunctionDeclaration":
       case "FunctionExpression":
-      case "ArrowFunctionExpression":
+      case "ArrowFunctionExpression": {
+        // An arrow function keeps the `this` of where it is written.
+        const own = node.type !== "ArrowFunctionExpression";
+        if (own) this.#depth++;
         for (const param of node.params) this.visit(param, "binding", false);
         this.visit(node.body, "read", false);
+        if (own) this.#depth--;
         return;
+      }
       case "ClassDeclaration":
       case "ClassExpression":
         this.visit(node.superClass, "read", false);
+        this.#depth++;
         this.visit(node.body, "read", false);
+        this.#depth--;
         return;
       case "MethodDefinition":
       case "PropertyDefinition":
@@ -355,17 +384,23 @@ class LocationRewriter {
       this.#locationTarget(node);
       return;
     }
+    if (role === "assign" && this.#isComputedAccess(node)) {
+      this.#computedTarget(node);
+      return;
+    }
     if (role === "read" && isImportMetaUrl(node)) {
       this.#call("__g$.M(", ")", node);
       return;
     }
     if (role === "read" && isLocationMember(node)) this.#wrap(node);
     else if (role === "read" && isWindowRefMember(node)) this.#call("__g$.W(", ")", node);
+    // Reads only: a call would lose its `this`, and calling a Location or a window throws anyway.
+    else if (role === "read" && this.#isComputedAccess(node)) this.#call("__g$.V(", ")", node);
     // A wrapped link would stop an optional chain from short-circuiting, so the next access becomes optional too.
     if (
       inChain &&
       !node.optional &&
-      (isLocationMember(node.object) || isWindowRefMember(node.object)) &&
+      (isLocationMember(node.object) || isWindowRefMember(node.object) || this.#isComputedAccess(node.object)) &&
       hasOptionalLink(node.object)
     ) {
       this.#output.appendRight(this.#nextToken(end(node.object)), node.computed ? "?." : "?");
@@ -401,8 +436,14 @@ class LocationRewriter {
     } else if (left.type === "MemberExpression" && isLocationMember(left)) {
       // The operator stays, so the value is evaluated only when the page's own operator would evaluate it.
       this.#locationTarget(left);
+    } else if (this.#isComputedAccess(left)) {
+      this.#computedTarget(left as unknown as ESTree.MemberExpression);
     } else {
-      if (left.type === "ObjectPattern" && hasWrappedKey(left) && !isHelperCall(right)) {
+      if (
+        left.type === "ObjectPattern" &&
+        (hasWrappedKey(left) || (this.#isReceiver(right) && hasDynamicKey(left))) &&
+        !isHelperCall(right)
+      ) {
         this.#call("__g$.D(", ")", right);
       }
       this.visit(left, (left as ESTree.Node).type === "MemberExpression" ? "target" : "assign", false);
@@ -425,6 +466,44 @@ class LocationRewriter {
     this.#output.appendRight(start(node), "__g$.A(");
     this.#output.overwrite(operator, end(node), ").v");
     this.visit(node.object, "read", false);
+  }
+
+  /** `window[key]` as a target: the key is converted once, and `v` reads it as V does and writes as S does for location. */
+  #computedTarget(node: ESTree.MemberExpression): void {
+    const bracket = this.#tokenAfter(end(node.object));
+    this.#output.appendRight(start(node), "__g$.K(");
+    this.#output.overwrite(bracket, start(node.property), ", (");
+    this.#output.overwrite(end(node.property), end(node), ")).v");
+    this.visit(node.object, "read", false);
+    this.visit(node.property, "read", false);
+  }
+
+  /** A key the static checks above do not know, on an object that may be a window or a document. */
+  #isComputedAccess(node: ESTree.Node): boolean {
+    if (node.type !== "MemberExpression" || !node.computed || !this.#isReceiver(node.object)) return false;
+    return !isLocationMember(node) && !isWindowRefMember(node);
+  }
+
+  #isReceiver(node: ESTree.Node): boolean {
+    if (node.type === "Identifier") return RECEIVERS.has(node.name);
+    if (node.type === "ThisExpression") return this.#globalThis && this.#depth === 0;
+    if (node.type === "MemberExpression" && node.object.type !== "Super") {
+      const { property } = node;
+      if (node.computed)
+        return property.type === "Literal" && typeof property.value === "string" && RECEIVERS.has(property.value);
+      return property.type === "Identifier" && RECEIVERS.has(property.name);
+    }
+    return false;
+  }
+
+  /** Whether a `new` callee holds a computed access that becomes a helper call. */
+  #hasComputedAccess(node: ESTree.Node): boolean {
+    let current: ESTree.Node = node;
+    while (current.type === "MemberExpression") {
+      if (this.#isComputedAccess(current)) return true;
+      current = current.object;
+    }
+    return false;
   }
 
   #wrap(node: ESTree.Node): void {
@@ -542,7 +621,7 @@ function isImportMetaUrl(node: ESTree.MemberExpression): boolean {
   );
 }
 
-/** Only literal keys are known here; a key built at run time reaches the native Location, a documented limit. */
+/** A literal `location` key; any other key on a window or a document goes through V or K instead. */
 function isLocationMember(node: ESTree.Node): node is ESTree.MemberExpression {
   // super.location is the page's own class member, never a window's.
   if (node.type !== "MemberExpression" || node.object.type === "Super") return false;
@@ -598,6 +677,11 @@ function hasWrappedKey(pattern: ESTree.ObjectPattern): boolean {
           typeof property.key.value === "string" &&
           isWrappedKey(property.key.value))),
   );
+}
+
+/** A computed key or a rest element, either of which can pick up `location` from a window. */
+function hasDynamicKey(pattern: ESTree.ObjectPattern): boolean {
+  return pattern.properties.some((property) => property.type === "RestElement" || property.computed);
 }
 
 function isWrappedKey(name: string): boolean {

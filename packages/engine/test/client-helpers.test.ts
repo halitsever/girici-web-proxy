@@ -15,6 +15,7 @@ function setup() {
     isLocation: (value) => value === nativeLocation || value === frameLocation,
     fakeFor: (location) => (location === frameLocation ? frameFake : null),
     isWindowOrDocument: (value) => value === win || value === win.document || value === frame,
+    isWindow: (value) => value === win || value === frame,
     navigationUrl: (raw) => (raw.startsWith("blob:") ? `blob:boot/${raw}` : `/~/proxied/${raw}`),
     rewrite: {
       js: (c) => c,
@@ -128,8 +129,8 @@ describe("createHelpers", () => {
     const { helpers, win, frame } = setup();
     const withLinks = Object.assign(win, { parent: frame, top: frame, opener: frame, frames: frame, name: frame });
     const view = helpers.D(withLinks) as Record<string, unknown>;
-    for (const key of ["parent", "top", "opener", "frames"]) expect(view[key]).toEqual({ wrapped: frame });
-    expect(view.name).toBe(frame);
+    for (const key of ["parent", "top", "opener", "frames", "name"]) expect(view[key]).toEqual({ wrapped: frame });
+    expect(view.document).toBe(win.document);
   });
 
   it("D ignores proxy traps a page adds to Object.prototype", () => {
@@ -148,6 +149,51 @@ describe("createHelpers", () => {
     expect(trapped).toBeNull();
   });
 
+  it("V swaps real locations and wraps other windows, and passes everything else", () => {
+    const { helpers, nativeLocation, fake, frame, win } = setup();
+    const plain = { a: 1 };
+    const fn = () => {};
+    expect(helpers.V(nativeLocation)).toBe(fake);
+    expect(helpers.V(frame)).toEqual({ wrapped: frame });
+    expect(helpers.V(win)).toBe(win);
+    for (const value of [plain, fn, 1, "s", null, undefined]) expect(helpers.V(value)).toBe(value);
+  });
+
+  it("K writes location as S does and every other key as the page wrote it", () => {
+    const { helpers, fake, win, frame } = setup();
+    helpers.K(win, { toString: () => "location" }).v = "https://x.test/";
+    expect(fake.href).toBe("https://x.test/");
+    helpers.K(win.document, "location").v = "y";
+    expect(fake.href).toBe("y");
+    expect(helpers.K(win, "location").v).toBe(fake);
+    const named = Object.assign(win, { child: frame });
+    expect(helpers.K(named, "child").v).toEqual({ wrapped: frame });
+    const plain: Record<PropertyKey, unknown> = { location: 1 };
+    helpers.K(plain, "location").v = 2;
+    expect(plain.location).toBe(2);
+  });
+
+  it("K converts its key once and keeps sloppy writes from throwing", () => {
+    const { helpers } = setup();
+    let conversions = 0;
+    const key = {
+      toString: () => {
+        conversions++;
+        return "n";
+      },
+    };
+    const target: Record<string, number> = { n: 1 };
+    const ref = helpers.K(target, key);
+    ref.v = (ref.v as number) + 1;
+    expect(target.n).toBe(2);
+    expect(conversions).toBe(1);
+    const frozen = Object.freeze({ n: 1 });
+    expect(() => (helpers.K(frozen, "n").v = 2)).not.toThrow();
+    expect(() => (helpers.K(5, "n").v = 2)).not.toThrow();
+    expect(() => (helpers.K(null, "n").v = 2)).toThrow(TypeError);
+    expect(() => helpers.K(undefined, "n").v).toThrow(TypeError);
+  });
+
   it("routes eval, html and import helpers through the bridge", () => {
     const nativeLocation = { href: "http://proxy.test/~/https/site.test/" };
     const evaled: string[] = [];
@@ -157,6 +203,7 @@ describe("createHelpers", () => {
       isLocation: (value) => value === nativeLocation,
       fakeFor: () => null,
       isWindowOrDocument: () => false,
+      isWindow: () => false,
       navigationUrl: (raw) => `/~/proxied/${raw}`,
       rewrite: {
         js: (c) => `/*rw*/${c}`,
