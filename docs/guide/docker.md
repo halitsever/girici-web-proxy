@@ -1,3 +1,7 @@
+---
+description: "Run Girici with Docker or Docker Compose, keep its database on a volume, and serve it over HTTPS with the bundled Caddy profile."
+---
+
 # Running with Docker
 
 ## Compose

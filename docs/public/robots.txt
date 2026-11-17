@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://halitsever.github.io/girici-web-proxy/sitemap.xml

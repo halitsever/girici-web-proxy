@@ -3,6 +3,25 @@ import { dirname, join } from "node:path";
 import { defineConfig, type DefaultTheme, type SiteConfig } from "vitepress";
 
 const repo = "https://github.com/halitsever/girici-web-proxy";
+const siteUrl = "https://halitsever.github.io/girici-web-proxy/";
+const description =
+  "Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy that runs in Docker.";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Girici",
+  description,
+  url: siteUrl,
+  image: `${siteUrl}og.png`,
+  applicationCategory: "UtilitiesApplication",
+  operatingSystem: "Linux",
+  codeRepository: repo,
+  programmingLanguage: "TypeScript",
+  license: "https://www.gnu.org/licenses/agpl-3.0.html",
+  author: { "@type": "Person", name: "Halit Sever", url: "https://github.com/halitsever" },
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
 
 const sidebar: DefaultTheme.SidebarItem[] = [
   {
@@ -38,9 +57,22 @@ const sidebar: DefaultTheme.SidebarItem[] = [
   },
 ];
 
+const llmsIntro = [
+  "Install: `docker run -d --name girici -p 3000:3000 -v girici_data:/data halitsever/girici-web-proxy:latest`, then",
+  "enter the setup code from `docker logs girici` at http://localhost:3000. Service workers need HTTPS on any address",
+  "other than localhost, and the operator of an instance can read all proxied traffic.",
+].join(" ");
+
+const llmsOptional = [
+  "## Optional",
+  "",
+  `- [Source](${repo}): repository`,
+  "- [Docker Hub](https://hub.docker.com/r/halitsever/girici-web-proxy): container image",
+].join("\n");
+
 /** Builds llms.txt from the sidebar and ships each page's markdown next to its HTML for LLM tools. */
 async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
-  const header = `# ${site.title}\n\n> ${site.description}`;
+  const header = `# ${site.title}\n\n> ${site.description}\n\n${llmsIntro}`;
   const sections: string[] = [];
   const pages: string[] = [];
   for (const group of sidebar) {
@@ -51,29 +83,32 @@ async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
         lines.push(`- [${text}](${link})`);
         continue;
       }
-      const page = (await readFile(join(srcDir, `${link}.md`), "utf8"))
+      const source = await readFile(join(srcDir, `${link}.md`), "utf8");
+      const page = source
         .replace(/^---\n[\s\S]*?\n---\n/, "")
         .replaceAll("](/", `](${site.base}`)
         .trim();
       const target = join(outDir, `${link}.md`);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, `${page}\n`);
-      // The paragraph under the H1 doubles as the page summary.
+      // The front matter description is the page summary; the paragraph under the H1 is the fallback.
+      const described = /^---\n[\s\S]*?^description: "(.*)"$/m.exec(source)?.[1];
       const intro = page.split(/\n\s*\n/)[1] ?? "";
-      const summary = /^(#|```|:::|\||-|>|<)/.test(intro) ? "" : `: ${intro.replace(/\s*\n\s*/g, " ")}`;
-      lines.push(`- [${text}](${site.base}${link.slice(1)}.md)${summary}`);
+      const fallback = /^(#|```|:::|\||-|>|<)/.test(intro) ? "" : intro.replace(/\s*\n\s*/g, " ");
+      const summary = described ?? fallback;
+      lines.push(`- [${text}](${siteUrl}${link.slice(1)}.md)${summary ? `: ${summary}` : ""}`);
       pages.push(page);
     }
     sections.push(lines.join("\n"));
   }
-  await writeFile(join(outDir, "llms.txt"), `${[header, ...sections].join("\n\n")}\n`);
+  await writeFile(join(outDir, "llms.txt"), `${[header, ...sections, llmsOptional].join("\n\n")}\n`);
   await writeFile(join(outDir, "llms-full.txt"), `${[header, ...pages].join("\n\n---\n\n")}\n`);
 }
 
 export default defineConfig({
   lang: "en-US",
   title: "Girici",
-  description: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
+  description,
   // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
   base: process.env.DOCS_BASE || "/",
   // The app is dark-only; drop the toggle so the docs match it.
@@ -84,15 +119,27 @@ export default defineConfig({
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["meta", { name: "theme-color", content: "#0A0F1E" }],
-    ["meta", { property: "og:title", content: "Girici" }],
-    [
-      "meta",
-      {
-        property: "og:description",
-        content: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
-      },
-    ],
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:site_name", content: "Girici" }],
+    ["meta", { property: "og:image", content: `${siteUrl}og.png` }],
+    ["meta", { property: "og:image:width", content: "1280" }],
+    ["meta", { property: "og:image:height", content: "640" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:image", content: `${siteUrl}og.png` }],
+    ["script", { type: "application/ld+json" }, JSON.stringify(jsonLd)],
   ],
+  sitemap: { hostname: siteUrl },
+  transformHead({ pageData, title, description: pageDescription }) {
+    if (pageData.isNotFound) return;
+    const path = pageData.relativePath.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, "");
+    const url = `${siteUrl}${path}`;
+    return [
+      ["link", { rel: "canonical", href: url }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: pageDescription }],
+    ];
+  },
   themeConfig: {
     logo: "/girici-icon-dark.svg",
     nav: [

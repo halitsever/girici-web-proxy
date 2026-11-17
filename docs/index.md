@@ -1,7 +1,7 @@
 ---
 layout: page
 title: Girici
-titleTemplate: Your own web proxy
+titleTemplate: Self-hosted web proxy for Node.js
 sidebar: false
 aside: false
 ---

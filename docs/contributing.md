@@ -1,3 +1,7 @@
+---
+description: "How to contribute to Girici: the npm workspace packages, building and testing locally, and the AGPL-3.0 license terms."
+---
+
 # Contributing
 
 Contributions are welcome. Girici v2 is written in TypeScript across three npm workspace packages, and
