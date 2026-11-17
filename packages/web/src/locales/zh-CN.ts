@@ -111,6 +111,8 @@ export const zhCN: Messages = {
 
   "settings.title": "设置",
   "settings.lead": "设置 Girici 如何打开和处理你访问的网站。",
+  "settings.sectionBrowsing": "浏览",
+  "settings.sectionPrivacy": "隐私和数据",
   "settings.language": "语言",
   "settings.languageHelp": "用于 Girici 自身的页面和工具栏。“自动”会跟随浏览器语言。",
   "settings.languageAuto": "自动",

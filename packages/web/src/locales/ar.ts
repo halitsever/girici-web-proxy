@@ -114,6 +114,8 @@ export const ar: Messages = {
 
   "settings.title": "الإعدادات",
   "settings.lead": "كيف يفتح Girici المواقع التي تزورها وكيف يتعامل معها.",
+  "settings.sectionBrowsing": "التصفح",
+  "settings.sectionPrivacy": "الخصوصية والبيانات",
   "settings.language": "اللغة",
   "settings.languageHelp": "لصفحات Girici وشريط أدواته. الخيار التلقائي يتبع لغة متصفحك.",
   "settings.languageAuto": "تلقائي",

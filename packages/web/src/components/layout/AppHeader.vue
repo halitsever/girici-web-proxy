@@ -13,21 +13,28 @@ const tabs: Array<{ to: string; label: TextKey; icon: typeof Search }> = [
 </script>
 
 <template>
-  <header class="sticky top-0 z-20 border-b border-[#18181b] bg-background/85 backdrop-blur-md">
-    <div class="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-3 px-3 py-3">
+  <header class="sticky top-0 z-20 border-b border-[#161b2c] bg-background/85 backdrop-blur-md">
+    <div class="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-3 px-5">
       <RouterLink to="/" class="no-underline">
         <BrandMark />
       </RouterLink>
-      <nav class="flex items-center gap-0.5 rounded-[10px] border border-border bg-card p-[3px]">
+      <nav class="flex h-full items-stretch gap-1 sm:gap-2">
         <RouterLink
           v-for="tab in tabs"
           :key="tab.to"
           :to="tab.to"
-          class="inline-flex h-8 items-center gap-[7px] rounded-[7px] px-3 text-[13px] font-medium no-underline transition-colors"
-          :class="route.path === tab.to ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          class="relative inline-flex items-center gap-2 px-2.5 text-[14px] font-medium no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-6px] focus-visible:outline-ring"
+          :class="route.path === tab.to ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          :aria-current="route.path === tab.to ? 'page' : undefined"
         >
-          <component :is="tab.icon" class="h-3.5 w-3.5" />
+          <component :is="tab.icon" class="hidden h-4 w-4 sm:block" />
           {{ t(tab.label) }}
+          <!-- The logo's route bar marks where you are. -->
+          <span
+            v-if="route.path === tab.to"
+            class="absolute inset-x-2.5 -bottom-px h-[3px] rounded-full bg-gi-brand"
+            aria-hidden="true"
+          />
         </RouterLink>
       </nav>
     </div>

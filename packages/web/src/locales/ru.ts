@@ -112,6 +112,8 @@ export const ru: Messages = {
 
   "settings.title": "Настройки",
   "settings.lead": "Как Girici открывает и обрабатывает сайты, которые вы посещаете.",
+  "settings.sectionBrowsing": "Просмотр",
+  "settings.sectionPrivacy": "Конфиденциальность и данные",
   "settings.language": "Язык",
   "settings.languageHelp": "Для страниц и панели инструментов Girici. «Автоматически» использует язык браузера.",
   "settings.languageAuto": "Автоматически",

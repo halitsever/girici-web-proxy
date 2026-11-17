@@ -115,6 +115,8 @@ export const fr: Messages = {
 
   "settings.title": "Paramètres",
   "settings.lead": "La façon dont Girici ouvre et traite les sites que vous visitez.",
+  "settings.sectionBrowsing": "Navigation",
+  "settings.sectionPrivacy": "Confidentialité et données",
   "settings.language": "Langue",
   "settings.languageHelp":
     "Pour les pages et la barre d'outils de Girici. Automatique suit la langue de votre navigateur.",

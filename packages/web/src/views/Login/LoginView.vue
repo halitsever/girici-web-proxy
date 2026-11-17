@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import AuthShell from "@/components/layout/AuthShell.vue";
 import BrandMark from "@/components/layout/BrandMark.vue";
 import SourceLink from "@/components/layout/SourceLink.vue";
 import { Input } from "@/components/ui/input";
@@ -47,13 +48,15 @@ function goNext(domain: string | null) {
 </script>
 
 <template>
-  <div class="grid min-h-screen place-items-center px-4 py-10">
-    <form class="flex w-full max-w-[400px] flex-col gap-6" @submit.prevent="onSubmit">
-      <div class="flex flex-col items-center gap-3 text-center">
-        <BrandMark size="lg" :show-name="false" />
+  <AuthShell>
+    <form class="flex flex-col gap-6" @submit.prevent="onSubmit">
+      <div class="flex flex-col gap-5">
+        <BrandMark size="lg" :show-name="false" class="lg:hidden" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">{{ t("login.title", { brand: brand.name }) }}</h1>
-          <p class="mt-1 text-[14px] text-muted-foreground">{{ t("login.lead") }}</p>
+          <h1 class="text-[30px] leading-tight font-semibold tracking-[-0.04em]">
+            {{ t("login.title", { brand: brand.name }) }}
+          </h1>
+          <p class="mt-2 text-[15px] text-muted-foreground">{{ t("login.lead") }}</p>
         </div>
       </div>
 
@@ -77,12 +80,12 @@ function goNext(domain: string | null) {
       <RouterLink
         v-if="publicAccess"
         to="/"
-        class="text-center text-[13px] text-muted-foreground no-underline transition-colors hover:text-foreground"
+        class="text-[13px] text-muted-foreground no-underline transition-colors hover:text-foreground"
       >
         {{ t("login.skip") }}
       </RouterLink>
 
-      <p class="text-center text-[13px]"><SourceLink /></p>
+      <p class="text-[13px]"><SourceLink /></p>
     </form>
-  </div>
+  </AuthShell>
 </template>
