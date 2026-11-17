@@ -31,6 +31,18 @@ export const tr: Messages = {
   "browse.keys": "↑↓ gezin · ↵ aç · esc temizle",
   "browse.sharedOrigin":
     "Girici üzerinden açtığınız tüm siteler tarayıcıda aynı kökeni paylaşır. Güvenmediğiniz siteleri kullanırken önemli hesaplarınıza giriş yapmayın.",
+  "visitor.howTitle": "Nasıl çalışır",
+  "visitor.step1Title": "Bir adres yazın",
+  "visitor.step1": "Yukarıya bir site ya da arama girin. Bu sunucu üzerinden tam burada açılır.",
+  "visitor.step2Title": "Sunucu sizin yerinize getirir",
+  "visitor.step2": "Siteyi bu sunucu yükler, böylece site sizin adresinizi değil sunucunun adresini görür.",
+  "visitor.step3Title": "Her zamanki gibi gezinin",
+  "visitor.step3":
+    "Bağlantılar, videolar ve oturum açma çalışmaya devam eder. Her sayfadaki Girici düğmesi sizi buraya geri getirir.",
+  "visitor.safeTitle": "Başlamadan önce",
+  "visitor.operator":
+    "Bu sunucuyu çalıştıran kişi hangi siteleri açtığınızı görebilir. Güvendiğiniz bir sunucu kullanın.",
+  "visitor.local": "Geçmişiniz ve ayarlarınız bu tarayıcıda kalır. Ayarlar'dan temizleyebilirsiniz.",
 
   "login.title": "{brand} için giriş yapın",
   "login.lead": "Bu proxy özeldir. Gezinmeye devam etmek için giriş yapın.",

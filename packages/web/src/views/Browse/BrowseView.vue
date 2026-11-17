@@ -37,6 +37,18 @@ const error = ref<string | null>(null);
 const success = ref<string | null>(null);
 // Null until the sign-in state is read, so the single-origin note does not flash in subdomain mode.
 const siteMode = ref<boolean | null>(null);
+// Someone on a public instance who has not signed in, and may never have heard of Girici.
+const visitor = ref(false);
+const STEPS: ReadonlyArray<[TextKey, TextKey]> = [
+  ["visitor.step1Title", "visitor.step1"],
+  ["visitor.step2Title", "visitor.step2"],
+  ["visitor.step3Title", "visitor.step3"],
+];
+const safety = computed<TextKey[]>(() => [
+  "visitor.operator",
+  ...(siteMode.value === false ? (["browse.sharedOrigin"] as TextKey[]) : []),
+  "visitor.local",
+]);
 
 const resolution = computed(() => classifyInput(query.value, settings.value.engine));
 /** The address the opened page will have, split so the route Girici adds stands out. */
@@ -217,7 +229,9 @@ onMounted(async () => {
   window.addEventListener("pageshow", () => (launching.value = false));
   settings.value = loadSettings();
   history.value = loadHistory();
-  siteMode.value = isSiteMode(await getAuthState().catch(() => null));
+  const state = await getAuthState().catch(() => null);
+  siteMode.value = isSiteMode(state);
+  visitor.value = state?.authed === false;
 });
 </script>
 
@@ -362,7 +376,29 @@ onMounted(async () => {
       </template>
     </form>
 
-    <p v-if="siteMode === false" class="mt-12 max-w-[68ch] text-[13px] leading-relaxed text-gi-subtle">
+    <template v-if="visitor">
+      <section class="mt-24">
+        <h2 class="text-[clamp(26px,3.6vw,36px)] font-semibold tracking-[-0.035em]">{{ t("visitor.howTitle") }}</h2>
+        <ol class="route-line relative mt-10 grid gap-10 sm:grid-cols-3 sm:gap-8">
+          <li v-for="([title, text], index) in STEPS" :key="title" class="stop relative" :style="{ '--i': index }">
+            <span class="stop-mark block h-[22px] w-[22px] rounded-full border-[5px] border-[#fafafa] bg-background" />
+            <h3 class="mt-6 text-[18px] font-semibold tracking-[-0.01em]">{{ t(title) }}</h3>
+            <p class="mt-2 max-w-[34ch] text-[15px] leading-relaxed text-muted-foreground">{{ t(text) }}</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="mt-24">
+        <h2 class="text-[clamp(26px,3.6vw,36px)] font-semibold tracking-[-0.035em]">{{ t("visitor.safeTitle") }}</h2>
+        <ul class="mt-8 grid gap-6 sm:grid-cols-2">
+          <li v-for="key in safety" :key="key" class="max-w-[46ch] text-[15px] leading-relaxed text-muted-foreground">
+            <span class="mb-4 block h-1 w-7 rounded-full bg-gi-brand" aria-hidden="true" />
+            {{ t(key) }}
+          </li>
+        </ul>
+      </section>
+    </template>
+    <p v-else-if="siteMode === false" class="mt-12 max-w-[68ch] text-[13px] leading-relaxed text-gi-subtle">
       {{ t("browse.sharedOrigin") }}
     </p>
 
@@ -432,6 +468,95 @@ onMounted(async () => {
 .tile:hover .mark-icon,
 .tile:focus-visible .mark-icon {
   opacity: 0;
+}
+
+/* The steps sit on the route; a light travels along it, as in the background. */
+.route-line::before,
+.route-line::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+.route-line::before {
+  top: 9px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--gi-brand);
+  transform-origin: left center;
+}
+.route-line::after {
+  top: 8px;
+  left: 0;
+  width: 120px;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.85));
+  opacity: 0;
+}
+.stop-mark {
+  position: relative;
+}
+@media (max-width: 639px) {
+  .route-line {
+    padding-left: 40px;
+  }
+  .route-line::before {
+    top: 0;
+    bottom: 0;
+    left: 9px;
+    right: auto;
+    width: 4px;
+    height: auto;
+  }
+  .route-line::after {
+    display: none;
+  }
+  .stop-mark {
+    position: absolute;
+    left: -40px;
+    top: 0;
+  }
+  .stop h3 {
+    margin-top: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) and (min-width: 640px) {
+  .route-line::after {
+    animation: run 4.5s cubic-bezier(0.5, 0, 0.5, 1) 1.2s infinite;
+  }
+  @supports (animation-timeline: view()) {
+    .route-line::before {
+      animation: draw linear both;
+      animation-timeline: view();
+      animation-range: entry 10% cover 35%;
+    }
+    .stop {
+      animation: rise linear both;
+      animation-timeline: view();
+      animation-range: entry calc(10% + var(--i) * 6%) cover calc(30% + var(--i) * 6%);
+    }
+  }
+}
+@keyframes draw {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes run {
+  0% {
+    opacity: 0;
+    left: 0;
+  }
+  15%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    left: calc(100% - 120px);
+  }
 }
 
 /* Opening a site: the route crosses the screen, then opens like a door onto the next page. */

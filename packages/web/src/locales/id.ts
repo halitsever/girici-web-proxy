@@ -31,6 +31,18 @@ export const id: Messages = {
   "browse.keys": "↑↓ navigasi · ↵ buka · esc hapus",
   "browse.sharedOrigin":
     "Semua situs yang Anda buka lewat Girici berbagi satu origin browser. Jangan masuk ke akun penting saat memakai situs yang tidak Anda percayai.",
+  "visitor.howTitle": "Cara kerjanya",
+  "visitor.step1Title": "Ketik alamat",
+  "visitor.step1": "Masukkan situs atau pencarian di atas. Situs akan terbuka di sini, melalui server ini.",
+  "visitor.step2Title": "Server mengambilkannya untuk Anda",
+  "visitor.step2": "Server ini memuat situs untuk Anda, jadi situs melihat alamat server, bukan alamat Anda.",
+  "visitor.step3Title": "Jelajahi seperti biasa",
+  "visitor.step3":
+    "Tautan, video, dan login tetap berfungsi. Tombol Girici di setiap halaman membawa Anda kembali ke sini.",
+  "visitor.safeTitle": "Sebelum mulai",
+  "visitor.operator":
+    "Pengelola server ini dapat melihat situs mana saja yang Anda buka. Gunakan server yang Anda percayai.",
+  "visitor.local": "Riwayat dan pengaturan Anda tetap di browser ini. Anda dapat menghapusnya di Pengaturan.",
 
   "login.title": "Masuk ke {brand}",
   "login.lead": "Proxy ini bersifat pribadi. Masuk untuk melanjutkan.",

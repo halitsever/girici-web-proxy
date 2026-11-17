@@ -31,6 +31,16 @@ export const vi: Messages = {
   "browse.keys": "↑↓ di chuyển · ↵ mở · esc xóa",
   "browse.sharedOrigin":
     "Mọi trang web bạn mở qua Girici đều dùng chung một origin trên trình duyệt. Đừng đăng nhập tài khoản quan trọng khi đang dùng những trang web bạn không tin cậy.",
+  "visitor.howTitle": "Cách hoạt động",
+  "visitor.step1Title": "Nhập một địa chỉ",
+  "visitor.step1": "Nhập trang web hoặc nội dung tìm kiếm ở trên. Trang sẽ mở ngay tại đây, qua máy chủ này.",
+  "visitor.step2Title": "Máy chủ tải giúp bạn",
+  "visitor.step2": "Máy chủ này tải trang web thay bạn, nên trang web thấy địa chỉ của máy chủ thay vì của bạn.",
+  "visitor.step3Title": "Duyệt web như thường lệ",
+  "visitor.step3": "Liên kết, video và đăng nhập vẫn hoạt động. Nút Girici trên mỗi trang sẽ đưa bạn trở lại đây.",
+  "visitor.safeTitle": "Trước khi bắt đầu",
+  "visitor.operator": "Người vận hành máy chủ này có thể thấy bạn mở những trang nào. Hãy dùng máy chủ bạn tin tưởng.",
+  "visitor.local": "Lịch sử và cài đặt của bạn được lưu trong trình duyệt này. Bạn có thể xóa chúng trong Cài đặt.",
 
   "login.title": "Đăng nhập vào {brand}",
   "login.lead": "Proxy này là riêng tư. Hãy đăng nhập để tiếp tục duyệt web.",
