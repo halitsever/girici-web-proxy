@@ -57,9 +57,22 @@ const sidebar: DefaultTheme.SidebarItem[] = [
   },
 ];
 
+const llmsIntro = [
+  "Install: `docker run -d --name girici -p 3000:3000 -v girici_data:/data halitsever/girici-web-proxy:latest`, then",
+  "enter the setup code from `docker logs girici` at http://localhost:3000. Service workers need HTTPS on any address",
+  "other than localhost, and the operator of an instance can read all proxied traffic.",
+].join(" ");
+
+const llmsOptional = [
+  "## Optional",
+  "",
+  `- [Source](${repo}): repository`,
+  "- [Docker Hub](https://hub.docker.com/r/halitsever/girici-web-proxy): container image",
+].join("\n");
+
 /** Builds llms.txt from the sidebar and ships each page's markdown next to its HTML for LLM tools. */
 async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
-  const header = `# ${site.title}\n\n> ${site.description}`;
+  const header = `# ${site.title}\n\n> ${site.description}\n\n${llmsIntro}`;
   const sections: string[] = [];
   const pages: string[] = [];
   for (const group of sidebar) {
@@ -70,22 +83,25 @@ async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
         lines.push(`- [${text}](${link})`);
         continue;
       }
-      const page = (await readFile(join(srcDir, `${link}.md`), "utf8"))
+      const source = await readFile(join(srcDir, `${link}.md`), "utf8");
+      const page = source
         .replace(/^---\n[\s\S]*?\n---\n/, "")
         .replaceAll("](/", `](${site.base}`)
         .trim();
       const target = join(outDir, `${link}.md`);
       await mkdir(dirname(target), { recursive: true });
       await writeFile(target, `${page}\n`);
-      // The paragraph under the H1 doubles as the page summary.
+      // The front matter description is the page summary; the paragraph under the H1 is the fallback.
+      const described = /^---\n[\s\S]*?^description: "(.*)"$/m.exec(source)?.[1];
       const intro = page.split(/\n\s*\n/)[1] ?? "";
-      const summary = /^(#|```|:::|\||-|>|<)/.test(intro) ? "" : `: ${intro.replace(/\s*\n\s*/g, " ")}`;
-      lines.push(`- [${text}](${site.base}${link.slice(1)}.md)${summary}`);
+      const fallback = /^(#|```|:::|\||-|>|<)/.test(intro) ? "" : intro.replace(/\s*\n\s*/g, " ");
+      const summary = described ?? fallback;
+      lines.push(`- [${text}](${siteUrl}${link.slice(1)}.md)${summary ? `: ${summary}` : ""}`);
       pages.push(page);
     }
     sections.push(lines.join("\n"));
   }
-  await writeFile(join(outDir, "llms.txt"), `${[header, ...sections].join("\n\n")}\n`);
+  await writeFile(join(outDir, "llms.txt"), `${[header, ...sections, llmsOptional].join("\n\n")}\n`);
   await writeFile(join(outDir, "llms-full.txt"), `${[header, ...pages].join("\n\n---\n\n")}\n`);
 }
 
