@@ -92,7 +92,7 @@ What stays open, and what the mode adds:
 
 - Origins of one site, such as `www.example.com` and `accounts.example.com`, share one host. Girici separates them in
   JavaScript as in single-origin mode, and `HttpOnly` is still not a boundary between them.
-- A page can still navigate its own tab out of the proxy through a computed `location` write.
+- A page can still navigate its own tab out of the proxy through a computed `location` write on an alias, as above.
 - Site labels appear in DNS lookups and the TLS handshake, so a network observer sees one stable label per site. Any
   page a visitor allowed to browse opens gets the label key and can match labels to sites; a signed-out visitor of a
   private instance learns no site's host.
