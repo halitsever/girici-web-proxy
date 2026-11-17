@@ -52,6 +52,24 @@ function initial(row: Row): string {
   const labels = host.split(".");
   return (labels.length > 1 ? labels[labels.length - 2] : labels[0])?.charAt(0) ?? "";
 }
+const launching = ref(false);
+const words = computed(() => tagline.split(" "));
+
+/** Points the tile's light at the cursor. */
+function spotlight(event: PointerEvent) {
+  const tile = event.currentTarget as HTMLElement;
+  const box = tile.getBoundingClientRect();
+  tile.style.setProperty("--mx", `${event.clientX - box.left}px`);
+  tile.style.setProperty("--my", `${event.clientY - box.top}px`);
+}
+
+/** The route sweeps the screen before the page opens; a new tab must open inside the click, so it skips this. */
+async function launch() {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  launching.value = true;
+  await new Promise((resolve) => setTimeout(resolve, 520));
+}
+
 const typing = computed(() => query.value.trim() !== "");
 const tiles = computed(() => rows.value.filter((row) => row.kind === "recent" || row.kind === "suggestion"));
 
@@ -159,8 +177,12 @@ async function openRow(row: Row | undefined) {
   success.value = t(settings.value.newTab ? "browse.openingTab" : "browse.opening", { name });
   try {
     if (settings.value.newTab) await openProxiedTab(row.path);
-    else await openProxied(row.path);
+    else {
+      await launch();
+      await openProxied(row.path);
+    }
   } catch (cause) {
+    launching.value = false;
     success.value = null;
     error.value = t("browse.engineFailed", { error: cause instanceof Error ? cause.message : String(cause) });
   }
@@ -183,6 +205,8 @@ function onEscape() {
 }
 
 onMounted(async () => {
+  // Back from the opened site, the page may come out of the cache with the sweep still covering it.
+  window.addEventListener("pageshow", () => (launching.value = false));
   settings.value = loadSettings();
   history.value = loadHistory();
   siteMode.value = isSiteMode(await getAuthState().catch(() => null));
@@ -192,7 +216,10 @@ onMounted(async () => {
 <template>
   <div class="mx-auto flex w-full max-w-[920px] flex-col px-5" style="padding-top: clamp(24px, 9vh, 96px)">
     <h1 class="max-w-[18ch] text-[clamp(34px,6vw,60px)] leading-[1.02] font-semibold tracking-[-0.045em] text-balance">
-      {{ tagline }}
+      <template v-for="(word, index) in words" :key="index"
+        ><span class="word" :style="{ '--i': index }">{{ word }}</span
+        >{{ index < words.length - 1 ? " " : "" }}</template
+      >
     </h1>
     <p class="mt-4 max-w-[52ch] text-[17px] leading-relaxed text-muted-foreground">{{ t("browse.lead") }}</p>
 
@@ -201,7 +228,7 @@ onMounted(async () => {
         class="group relative flex h-[72px] items-center gap-4 overflow-hidden rounded-2xl border bg-[#0d1326] pr-3 pl-5 transition-colors focus-within:border-[#2c3a66]"
         :class="error ? 'border-[var(--gi-danger-border)]' : 'border-[#1c2440]'"
       >
-        <svg viewBox="0 0 64 64" class="h-7 w-7 shrink-0" aria-hidden="true">
+        <svg viewBox="0 0 64 64" class="door h-7 w-7 shrink-0" aria-hidden="true">
           <path fill="#fafafa" d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z" />
           <rect width="38" height="8" x="24" y="26" fill="#3d6bff" />
         </svg>
@@ -288,18 +315,18 @@ onMounted(async () => {
               v-for="row in section.items"
               :key="row.key"
               type="button"
-              class="group/tile flex min-w-0 flex-col items-start gap-5 rounded-2xl border bg-[#0c1124] p-4 text-left transition-colors hover:border-[#2c3a66] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              class="tile group/tile relative flex min-w-0 flex-col items-start gap-5 overflow-hidden rounded-2xl border bg-[#0c1124] p-4 text-left transition-[border-color,transform] duration-300 hover:-translate-y-0.5 hover:border-[#2c3a66] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-reduce:hover:translate-y-0"
               :class="row.index === selectedIndex && tiles.length ? 'border-[#1c2440]' : 'border-[#161d36]'"
+              :style="{ '--i': row.index }"
+              @pointermove="spotlight"
               @click="openRow(row)"
             >
-              <span class="flex w-full items-center">
-                <span
-                  class="grid h-9 w-9 place-items-center rounded-full border-[3px] border-[#e4e4e7] text-[13px] font-semibold text-[#e4e4e7] uppercase transition-colors group-hover/tile:border-gi-brand"
-                  aria-hidden="true"
-                  >{{ initial(row) }}</span
-                >
+              <span class="mark relative grid h-9 w-9 place-items-center" aria-hidden="true">
+                <span class="mark-ring absolute inset-0 rounded-full border-[3px] border-[#e4e4e7]" />
+                <span class="mark-bar absolute top-1/2 left-1/2 h-[5px] w-[22px] -translate-y-1/2 bg-gi-brand" />
+                <span class="mark-letter text-[13px] font-semibold text-[#e4e4e7] uppercase">{{ initial(row) }}</span>
               </span>
-              <span class="flex w-full min-w-0 flex-col gap-0.5">
+              <span class="relative flex w-full min-w-0 flex-col gap-0.5">
                 <span class="truncate text-[15px] font-medium text-[#e4e4e7]">{{
                   row.kind === "recent" ? row.label.replace(/^https?:\/\//, "") : row.label
                 }}</span>
@@ -314,5 +341,114 @@ onMounted(async () => {
     <p v-if="siteMode === false" class="mt-12 max-w-[68ch] text-[13px] leading-relaxed text-gi-subtle">
       {{ t("browse.sharedOrigin") }}
     </p>
+
+    <div v-if="launching" class="launch" aria-hidden="true"><span class="launch-route" /></div>
   </div>
 </template>
+
+<style scoped>
+@media (prefers-reduced-motion: no-preference) {
+  .word {
+    display: inline-block;
+    animation: rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--i) * 70ms);
+  }
+  .door {
+    animation: turn-in 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) 0.2s backwards;
+    transition: transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .group:focus-within .door {
+    transform: rotate(-360deg);
+  }
+  .tile {
+    animation: rise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+    animation-delay: calc(0.35s + var(--i) * 45ms);
+  }
+}
+
+/* The cursor carries a soft light across each tile. */
+.tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(61, 107, 255, 0.16), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.tile:hover::before {
+  opacity: 1;
+}
+
+/* Hovered, the letter's ring opens into the logo's door and the route slides in. */
+.mark-ring {
+  transition:
+    border-color 0.3s ease,
+    transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.mark-bar {
+  transform-origin: right center;
+  transform: translate(0, -50%) scaleX(0);
+  transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.mark-letter {
+  transition: opacity 0.2s ease;
+}
+.tile:hover .mark-ring,
+.tile:focus-visible .mark-ring {
+  border-right-color: transparent;
+  transform: rotate(20deg);
+}
+.tile:hover .mark-bar,
+.tile:focus-visible .mark-bar {
+  transform: translate(0, -50%) scaleX(1);
+}
+.tile:hover .mark-letter,
+.tile:focus-visible .mark-letter {
+  opacity: 0;
+}
+
+/* Opening a site: the route crosses the screen, then opens like a door onto the next page. */
+.launch {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  align-items: center;
+  pointer-events: none;
+}
+.launch-route {
+  display: block;
+  height: 6px;
+  background: var(--gi-brand);
+  box-shadow: 0 0 40px rgba(61, 107, 255, 0.9);
+  transform-origin: left center;
+  animation:
+    sweep 0.26s cubic-bezier(0.6, 0, 0.2, 1) both,
+    open 0.3s cubic-bezier(0.6, 0, 0.2, 1) 0.24s both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes turn-in {
+  from {
+    opacity: 0;
+    transform: rotate(-120deg) scale(0.6);
+  }
+}
+@keyframes sweep {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes open {
+  to {
+    height: 100vh;
+    background: var(--background);
+    box-shadow: none;
+  }
+}
+</style>

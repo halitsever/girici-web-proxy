@@ -344,6 +344,27 @@ function onClearHistory() {
   history.value = [];
 }
 
+const sectionNav = ref<HTMLElement | null>(null);
+const highlight = ref<Record<string, string> | null>(null);
+
+function placeHighlight() {
+  const link = sectionNav.value?.querySelector<HTMLElement>('[aria-current="true"]');
+  highlight.value = link
+    ? {
+        left: `${link.offsetLeft}px`,
+        top: `${link.offsetTop}px`,
+        width: `${link.offsetWidth}px`,
+        height: `${link.offsetHeight}px`,
+      }
+    : null;
+}
+watch([active, sections], () => void nextTick(placeHighlight));
+onMounted(() => {
+  placeHighlight();
+  window.addEventListener("resize", placeHighlight);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", placeHighlight));
+
 let stopWatching: (() => void) | undefined;
 onBeforeUnmount(() => stopWatching?.());
 
@@ -387,23 +408,30 @@ onMounted(async () => {
 
     <div class="mt-10 grid gap-8 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-14">
       <nav
-        class="-mx-5 flex gap-1 overflow-x-auto px-5 lg:sticky lg:top-24 lg:mx-0 lg:flex-col lg:self-start lg:overflow-visible lg:px-0"
+        ref="sectionNav"
+        class="relative -mx-5 flex gap-1 overflow-x-auto px-5 lg:sticky lg:top-24 lg:mx-0 lg:flex-col lg:self-start lg:overflow-visible lg:px-0"
         :aria-label="t('settings.title')"
       >
+        <!-- One highlight that glides to the section in view. -->
+        <span
+          v-if="highlight"
+          class="pointer-events-none absolute rounded-lg bg-accent transition-all duration-500 ease-[cubic-bezier(0.2,0.7,0.2,1)] motion-reduce:transition-none"
+          :style="highlight"
+          aria-hidden="true"
+        >
+          <span
+            class="absolute top-1/2 left-2 hidden h-[3px] w-2.5 -translate-y-1/2 rounded-full bg-gi-brand shadow-[0_0_10px_rgba(61,107,255,0.8)] lg:block"
+          />
+        </span>
         <a
           v-for="section in sections"
           :key="section.id"
           :href="`#${section.id}`"
           class="relative flex h-10 shrink-0 items-center rounded-lg px-3 text-[14px] font-medium whitespace-nowrap no-underline transition-colors lg:pl-6"
-          :class="active === section.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          :class="active === section.id ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'"
           :aria-current="active === section.id ? 'true' : undefined"
           @click.prevent="jump(section.id)"
         >
-          <span
-            v-if="active === section.id"
-            class="absolute top-1/2 left-2 hidden h-[3px] w-2.5 -translate-y-1/2 rounded-full bg-gi-brand lg:block"
-            aria-hidden="true"
-          />
           {{ t(section.label) }}
         </a>
       </nav>

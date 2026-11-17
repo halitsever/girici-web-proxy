@@ -12,7 +12,9 @@ import BrandMark from "./BrandMark.vue";
     >
       <BrandMark />
       <div v-if="!brand.logo" class="relative mx-auto aspect-square w-[min(72%,440px)]">
-        <span class="door-route absolute top-[40.6%] left-[37.5%] h-[12.5%] w-[200%] bg-gi-brand" />
+        <span class="door-route absolute top-[40.6%] left-[37.5%] h-[12.5%] w-[200%] overflow-hidden bg-gi-brand">
+          <span v-for="index in 4" :key="index" class="packet" :style="{ '--i': index - 1 }" />
+        </span>
         <svg viewBox="0 0 64 64" class="door-ring absolute inset-0 h-full w-full">
           <path fill="#fafafa" d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z" />
         </svg>
@@ -39,6 +41,36 @@ import BrandMark from "./BrandMark.vue";
   .door-route {
     transform-origin: left center;
     animation: extend 0.8s cubic-bezier(0.6, 0, 0.2, 1) 0.3s both;
+  }
+}
+/* Light runs along the route into the door, as addresses do. */
+.packet {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 18%;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0));
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .packet {
+    animation: travel 6s linear infinite;
+    animation-delay: calc(1.1s + var(--i) * 1.5s);
+  }
+}
+@keyframes travel {
+  0% {
+    opacity: 0;
+    transform: translateX(560%);
+  }
+  8%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-20%);
   }
 }
 @keyframes turn-in {
