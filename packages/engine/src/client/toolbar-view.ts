@@ -12,7 +12,7 @@ import { toolbarText as vi } from "./locales/vi.ts";
 
 /** The Girici mark from girici-icon-white.svg, without its metadata block. */
 const MARK =
-  '<svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z"/><rect width="38" height="8" x="24" y="26"/></svg>';
+  '<svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z"/><rect class="bar" width="38" height="8" x="24" y="26"/></svg>';
 
 const icon = (d: string) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
 
@@ -105,22 +105,31 @@ export const TOOLBAR_CSS = `
   font: 13px/1.2 system-ui, -apple-system, "Segoe UI", sans-serif; }
 [hidden] { display: none !important; }
 button { all: unset; box-sizing: border-box; display: grid; place-items: center; flex: none; width: 32px; height: 32px;
-  border-radius: 8px; color: #a1a1aa; cursor: pointer; }
-button:hover { color: #fafafa; background: #27272a; }
+  border-radius: 9px; color: #a1a1aa; cursor: pointer; transition: color .15s ease, background-color .15s ease; }
+button:hover { color: #fafafa; background: #141c36; }
 button:focus-visible, .address:focus-visible { outline: 2px solid #3d6bff; outline-offset: 1px; }
 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;
   stroke-linejoin: round; }
 svg.mark { fill: currentColor; stroke: none; }
-.handle { border-radius: 50%; background: #0a0f1e; border: 1px solid #27272a; color: #fafafa;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 35%); }
-.panel { display: flex; align-items: center; gap: 2px; box-sizing: border-box; height: 40px;
-  width: min(560px, calc(100vw - 24px)); padding: 0 4px; background: #0a0f1e; border: 1px solid #27272a;
-  border-radius: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / 40%); }
-.address { all: unset; box-sizing: border-box; flex: 1; min-width: 0; height: 30px; padding: 0 10px; border-radius: 8px;
-  background: #18181b; color: #fafafa; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+svg.mark .bar { fill: #3d6bff; }
+.handle { width: 38px; height: 38px; border-radius: 50%; background: #0a0f1e; border: 1px solid #1c2440;
+  color: #fafafa; box-shadow: 0 6px 20px rgb(0 0 0 / 40%), 0 0 0 0 rgb(61 107 255 / 0%);
+  transition: box-shadow .3s ease, border-color .3s ease; }
+.handle:hover { background: #0a0f1e; border-color: #2c3a66; box-shadow: 0 6px 20px rgb(0 0 0 / 40%),
+  0 0 18px rgb(61 107 255 / 45%); }
+.handle svg { width: 18px; height: 18px; transition: transform .5s cubic-bezier(.2,.7,.2,1); }
+.handle:hover svg { transform: rotate(-200deg); }
+.panel { display: flex; align-items: center; gap: 2px; box-sizing: border-box; height: 44px;
+  width: min(580px, calc(100vw - 24px)); padding: 0 5px; background: rgb(13 19 38 / 96%); border: 1px solid #1c2440;
+  border-radius: 14px; box-shadow: 0 12px 32px rgb(0 0 0 / 45%), 0 0 0 1px rgb(61 107 255 / 8%);
+  transform-origin: left bottom; animation: open .28s cubic-bezier(.2,.7,.2,1); }
+.address { all: unset; box-sizing: border-box; flex: 1; min-width: 0; height: 32px; padding: 0 12px; border-radius: 9px;
+  background: #141c36; color: #fafafa; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .address[aria-invalid="true"] { box-shadow: inset 0 0 0 1px #f87171; }
 .message { flex: 1; min-width: 0; padding: 0 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-button.text { width: auto; padding: 0 10px; color: #fafafa; }
+button.text { width: auto; padding: 0 12px; color: #fafafa; }
 button.danger { color: #f87171; }
+@keyframes open { from { opacity: 0; transform: translateY(6px) scale(.96); } }
+@media (prefers-reduced-motion: reduce) { .panel { animation: none; } .handle svg { transition: none; } }
 @media print { :host { display: none; } }
 `;
