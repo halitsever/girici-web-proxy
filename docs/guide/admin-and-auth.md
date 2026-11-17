@@ -1,3 +1,7 @@
+---
+description: "How Girici handles first-run setup, the admin account, login and public access, stored in a small SQLite database."
+---
+
 # Admin and auth
 
 Girici stores a single admin account and its settings in a small SQLite database

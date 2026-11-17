@@ -1,3 +1,7 @@
+---
+description: "Monitor a Girici instance with the health endpoint, the admin Status section, the optional Prometheus endpoint and logs."
+---
+
 # Monitoring
 
 Girici has a health endpoint, a Status section for the admin, an optional Prometheus endpoint and plain-text logs.

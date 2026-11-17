@@ -3,6 +3,25 @@ import { dirname, join } from "node:path";
 import { defineConfig, type DefaultTheme, type SiteConfig } from "vitepress";
 
 const repo = "https://github.com/halitsever/girici-web-proxy";
+const siteUrl = "https://halitsever.github.io/girici-web-proxy/";
+const description =
+  "Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy that runs in Docker.";
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Girici",
+  description,
+  url: siteUrl,
+  image: `${siteUrl}og.png`,
+  applicationCategory: "UtilitiesApplication",
+  operatingSystem: "Linux",
+  codeRepository: repo,
+  programmingLanguage: "TypeScript",
+  license: "https://www.gnu.org/licenses/agpl-3.0.html",
+  author: { "@type": "Person", name: "Halit Sever", url: "https://github.com/halitsever" },
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
 
 const sidebar: DefaultTheme.SidebarItem[] = [
   {
@@ -73,7 +92,7 @@ async function writeLlmsTxt({ srcDir, outDir, site }: SiteConfig) {
 export default defineConfig({
   lang: "en-US",
   title: "Girici",
-  description: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
+  description,
   // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
   base: process.env.DOCS_BASE || "/",
   // The app is dark-only; drop the toggle so the docs match it.
@@ -84,15 +103,27 @@ export default defineConfig({
   head: [
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["meta", { name: "theme-color", content: "#0A0F1E" }],
-    ["meta", { property: "og:title", content: "Girici" }],
-    [
-      "meta",
-      {
-        property: "og:description",
-        content: "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
-      },
-    ],
+    ["meta", { property: "og:type", content: "website" }],
+    ["meta", { property: "og:site_name", content: "Girici" }],
+    ["meta", { property: "og:image", content: `${siteUrl}og.png` }],
+    ["meta", { property: "og:image:width", content: "1280" }],
+    ["meta", { property: "og:image:height", content: "640" }],
+    ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ["meta", { name: "twitter:image", content: `${siteUrl}og.png` }],
+    ["script", { type: "application/ld+json" }, JSON.stringify(jsonLd)],
   ],
+  sitemap: { hostname: siteUrl },
+  transformHead({ pageData, title, description: pageDescription }) {
+    if (pageData.isNotFound) return;
+    const path = pageData.relativePath.replace(/(^|\/)index\.md$/, "$1").replace(/\.md$/, "");
+    const url = `${siteUrl}${path}`;
+    return [
+      ["link", { rel: "canonical", href: url }],
+      ["meta", { property: "og:url", content: url }],
+      ["meta", { property: "og:title", content: title }],
+      ["meta", { property: "og:description", content: pageDescription }],
+    ];
+  },
   themeConfig: {
     logo: "/girici-icon-dark.svg",
     nav: [

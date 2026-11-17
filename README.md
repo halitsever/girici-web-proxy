@@ -1,19 +1,27 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="packages/web/src/assets/brand/girici-icon-dark.svg">
-    <img src="packages/web/src/assets/brand/girici-icon.svg" height="120" alt="Girici">
+    <img src="packages/web/src/assets/brand/girici-icon.svg" height="120" alt="Girici web proxy logo">
   </picture>
+<br/>
+<img src="https://halitsever-api.vercel.app/api/repo-title?title=Girici">
 </p>
-<h1 align="center">Girici</h1>
 
 <p align="center">
-🌐 Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.
+🌐 Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy
+that you run with Docker on your own server.
 <br/>
 <br/>
-<img src="https://img.shields.io/github/sponsors/halitsever"/>
-<img src="https://img.shields.io/github/license/halitsever/girici-web-proxy"/>
-<a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/pulls/halitsever/girici-web-proxy"/></a>
-<a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker"/></a>
+<img src="https://img.shields.io/github/sponsors/halitsever" alt="GitHub sponsors"/>
+<img src="https://img.shields.io/github/license/halitsever/girici-web-proxy" alt="License: AGPL-3.0"/>
+<a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/pulls/halitsever/girici-web-proxy" alt="Docker pulls"/></a>
+<a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker" alt="Docker image version"/></a>
+</p>
+<p align="center">
+<a href="https://halitsever.github.io/girici-web-proxy/"><b>Documentation</b></a> ·
+<a href="https://halitsever.github.io/girici-web-proxy/guide/getting-started">Getting started</a> ·
+<a href="https://halitsever.github.io/girici-web-proxy/guide/supported-sites">Supported sites</a> ·
+<a href="https://halitsever.github.io/girici-web-proxy/guide/threat-model">Threat model</a>
 </p>
 
 > **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.
@@ -39,11 +47,6 @@ working inside the proxy. The server only checks and relays the traffic.
 <img src="docs/public/screenshot.png" alt="Girici Web Proxy Node.js Screenshot" width="820"/>
 </div>
 
-**[Documentation](https://halitsever.github.io/girici-web-proxy/)** ·
-[Getting started](https://halitsever.github.io/girici-web-proxy/guide/getting-started) ·
-[Supported sites](https://halitsever.github.io/girici-web-proxy/guide/supported-sites) ·
-[Threat model](https://halitsever.github.io/girici-web-proxy/guide/threat-model)
-
 ## Features
 
 - **Modern sites.** Classic pages, single-page apps, video, and realtime sites over WebSockets.
@@ -57,6 +60,10 @@ working inside the proxy. The server only checks and relays the traffic.
   server-side YouTube poTokens.
 - **Small to run.** One Docker image for amd64 and arm64, with a SQLite file as its only state. Release images are
   signed with cosign and carry provenance and an SBOM.
+
+<p align="center" >
+<img src="https://halitsever-api.vercel.app/api/installation"/>
+</p>
 
 ## Quick start
 
@@ -150,11 +157,18 @@ Report vulnerabilities privately through GitHub's private vulnerability reportin
 <a href="https://github.com/halitsever/girici-web-proxy/issues"><img src="https://halitsever-api.vercel.app/api/issue"/></a>
 </div>
 
+<p align="center">
+Found a bug or have an idea? Open an <a href="https://github.com/halitsever/girici-web-proxy/issues">issue</a>.<br/>
+Read the <a href=".github/CONTRIBUTING.md">contributing guide</a> before sending a pull request.
+</p>
+
 <div align="center">
 <img src="https://halitsever-api.vercel.app/api/sponsor"/>
 </div>
 
-## License
+<p align="center">
+<img src="https://halitsever-api.vercel.app/api/license"/>
+</p>
 
 Copyright (C) 2021-2026 Halit Sever
 

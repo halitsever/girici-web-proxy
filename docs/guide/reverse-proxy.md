@@ -1,3 +1,7 @@
+---
+description: "Put Girici behind nginx, Traefik or Cloudflare Tunnel with HTTPS, and the settings every reverse proxy setup needs."
+---
+
 # Reverse proxies
 
 Service workers need HTTPS on any host other than `localhost`, so a real deployment puts a TLS terminator in front

@@ -1,3 +1,7 @@
+---
+description: "Subdomain mode runs every proxied site on its own host under your domain, so the browser keeps sites apart."
+---
+
 # Subdomain mode
 
 Subdomain mode runs every proxied site on its own host under your domain, so the browser itself keeps sites apart. It
