@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { Search, SlidersHorizontal, User } from "lucide-vue-next";
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { LogIn, Search, SlidersHorizontal, User } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import { getAuthState } from "@/lib/auth";
+import { LOGIN_PATH } from "@/router";
 import { t, type TextKey } from "@/lib/i18n";
 import BrandMark from "./BrandMark.vue";
 
 const route = useRoute();
-const tabs: Array<{ to: string; label: TextKey; icon: typeof Search }> = [
+// A visitor on a public instance has no account here, only the admin's way in.
+const authed = ref(true);
+const tabs = computed<Array<{ to: string; label: TextKey; icon: typeof Search }>>(() => [
   { to: "/", label: "nav.browse", icon: Search },
   { to: "/settings", label: "nav.settings", icon: SlidersHorizontal },
-  { to: "/account", label: "nav.account", icon: User },
-];
+  authed.value
+    ? { to: "/account", label: "nav.account", icon: User }
+    : { to: LOGIN_PATH, label: "login.submit", icon: LogIn },
+]);
 
 const nav = ref<HTMLElement | null>(null);
 const bar = ref<{ left: number; width: number } | null>(null);
@@ -23,7 +29,12 @@ function place() {
 
 watch(
   () => route.path,
-  () => void nextTick(place),
+  async () => {
+    authed.value = (await getAuthState().catch(() => null))?.authed ?? true;
+    await nextTick();
+    place();
+  },
+  { immediate: true },
 );
 onMounted(() => {
   place();

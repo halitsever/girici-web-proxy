@@ -32,6 +32,16 @@ export const en = {
   "browse.keys": "↑↓ navigate · ↵ open · esc clear",
   "browse.sharedOrigin":
     "Every site you open through Girici shares one browser origin. Don't sign in to important accounts while using sites you don't trust.",
+  "visitor.howTitle": "How it works",
+  "visitor.step1Title": "Type an address",
+  "visitor.step1": "Enter a site or a search above. It opens right here, through this server.",
+  "visitor.step2Title": "The server fetches it",
+  "visitor.step2": "This server loads the site for you, so the site sees the server's address instead of yours.",
+  "visitor.step3Title": "Browse as usual",
+  "visitor.step3": "Links, videos and sign-ins keep working. The Girici button on every page brings you back here.",
+  "visitor.safeTitle": "Before you start",
+  "visitor.operator": "Whoever runs this server can see which sites you open. Use a server you trust.",
+  "visitor.local": "Your history and settings stay in this browser. You can clear them in Settings.",
 
   "login.title": "Sign in to {brand}",
   "login.lead": "This proxy is private. Sign in to keep browsing.",

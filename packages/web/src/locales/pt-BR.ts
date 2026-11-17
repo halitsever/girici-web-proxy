@@ -31,6 +31,18 @@ export const ptBR: Messages = {
   "browse.keys": "↑↓ navegar · ↵ abrir · esc limpar",
   "browse.sharedOrigin":
     "Todos os sites que você abre pelo Girici compartilham uma única origem no navegador. Não entre em contas importantes enquanto usa sites em que você não confia.",
+  "visitor.howTitle": "Como funciona",
+  "visitor.step1Title": "Digite um endereço",
+  "visitor.step1": "Digite um site ou uma pesquisa acima. Ele abre aqui mesmo, por este servidor.",
+  "visitor.step2Title": "O servidor busca para você",
+  "visitor.step2": "Este servidor carrega o site para você, então o site vê o endereço do servidor em vez do seu.",
+  "visitor.step3Title": "Navegue como sempre",
+  "visitor.step3":
+    "Links, vídeos e logins continuam funcionando. O botão do Girici em cada página traz você de volta para cá.",
+  "visitor.safeTitle": "Antes de começar",
+  "visitor.operator":
+    "Quem administra este servidor pode ver quais sites você abre. Use um servidor em que você confia.",
+  "visitor.local": "Seu histórico e suas configurações ficam neste navegador. Você pode apagá-los em Configurações.",
 
   "login.title": "Entrar em {brand}",
   "login.lead": "Este proxy é privado. Entre para continuar navegando.",

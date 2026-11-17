@@ -31,6 +31,19 @@ export const fr: Messages = {
   "browse.keys": "↑↓ naviguer · ↵ ouvrir · esc effacer",
   "browse.sharedOrigin":
     "Tous les sites ouverts avec Girici partagent une même origine dans le navigateur. Ne vous connectez pas à des comptes importants pendant que vous utilisez des sites auxquels vous ne faites pas confiance.",
+  "visitor.howTitle": "Comment ça marche",
+  "visitor.step1Title": "Saisissez une adresse",
+  "visitor.step1": "Saisissez un site ou une recherche ci-dessus. Il s'ouvre ici même, via ce serveur.",
+  "visitor.step2Title": "Le serveur va le chercher",
+  "visitor.step2": "Ce serveur charge le site pour vous : le site voit l'adresse du serveur et non la vôtre.",
+  "visitor.step3Title": "Naviguez comme d'habitude",
+  "visitor.step3":
+    "Les liens, les vidéos et les connexions continuent de fonctionner. Le bouton Girici présent sur chaque page vous ramène ici.",
+  "visitor.safeTitle": "Avant de commencer",
+  "visitor.operator":
+    "La personne qui gère ce serveur peut voir les sites que vous ouvrez. Utilisez un serveur de confiance.",
+  "visitor.local":
+    "Votre historique et vos réglages restent dans ce navigateur. Vous pouvez les effacer dans les Réglages.",
 
   "login.title": "Connexion à {brand}",
   "login.lead": "Ce proxy est privé. Connectez-vous pour continuer à naviguer.",
