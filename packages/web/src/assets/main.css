@@ -2,29 +2,29 @@
 @import "tw-animate-css";
 
 /*
- * Girici dark theme: brand Midnight base + Route Blue accent, on a neutral dark ramp.
+ * Girici dark theme: brand Midnight base + Route Blue accent, on a ramp of Midnight blues.
  * Route Blue is the one brand accent (open action, active toggles, focus, avatar, logo bar).
  */
 :root {
   color-scheme: dark;
   --background: #0a0f1e; /* Midnight */
   --foreground: #fafafa;
-  --card: #18181b;
+  --card: #0f1529;
   --card-foreground: #fafafa;
-  --popover: #18181b;
+  --popover: #0f1529;
   --popover-foreground: #fafafa;
   --primary: #fafafa;
   --primary-foreground: #0a0f1e;
-  --secondary: #27272a;
+  --secondary: #141c36;
   --secondary-foreground: #fafafa;
-  --muted: #27272a;
+  --muted: #141c36;
   --muted-foreground: #a1a1aa;
-  --accent: #27272a;
+  --accent: #141c36;
   --accent-foreground: #fafafa;
   --destructive: #7f1d1d;
   --destructive-foreground: #fafafa;
-  --border: #27272a;
-  --input: #27272a;
+  --border: #1c2440;
+  --input: #1c2440;
   --ring: #3d6bff; /* Route Blue */
   --radius: 0.75rem;
 
@@ -36,9 +36,9 @@
   --gi-danger-bg: #450a0a;
   --gi-subtle: #71717a;
   --gi-placeholder: #52525b;
-  --gi-strong: #3f3f46;
-  --gi-divider: #18181b;
-  --gi-panel: #111113;
+  --gi-strong: #2c3a66;
+  --gi-divider: #121a30;
+  --gi-panel: #0c1124;
 }
 
 @theme inline {
