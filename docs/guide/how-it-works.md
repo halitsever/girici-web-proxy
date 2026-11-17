@@ -73,6 +73,11 @@ guard (no local or private addresses, an allowed-port list, DNS-rebinding protec
 `undici`, and streams the response back. Range requests, redirects, and compressed bodies pass through
 without being mangled. Target URLs, cookies, and tokens are never logged at the default log level.
 
+The icons on the browse page's site tiles come from `/_g/favicon?host=...`. The server fetches a site's
+`/favicon.ico`, or the icon its home page names, through the same guard and blocklist, and keeps it in memory for a
+day. The site sees the server, and no third-party icon service is asked. It answers whoever may browse: the signed-in
+admin, or everyone while public access is on.
+
 ## Authentication
 
 Once an admin account exists, the proxy data path (`/_g/r` and `/_g/ws`) sits behind a login. A
