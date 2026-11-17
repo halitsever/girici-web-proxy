@@ -46,12 +46,20 @@ const preview = computed(() => {
   const match = /^(\/~\/[^/]+\/)(.*)$/.exec(res.path);
   return match ? { host: window.location.host, route: match[1], rest: match[2] } : null;
 });
+/** The host a tile opens, with any scheme and path dropped. */
+function hostOf(row: Row): string {
+  return (row.host ?? row.label).replace(/^https?:\/\//, "").split("/")[0] ?? "";
+}
+
 /** The site's own name, so en.wikipedia.org and wikipedia.org both read as W. */
 function initial(row: Row): string {
-  const host = (row.host ?? row.label).replace(/^https?:\/\//, "").split("/")[0] ?? "";
-  const labels = host.split(".");
+  const labels = hostOf(row).split(".");
   return (labels.length > 1 ? labels[labels.length - 2] : labels[0])?.charAt(0) ?? "";
 }
+
+/** Icons that arrived; the letter shows until then, and for good when one never does. */
+const icons = ref(new Set<string>());
+const iconUrl = (row: Row) => `/_g/favicon?host=${encodeURIComponent(hostOf(row))}`;
 const launching = ref(false);
 const words = computed(() => tagline.split(" "));
 
@@ -324,7 +332,23 @@ onMounted(async () => {
               <span class="mark relative grid h-9 w-9 place-items-center" aria-hidden="true">
                 <span class="mark-ring absolute inset-0 rounded-full border-[3px] border-[#e4e4e7]" />
                 <span class="mark-bar absolute top-1/2 left-1/2 h-[5px] w-[22px] -translate-y-1/2 bg-gi-brand" />
-                <span class="mark-letter text-[13px] font-semibold text-[#e4e4e7] uppercase">{{ initial(row) }}</span>
+                <!-- A light disc, so dark icons such as GitHub's stay visible on Midnight. -->
+                <span
+                  class="mark-icon grid h-[22px] w-[22px] place-items-center rounded-full bg-[#f4f4f5]"
+                  :class="icons.has(hostOf(row)) ? '' : 'absolute opacity-0'"
+                >
+                  <img
+                    :src="iconUrl(row)"
+                    alt=""
+                    class="h-[14px] w-[14px] object-contain"
+                    @load="icons = new Set(icons).add(hostOf(row))"
+                  />
+                </span>
+                <span
+                  v-if="!icons.has(hostOf(row))"
+                  class="mark-letter text-[13px] font-semibold text-[#e4e4e7] uppercase"
+                  >{{ initial(row) }}</span
+                >
               </span>
               <span class="relative flex w-full min-w-0 flex-col gap-0.5">
                 <span class="truncate text-[15px] font-medium text-[#e4e4e7]">{{
@@ -390,7 +414,8 @@ onMounted(async () => {
   transform: translate(0, -50%) scaleX(0);
   transition: transform 0.4s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
-.mark-letter {
+.mark-letter,
+.mark-icon {
   transition: opacity 0.2s ease;
 }
 .tile:hover .mark-ring,
@@ -403,7 +428,9 @@ onMounted(async () => {
   transform: translate(0, -50%) scaleX(1);
 }
 .tile:hover .mark-letter,
-.tile:focus-visible .mark-letter {
+.tile:focus-visible .mark-letter,
+.tile:hover .mark-icon,
+.tile:focus-visible .mark-icon {
   opacity: 0;
 }
 

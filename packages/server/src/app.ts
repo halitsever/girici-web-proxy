@@ -16,6 +16,7 @@ import { authRouter } from "./routes/auth.ts";
 import { bootstrapRouter } from "./routes/bootstrap.ts";
 import { brandRouter } from "./routes/brand.ts";
 import { engineRouter } from "./routes/engine.ts";
+import { faviconRouter } from "./routes/favicon.ts";
 import { healthRouter } from "./routes/health.ts";
 import { legacyRouter } from "./routes/legacy.ts";
 import { poRouter, type PoTokenSource } from "./routes/pot.ts";
@@ -95,6 +96,17 @@ export function createApp({
   if (sites) app.use(onHosts(["root"], siteRootRouter(sites, authStore)));
   app.use(root(sourceRouter(sourceUrl)));
   app.use(root(brandRouter(brand)));
+  app.use(
+    root(
+      faviconRouter({
+        agent: relay.agent,
+        store: authStore,
+        allowedTestHosts: relay.allowedTestHosts,
+        blocklist: relay.blocklist,
+        siteDomain: relay.siteDomain,
+      }),
+    ),
+  );
   app.use(root(authRouter(authStore, { setupToken, siteDomain: sites?.domain })));
   app.use(
     root(adminRouter(authStore, blocklist ?? new HostBlocklist([], authStore.blockedHosts()), brand, sites?.domain)),
