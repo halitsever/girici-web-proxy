@@ -4,6 +4,7 @@ import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import AuthShell from "@/components/layout/AuthShell.vue";
 import BrandMark from "@/components/layout/BrandMark.vue";
 import SourceLink from "@/components/layout/SourceLink.vue";
 import { getAuthState } from "@/lib/auth";
@@ -59,13 +60,13 @@ async function goNext() {
 </script>
 
 <template>
-  <div class="grid min-h-screen place-items-center px-4 py-10">
-    <div class="flex w-full max-w-[400px] flex-col gap-6">
-      <div class="flex flex-col items-center gap-3 text-center">
-        <BrandMark size="lg" :show-name="false" />
+  <AuthShell>
+    <div class="flex flex-col gap-6">
+      <div class="flex flex-col gap-5">
+        <BrandMark size="lg" :show-name="false" class="lg:hidden" />
         <div>
-          <h1 class="text-[22px] font-semibold tracking-[-0.03em]">{{ t("challenge.title") }}</h1>
-          <p class="mt-1 text-[14px] text-muted-foreground">{{ t("challenge.lead") }}</p>
+          <h1 class="text-[30px] leading-tight font-semibold tracking-[-0.04em]">{{ t("challenge.title") }}</h1>
+          <p class="mt-2 text-[15px] text-muted-foreground">{{ t("challenge.lead") }}</p>
         </div>
       </div>
 
@@ -85,7 +86,7 @@ async function goNext() {
         <Button @click="run">{{ t("challenge.retry") }}</Button>
       </template>
 
-      <p class="text-center text-[13px]"><SourceLink /></p>
+      <p class="text-[13px]"><SourceLink /></p>
     </div>
-  </div>
+  </AuthShell>
 </template>
