@@ -140,6 +140,7 @@ function workerHelpers(scope: WorkerScope, ctx: UrlContext) {
     fakeFor: () => null,
     // A worker has no window or document, so location writes fall through to the native (read-only) property.
     isWindowOrDocument: () => false,
+    isWindow: () => false,
     navigationUrl: ctx.toProxy,
     rewrite: {
       js: (code) => code,

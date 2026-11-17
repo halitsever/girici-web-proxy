@@ -31,11 +31,20 @@ Every proxied site runs on Girici's own origin, for example `https://proxy.examp
 all of them as one site, and Girici has to rebuild the walls between them in JavaScript. That works for the ways
 pages usually reach each other, but not for all of them. These gaps are known and remain open:
 
-- **Computed window access.** A page that reaches another window as `frames[i]`, `window[i]` or by its name gets
-  the browser's real object, not Girici's wrapper.
-- **Computed `location` access.** Girici rewrites the usual ways scripts read and set `location`. A key built at
-  run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)` or
-  `Object.assign(window, { location: url })`, reaches the real one. Such a page can navigate outside the proxy.
+- **Computed window and `location` access through an alias.** Girici rewrites computed access written on a window,
+  a document or a classic script's top-level `this`, such as `self["loc" + "ation"] = url`, `window[k] += x`,
+  `frames[i]`, `window[i]`, `window["name"]`, `const { [k]: l } = window` and `{ ...window }`. It also hooks
+  `Reflect.get`, `Reflect.set`, `Object.getOwnPropertyDescriptor(s)`, `Object.assign`, `Object.values`,
+  `Object.entries` and `__lookupGetter__`, so `Reflect.set(window, "location", url)`,
+  `Object.assign(window, { location: url })` or `Object.getOwnPropertyDescriptor(window, "location").get` get the
+  stand-in for any window or document. Some ways around this remain:
+  - a window or document the rewriter cannot see by its name, such as `const w = window; w[k] = url`, a function
+    parameter or an array element;
+  - a frame named in plain dot syntax, such as `window.someFrameName`, which looks like any other global;
+  - reflection on another window's frames by index or value, such as `Reflect.get(otherWindow, 0)` or
+    `Object.values(otherWindow)`.
+
+  A page written to leave the proxy can still do so this way.
 - **Rewriters run in the page realm.** The code that rewrites a page's scripts and HTML runs in the same JavaScript
   world as the page. A hostile page can interfere with it and with the built-ins it relies on.
 - **Shared workers are found by address.** A page that reaches the browser's own `SharedWorker` can connect to
