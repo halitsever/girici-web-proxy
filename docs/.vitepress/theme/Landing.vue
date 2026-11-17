@@ -14,6 +14,29 @@ const examples = [
 ];
 const packets = ["wikipedia.org", "youtube.com", "info.cern.ch", "archive.org", "reddit.com", "github.com"];
 
+const doorSteps = ["You type an address.", "It goes through the door.", "It comes out on your own server."];
+
+const shots = [
+  {
+    src: "/screenshot.png",
+    alt: "The Girici browse screen with an address field and tiles for recent sites, each with its own icon",
+    title: "Browse",
+    text: "Type an address or a search, or pick up a recent site with one click.",
+  },
+  {
+    src: "/screenshot-settings.png",
+    alt: "Girici settings split into Browsing, Privacy and data, and Admin sections",
+    title: "Settings",
+    text: "Language, search engine, cookies and history for you; access, branding and blocked sites for the admin.",
+  },
+  {
+    src: "/screenshot-signin.png",
+    alt: "The Girici sign-in screen with the logo's ring and route beside the form",
+    title: "Sign-in",
+    text: "Private by default. Open it to the public when you want, and visitors get a short introduction first.",
+  },
+];
+
 const stops = [
   {
     name: "Your tab",
@@ -48,28 +71,57 @@ const defaults = [
   { name: "Small image", text: "A distroless runtime with no shell, running as an unprivileged user." },
 ];
 
-const languages = [
-  { name: "English", lang: "en" },
-  { name: "Türkçe", lang: "tr" },
-  { name: "Español", lang: "es" },
-  { name: "Português", lang: "pt-BR" },
-  { name: "Français", lang: "fr" },
-  { name: "Deutsch", lang: "de" },
-  { name: "Русский", lang: "ru" },
-  { name: "فارسی", lang: "fa", rtl: true },
-  { name: "العربية", lang: "ar", rtl: true },
-  { name: "简体中文", lang: "zh-CN" },
-  { name: "Bahasa Indonesia", lang: "id" },
-  { name: "Tiếng Việt", lang: "vi" },
-];
-
 const current = ref(0);
 const swapping = ref(false);
 const copied = ref(false);
+/** Scroll-driven scenes run only with motion allowed; otherwise every scene shows its end state at rest. */
+const live = ref(false);
+const doorStep = ref(0);
+const shotStep = ref(0);
+const root = ref<HTMLElement | null>(null);
 let timer: ReturnType<typeof setInterval> | undefined;
+let stopScenes: (() => void) | undefined;
+
+const clamp = (value: number) => Math.min(1, Math.max(0, value));
+
+/**
+ * Hands each scene its scroll progress as --p, from 0 to 1. A pinned scene counts while its stage is stuck to the
+ * viewport, any other while it crosses the viewport.
+ */
+function watchScenes(container: HTMLElement): () => void {
+  const scenes = Array.from(container.querySelectorAll<HTMLElement>("[data-scene]"));
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const height = window.innerHeight;
+    for (const scene of scenes) {
+      const box = scene.getBoundingClientRect();
+      const p =
+        scene.dataset.scene === "pin"
+          ? clamp(-box.top / Math.max(1, box.height - height))
+          : clamp((height - box.top) / (height + box.height));
+      scene.style.setProperty("--p", p.toFixed(4));
+      if (scene.dataset.name === "door") doorStep.value = p < 0.34 ? 0 : p < 0.64 ? 1 : 2;
+      if (scene.dataset.name === "shots") shotStep.value = Math.min(shots.length - 1, Math.floor(p * shots.length));
+    }
+  };
+  const onScroll = () => {
+    if (!frame) frame = requestAnimationFrame(update);
+  };
+  update();
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll);
+  return () => {
+    cancelAnimationFrame(frame);
+    window.removeEventListener("scroll", onScroll);
+    window.removeEventListener("resize", onScroll);
+  };
+}
 
 onMounted(() => {
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || !root.value) return;
+  live.value = true;
+  stopScenes = watchScenes(root.value);
   timer = setInterval(() => {
     swapping.value = true;
     setTimeout(() => {
@@ -78,7 +130,10 @@ onMounted(() => {
     }, 260);
   }, 3400);
 });
-onBeforeUnmount(() => clearInterval(timer));
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  stopScenes?.();
+});
 
 async function copy() {
   try {
@@ -92,7 +147,7 @@ async function copy() {
 </script>
 
 <template>
-  <div class="gl">
+  <div ref="root" class="gl" :class="{ live }">
     <section class="hero">
       <div class="hero-copy">
         <h1 class="hero-title">Every site, through one door.</h1>
@@ -136,28 +191,61 @@ async function copy() {
           <path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z" />
         </svg>
       </div>
+      <span class="scroll-cue" aria-hidden="true" />
     </section>
 
-    <section class="product">
-      <figure class="product-frame">
-        <img
-          :src="withBase('/screenshot.png')"
-          width="1505"
-          height="859"
-          alt="The Girici browse screen: a search box with suggestions for Wikipedia, YouTube, Reddit and the Internet Archive"
-        />
-      </figure>
-      <p class="product-caption">
-        Type an address or a search. Pages open inside Girici with logins, video and WebSockets working, and a small
-        toolbar to go back home.
-      </p>
+    <!-- Pinned: one address travels along the route, through the ring, and out as a path on your server. -->
+    <section class="scene door-scene" data-scene="pin" data-name="door">
+      <div class="stage">
+        <ol class="captions">
+          <li v-for="(caption, index) in doorSteps" :key="caption" :class="{ on: doorStep === index }">
+            {{ caption }}
+          </li>
+        </ol>
+        <div class="big-door" aria-hidden="true">
+          <span class="big-route"><code class="addr addr-in">https://en.wikipedia.org/wiki/Istanbul</code></span>
+          <svg class="big-ring" viewBox="0 0 64 64">
+            <path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z" />
+          </svg>
+          <code class="addr addr-out"
+            ><span class="addr-host">proxy.example</span
+            ><span class="addr-route">/~/https/</span>en.wikipedia.org/wiki/Istanbul</code
+          >
+        </div>
+      </div>
     </section>
 
-    <section class="section">
+    <!-- Pinned: the app itself, one screen per stretch of scroll. -->
+    <section class="scene shots-scene" data-scene="pin" data-name="shots">
+      <div class="stage">
+        <div class="shots-copy">
+          <h2 class="h2">Built to be opened every day.</h2>
+          <ol class="shot-list">
+            <li v-for="(shot, index) in shots" :key="shot.title" :class="{ on: shotStep === index }">
+              <span class="shot-dot" aria-hidden="true" />
+              <h3>{{ shot.title }}</h3>
+              <p>{{ shot.text }}</p>
+            </li>
+          </ol>
+        </div>
+        <div class="shots">
+          <figure
+            v-for="(shot, index) in shots"
+            :key="shot.src"
+            class="shot"
+            :class="{ on: shotStep === index, past: shotStep > index }"
+          >
+            <img :src="withBase(shot.src)" width="1440" height="860" :alt="shot.alt" loading="lazy" />
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section route-scene" data-scene="view">
       <h2 class="h2">The route a request takes</h2>
       <p class="lead">Rewriting happens in your browser. The server never parses a page, it moves bytes.</p>
       <ol class="line">
-        <li v-for="stop in stops" :key="stop.name" class="stop">
+        <li v-for="(stop, index) in stops" :key="stop.name" class="stop" :style="{ '--i': index }">
           <span class="stop-mark" />
           <h3 class="stop-name">{{ stop.name }}</h3>
           <p class="stop-text">{{ stop.text }}</p>
@@ -165,34 +253,17 @@ async function copy() {
       </ol>
     </section>
 
-    <section class="section">
+    <section class="section defaults-scene" data-scene="view">
       <h2 class="h2">Safe before you touch a setting</h2>
       <p class="lead">
         A fresh instance is private, guarded and quiet. Every limit can be tuned with an environment variable.
       </p>
       <dl class="defaults">
-        <div v-for="item in defaults" :key="item.name" class="default">
+        <div v-for="(item, index) in defaults" :key="item.name" class="default" :style="{ '--i': index }">
           <dt>{{ item.name }}</dt>
           <dd>{{ item.text }}</dd>
         </div>
       </dl>
-    </section>
-
-    <section class="section languages">
-      <h2 class="h2">Speaks twelve languages</h2>
-      <p class="lead">
-        The interface, the toolbar and every error page follow the browser's language, right to left included.
-      </p>
-      <p class="tongues">
-        <span
-          v-for="item in languages"
-          :key="item.lang"
-          class="tongue"
-          :lang="item.lang"
-          :dir="item.rtl ? 'rtl' : 'ltr'"
-          >{{ item.name }}</span
-        >
-      </p>
     </section>
 
     <section class="section">
@@ -214,7 +285,11 @@ async function copy() {
       </div>
     </section>
 
-    <section class="section closing">
+    <section class="section closing" data-scene="view">
+      <svg class="closing-ring" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M30 6A26 26 0 1 0 55.3 38H44.83A16 16 0 1 1 30 16Z" />
+        <rect width="38" height="8" x="24" y="26" />
+      </svg>
       <h2 class="closing-title">Open the door.</h2>
       <div class="terminal">
         <code class="terminal-line"><span class="terminal-prompt">$</span>{{ command }}</code>
@@ -514,6 +589,315 @@ async function copy() {
   }
 }
 
+/* Scenes read their scroll progress from --p; at rest, and without motion, they sit at their end state. */
+[data-scene] {
+  --p: 1;
+}
+
+.scroll-cue {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  width: 2px;
+  height: 52px;
+  background: linear-gradient(var(--blue), transparent);
+  transform-origin: top;
+}
+.live .scroll-cue {
+  animation: cue 1.8s ease-in-out infinite;
+}
+@keyframes cue {
+  from {
+    transform: scaleY(0);
+    opacity: 1;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+
+/* Pinned scenes: a tall section whose stage sticks to the viewport while the scroll plays it. */
+.scene {
+  position: relative;
+}
+.stage {
+  padding: 120px var(--gutter) 0;
+}
+.live .door-scene {
+  height: 320vh;
+}
+.live .shots-scene {
+  height: 340vh;
+}
+.live .stage {
+  position: sticky;
+  top: var(--vp-nav-height);
+  height: calc(100svh - var(--vp-nav-height));
+  padding: 0 var(--gutter);
+  overflow: hidden;
+}
+
+/* The door scene. Positions follow the 64-unit logo, as in the hero. */
+.door-scene .stage {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: clamp(32px, 7vh, 72px);
+  text-align: center;
+}
+.captions {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.captions li {
+  margin: 0;
+  font-size: clamp(30px, 5vw, 64px);
+  font-weight: 650;
+  line-height: 1.05;
+  letter-spacing: -0.045em;
+}
+.live .captions li {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.5s ease,
+    transform 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.live .captions li.on {
+  opacity: 1;
+  transform: none;
+}
+.big-door {
+  --d: min(40vh, 62vw);
+  /* In, turn, out: each part of the scroll moves one piece. */
+  --a: clamp(0, calc(var(--p) / 0.36), 1);
+  --r: clamp(0, calc((var(--p) - 0.36) / 0.26), 1);
+  --o: clamp(0, calc((var(--p) - 0.62) / 0.26), 1);
+  position: relative;
+  width: var(--d);
+  height: var(--d);
+  margin-bottom: 72px;
+}
+.big-ring {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  fill: var(--paper);
+  transform-origin: 46.875% 46.875%;
+  transform: rotate(calc(var(--r) * -360deg));
+  filter: drop-shadow(0 30px 90px rgba(61, 107, 255, 0.25));
+}
+.big-route {
+  position: absolute;
+  top: calc(var(--d) * 26 / 64);
+  left: calc(var(--d) * 24 / 64);
+  z-index: 1;
+  width: 100vw;
+  height: calc(var(--d) * 8 / 64);
+  background: var(--blue);
+  overflow: hidden;
+  box-shadow: 0 0 calc(var(--r) * 60px) rgba(61, 107, 255, calc(var(--r) * 0.9));
+}
+.addr {
+  font-family: var(--vp-font-family-mono);
+  font-size: clamp(12px, 1.5vw, 19px);
+  white-space: nowrap;
+}
+.addr-in {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  color: var(--midnight);
+  font-weight: 600;
+  /* The route clips it where it starts, inside the ring, so the address disappears through the door. */
+  translate: calc((1 - var(--a)) * 48vw - var(--a) * 100%) -50%;
+}
+.addr-out {
+  position: absolute;
+  top: calc(100% + 28px);
+  left: 50%;
+  padding: 12px 18px;
+  border: 1px solid #1c2440;
+  border-radius: 12px;
+  background: var(--deep);
+  color: var(--zinc);
+  opacity: var(--o);
+  translate: -50% calc((1 - var(--o)) * -90px);
+  scale: calc(0.7 + var(--o) * 0.3);
+  box-shadow: 0 20px 60px -20px rgba(61, 107, 255, calc(var(--o) * 0.6));
+}
+.addr-host {
+  color: var(--paper);
+}
+.addr-route {
+  color: var(--signal);
+}
+
+/* The product scene: one screen per stretch of scroll, its caption lit on a small route. */
+.shots-scene .stage {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.7fr);
+  align-items: center;
+  gap: clamp(32px, 5vw, 72px);
+}
+.shot-list {
+  position: relative;
+  display: grid;
+  gap: 28px;
+  margin: 44px 0 0;
+  padding: 0 0 0 30px;
+  list-style: none;
+}
+.shot-list::before,
+.shot-list::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  left: 6px;
+  width: 3px;
+  border-radius: 3px;
+  background: #1c2440;
+}
+.shot-list::after {
+  background: var(--blue);
+  transform-origin: top;
+  transform: scaleY(var(--p));
+}
+.shot-list li {
+  position: relative;
+  margin: 0;
+  transition: opacity 0.4s ease;
+}
+.live .shot-list li {
+  opacity: 0.35;
+}
+.live .shot-list li.on {
+  opacity: 1;
+}
+.shot-dot {
+  position: absolute;
+  top: 3px;
+  left: -30px;
+  z-index: 1;
+  width: 15px;
+  height: 15px;
+  box-sizing: border-box;
+  border: 3px solid #3a4568;
+  border-radius: 50%;
+  background: var(--midnight);
+  transition:
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.shot-list li.on .shot-dot {
+  border-color: var(--paper);
+  box-shadow: 0 0 0 5px rgba(61, 107, 255, 0.3);
+}
+.shot-list h3 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.shot-list p {
+  margin: 6px 0 0;
+  max-width: 36ch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--zinc);
+}
+.shots {
+  position: relative;
+  aspect-ratio: 1440 / 860;
+  perspective: 1800px;
+}
+.shot {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #1c2440;
+  border-radius: 16px;
+  box-shadow:
+    0 60px 120px -40px rgba(61, 107, 255, 0.4),
+    0 30px 60px -30px rgba(0, 0, 0, 0.8);
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.live .shot {
+  opacity: 0;
+  transform: translateY(70px) rotateX(14deg) scale(0.94);
+  transition:
+    opacity 0.6s ease,
+    transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.live .shot.on {
+  opacity: 1;
+  transform: none;
+}
+.live .shot.past {
+  opacity: 0;
+  transform: translateY(-50px) scale(0.96);
+}
+.gl:not(.live) .shots {
+  display: grid;
+  gap: 24px;
+  aspect-ratio: auto;
+}
+.gl:not(.live) .shot {
+  position: static;
+}
+
+/* The route draws itself across the screen and lights its stops in order. */
+.live .route-scene .line::before {
+  transform-origin: left center;
+  transform: scaleX(clamp(0, calc((var(--p) - 0.18) / 0.3), 1));
+}
+.live .route-scene .stop,
+.live .defaults-scene .default {
+  --k: clamp(0, calc((var(--p) - 0.18 - var(--i) * 0.07) * 9), 1);
+  opacity: calc(0.12 + var(--k) * 0.88);
+  translate: 0 calc((1 - var(--k)) * 28px);
+}
+.live .defaults-scene .default {
+  --k: clamp(0, calc((var(--p) - 0.16 - var(--i) * 0.035) * 9), 1);
+}
+.live .route-scene .stop-mark {
+  box-shadow: 0 0 0 calc(var(--k) * 6px) rgba(61, 107, 255, 0.3);
+}
+
+/* The closing ring turns into place as the page ends. */
+.closing {
+  position: relative;
+  overflow: hidden;
+}
+.closing > :not(.closing-ring) {
+  position: relative;
+  z-index: 1;
+}
+.closing-ring {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  width: min(86vw, 760px);
+  fill: rgba(250, 250, 250, 0.04);
+  translate: -50% 0;
+  rotate: calc((1 - var(--p)) * -220deg);
+  scale: calc(0.8 + var(--p) * 0.25);
+  pointer-events: none;
+}
+.closing-ring rect {
+  fill: rgba(61, 107, 255, 0.16);
+}
+
 .section {
   padding: 140px var(--gutter) 0;
 }
@@ -606,28 +990,6 @@ async function copy() {
   line-height: 1.6;
   color: var(--zinc);
   max-width: 36ch;
-}
-
-.tongues {
-  margin: 64px 0 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.15em 0.6em;
-  font-size: clamp(30px, 5.2vw, 72px);
-  font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: -0.03em;
-}
-.tongue {
-  color: #3f3f46;
-  transition: color 0.25s ease;
-}
-.tongue:nth-child(3n + 1) {
-  color: var(--paper);
-}
-.tongue:hover {
-  color: var(--signal);
 }
 
 .modes {
@@ -748,6 +1110,18 @@ async function copy() {
   .door {
     order: -1;
   }
+  .shots-scene .stage {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 28px;
+  }
+  .shot-list {
+    margin-top: 20px;
+    gap: 14px;
+  }
+  .live .shot-list li:not(.on) p {
+    display: none;
+  }
   .route {
     width: calc(100vw - var(--gutter) - var(--s) * 24 / 64);
   }
@@ -797,6 +1171,22 @@ async function copy() {
     right: auto;
     width: 4px;
     height: auto;
+  }
+  .live .route-scene .line::before {
+    transform-origin: center top;
+    transform: scaleY(clamp(0, calc((var(--p) - 0.12) / 0.4), 1));
+  }
+  .scroll-cue {
+    display: none;
+  }
+  .addr-out {
+    width: max-content;
+    max-width: calc(100vw - 40px);
+    box-sizing: border-box;
+    font-size: 12px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
   }
   .stop-mark {
     position: absolute;
