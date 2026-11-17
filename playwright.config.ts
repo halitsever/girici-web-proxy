@@ -21,6 +21,8 @@ export default defineConfig({
     proxy: { server: "http://127.0.0.1:41999", bypass: "127.0.0.1,localhost" },
     // Specs find UI text by its English wording, and the UI follows the browser's language.
     locale: "en-US",
+    // The UI's motion only adds waits here: opening a site would sweep the screen first on every test.
+    reducedMotion: "reduce",
     trace: "retain-on-failure",
   },
   webServer: [
