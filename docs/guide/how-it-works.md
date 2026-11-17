@@ -88,10 +88,11 @@ The [threat model](/guide/threat-model) covers these in more depth, along with w
 
 - **Single origin.** By default every proxied site shares one browser origin, so isolation between sites is
   limited. `HttpOnly` is not a boundary here. [Subdomain mode](/guide/subdomain-mode) gives each site its own origin.
-- **Computed access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other
-  windows. A key built at run time, such as `self["loc" + "ation"]`, `Reflect.set(window, "location", url)`,
-  `Object.assign(window, { location: url })`, or a window reached as `frames[i]`, `window[i]` or by name, gets the
-  browser's own object. Such a page can navigate outside the proxy or open a document without Girici's script.
+- **Aliased access goes around the rewriter.** Girici rewrites the ways scripts usually reach `location` and other
+  windows, computed keys such as `self["loc" + "ation"]` or `frames[i]` and reflection such as
+  `Reflect.set(window, "location", url)` included. A window reached through an alias, such as
+  `const w = window; w[k] = url`, or a frame named in dot syntax gets the browser's own object. Such a page can
+  navigate outside the proxy or open a document without Girici's script.
 - **Blob URLs are partly shared.** Every site runs on Girici's origin. Girici refuses another site's `blob:` URL to
   `fetch`, `XMLHttpRequest` and navigations, but an image, media or script element can still load one.
 - **The operator sees traffic.** The relay terminates TLS at the server.

@@ -84,7 +84,7 @@ describe("rewriteJs", () => {
     ["frame.contentWindow.parent.x", "__g$.W(frame.contentWindow.parent).x"],
     ["window['top'].x", "__g$.W(window['top']).x"],
     ["let parent = a; parent = b;", "let parent = a; parent = b;"],
-    ["self.frames[0]", "__g$.W(self.frames)[0]"],
+    ["self.frames[0]", "__g$.V(__g$.W(self.frames)[0])"],
     ["var u = location;", "var u = __g$.L(location);"],
     ['location = "https://x.test/"', 'location = __g$.N(location, ("https://x.test/"))'],
     ["window.location.href = u", "__g$.L(window.location).href = u"],
@@ -161,6 +161,21 @@ describe("rewriteJs", () => {
     expect(STANDALONE_SHIM).toContain("M:");
     expect(STANDALONE_SHIM).toContain("W:function(v){return v}");
     expect(STANDALONE_SHIM).toContain("P:");
+    expect(STANDALONE_SHIM).toContain("V:function(v){return v}");
+    expect(STANDALONE_SHIM).toContain("K:");
+  });
+
+  it("makes the standalone K convert its key once, as the page's own access would", () => {
+    const scope = { globalThis: {} as Record<string, unknown> };
+    new Function("globalThis", STANDALONE_SHIM)(scope.globalThis);
+    const helpers = scope.globalThis.__g$ as { K(o: unknown, k: unknown): { v: unknown }; V(v: unknown): unknown };
+    let conversions = 0;
+    const key = { toString: () => (conversions++, "a") };
+    const target = { a: 1 };
+    const ref = helpers.K(target, key);
+    ref.v = (ref.v as number) + 2;
+    expect([target.a, conversions]).toEqual([3, 1]);
+    expect(helpers.V(target)).toBe(target);
   });
 
   it("leaves module bindings alone", () => {
@@ -265,6 +280,64 @@ describe("rewriteJs", () => {
     expect(rewriteJs(rewriteJs("location.href", { standalone: true }), { standalone: true })).toBe(
       `${STANDALONE_SHIM}__g$.L(location).href`,
     );
+  });
+});
+
+describe("computed access on windows", () => {
+  it.each([
+    ['self["loc" + "ation"]', '__g$.V(self["loc" + "ation"])'],
+    ["window[k].href = u", "__g$.V(window[k]).href = u"],
+    ["window[k] = u", "__g$.K(window, (k)).v = u"],
+    ["(window)[k] = u", "__g$.K((window), (k)).v = u"],
+    ["window[/* c */ k] = u", "__g$.K(window, (k)).v = u"],
+    ["window[(a, b)] = u", "__g$.K(window, (a, b)).v = u"],
+    ["document[k] += u", "__g$.K(document, (k)).v += u"],
+    ["top[k]--", "__g$.K(__g$.W(top), (k)).v--"],
+    ["self[k] ??= u", "__g$.K(self, (k)).v ??= u"],
+    ["[window[k]] = [u]", "[__g$.K(window, (k)).v] = [u]"],
+    ["for (window[k] in o);", "for (__g$.K(window, (k)).v in o);"],
+    ["frames[0]", "__g$.V(__g$.W(frames)[0])"],
+    ["window[0].document", "__g$.V(window[0]).document"],
+    ['window["child"]', '__g$.V(window["child"])'],
+    ["x.contentWindow[k]", "__g$.V(x.contentWindow[k])"],
+    ["window?.[k].x", "__g$.V(window?.[k])?.x"],
+    ["new window[k]()", "new (__g$.V(window[k]))()"],
+    ["new window[k].C()", "new (__g$.V(window[k]).C)()"],
+    ["this[k]", "__g$.V(this[k])"],
+    ["() => this[k]", "() => __g$.V(this[k])"],
+    ["const { [k]: l } = window", "const { [k]: l } = __g$.D(window)"],
+    ["({ [k]: l } = self)", "({ [k]: l } = __g$.D(self))"],
+    ["const { ...rest } = window", "const { ...rest } = __g$.D(window)"],
+    ["({ ...window })", "({ ...__g$.D(window) })"],
+    ["window[location.hash]", "__g$.V(window[__g$.L(location).hash])"],
+  ])("routes %s through the helpers", (input, output) => {
+    expect(rewriteJs(input)).toBe(output);
+    expect(rewriteJs(output)).toBe(output);
+    expect(() => parseScript(output, { next: true, webcompat: true })).not.toThrow();
+  });
+
+  it.each([
+    // A call keeps the receiver as its this, and calling a Location or a window throws anyway.
+    "window[k](a)",
+    "window[k]`t`",
+    "delete window[k]",
+    "k in window",
+    "function f() { return this[k]; }",
+    "class A { x = this[k]; }",
+    "arr[i] = a[b]",
+  ])("leaves %s as written", (source) => {
+    expect(rewriteJs(`location; ${source}`)).toBe(`__g$.L(location); ${source}`);
+  });
+
+  it("leaves this[k] alone outside a classic script's top level", () => {
+    expect(rewriteJs("location; this[k]", { kind: "module" })).toBe("__g$.L(location); this[k]");
+    expect(rewriteJs("location; this[k]", { kind: "handler" })).toBe("__g$.L(location); this[k]");
+  });
+
+  it("parses sources whose only trigger is a computed window access", () => {
+    expect(rewriteJs("self[a + b]")).toBe("__g$.V(self[a + b])");
+    expect(rewriteJs("({ ...window })")).toBe("({ ...__g$.D(window) })");
+    expect(rewriteJs("a[b]")).toBe("a[b]");
   });
 });
 

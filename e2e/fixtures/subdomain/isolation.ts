@@ -40,7 +40,7 @@ const FRAMES = page(
       windowIndex: attempt(() => window[0].localStorage.length),
       named: attempt(() => window.bframe.document.title),
       computedLocation: attempt(() => frames[0]["loc" + "ation"].href),
-      sameSite: attempt(() => frames[1].document.title),
+      sameSiteOrigin: attempt(() => frames[1].document.title),
     });
   });
 </script>`,

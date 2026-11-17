@@ -41,13 +41,14 @@ test("renews a frame window the page touched before setting its src", async ({ p
   );
   await openThroughUi(page, "https://site-a.test/reuse");
   await expect(page.locator("#results")).not.toBeEmpty();
-  // contentWindow keeps a frame headed to another site out of reach; frames[0] still hands it out, the single-origin limit.
+  // contentWindow and frames[0] keep a frame headed to another site out of reach; an alias still hands it out.
   expect(JSON.parse((await page.locator("#results").textContent()) ?? "{}")).toEqual({
     cookie: "",
     href: "https://site-b.test/reuse-child",
     reused: true,
     fromChild: true,
     contentWindow: "SecurityError",
+    index: "SecurityError",
   });
 });
 

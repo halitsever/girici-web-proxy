@@ -7,6 +7,8 @@ export interface HelperEnv {
   isLocation(value: unknown): boolean;
   fakeFor(location: object): object | null;
   isWindowOrDocument(value: unknown): boolean;
+  /** Whether a value is a window, by a check that runs none of a page's getters or proxy traps. */
+  isWindow(value: unknown): boolean;
   /** A navigation's URL as the browser must see it: proxied, and a blob swapped for its bootstrap. */
   navigationUrl(raw: string): string;
   rewrite: RewriteBridge;
@@ -37,6 +39,10 @@ export interface GiriciHelpers {
   /** A javascript: URL's code. A string result is the window's next document, so it comes back with the runtime. */
   J(code: unknown, owner?: unknown): string | undefined;
   W(value: unknown): unknown;
+  /** A value read at a key only known at run time: a Location becomes its stand-in and another window is wrapped. */
+  V(value: unknown): unknown;
+  /** `object[key]` as a target, with the key converted once: `v` reads it as V does and writes `location` as S does. */
+  K(object: unknown, key: unknown): { v: unknown };
   realOrigin(): string;
   site(): string | undefined;
   /** The engine script of a document that reuses this window calls this instead of installing again. */
@@ -45,6 +51,7 @@ export interface GiriciHelpers {
 
 // Taken at load: the destructuring proxy is made and read through on page calls.
 const reflectGet = Reflect.get;
+const reflectSet = Reflect.set;
 const NativeProxy = Proxy;
 
 /** Window links that can lead to another origin's window. A null prototype keeps page additions out of `in`. */
@@ -54,6 +61,11 @@ const WINDOW_LINKS: Record<string, true> = Object.assign(Object.create(null) as 
   opener: true,
   frames: true,
 });
+
+/** ToPropertyKey, so a key object's toString runs once, as it would for the page's own access. */
+export function propertyKey(key: unknown): PropertyKey {
+  return typeof key === "symbol" ? key : toText(key);
+}
 
 /** The functions rewritten scripts call in place of reading or writing `location`. */
 export function createHelpers(env: HelperEnv): GiriciHelpers {
@@ -77,6 +89,12 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
       (object as Record<string, unknown>)[key] = value;
     }
     return value;
+  };
+
+  const V = (value: unknown): unknown => {
+    if (typeof value !== "object" || value === null) return value;
+    if (isRealLocation(value)) return L(value);
+    return env.isWindow(value) ? env.wrapWindow(value) : value;
   };
 
   return {
@@ -104,7 +122,7 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
           get: (target, property) => {
             const value: unknown = reflectGet(target, property, target);
             if (property === "location") return L(value);
-            return typeof property === "string" && property in WINDOW_LINKS ? env.wrapWindow(value) : value;
+            return typeof property === "string" && property in WINDOW_LINKS ? env.wrapWindow(value) : V(value);
           },
         } as ProxyHandler<object>,
       );
@@ -123,6 +141,23 @@ export function createHelpers(env: HelperEnv): GiriciHelpers {
       return typeof result === "string" ? env.rewrite.srcdoc(result) : undefined;
     },
     W: (value) => env.wrapWindow(value),
+    V,
+    K: (object, key) => {
+      const property = propertyKey(key);
+      return {
+        __proto__: null,
+        get v() {
+          return V((object as Record<PropertyKey, unknown>)[property]);
+        },
+        set v(value: unknown) {
+          if (property === "location" && env.isWindowOrDocument(object)) S(object, property, value);
+          else if (object === null || object === undefined)
+            (object as unknown as Record<PropertyKey, unknown>)[property] = value;
+          // Without throwing, as a sloppy page's own write would not; a primitive takes no property at all.
+          else if (typeof object === "object" || typeof object === "function") reflectSet(object, property, value);
+        },
+      } as unknown as { v: unknown };
+    },
     realOrigin: () => env.realOrigin(),
     site: () => env.site(),
     renew: () => env.renew(),

@@ -39,7 +39,7 @@ test("another site's frame is out of reach by index, name and computed location"
     windowIndex: "SecurityError",
     named: "SecurityError",
     computedLocation: "SecurityError",
-    sameSite: "read",
+    sameSiteOrigin: "SecurityError",
   });
 });
 

@@ -64,6 +64,15 @@ const NAV = page(
 <button id="assign" onclick="location.assign('https://site-b.test/')">assign</button>
 <button id="href" onclick="location.href='https://site-b.test/'">href</button>
 <button id="replace" onclick="location.replace('https://site-b.test/')">replace</button>
+<button id="computed-href" onclick="self['loc' + 'ation'].href = 'https://site-b.test/'">computed href</button>
+<button id="computed-set" onclick="self['loc' + 'ation'] = 'https://site-b.test/'">computed set</button>
+<button id="reflect-set" onclick="Reflect.set(window, 'location', 'https://site-b.test/')">reflect set</button>
+<button id="reflect-get" onclick="const k = 'location'; Reflect.get(window, k).replace('https://site-b.test/')">reflect get</button>
+<button id="object-assign" onclick="Object.assign(window, { location: 'https://site-b.test/' })">object assign</button>
+<button id="descriptor" onclick="Object.getOwnPropertyDescriptor(window, 'location').get.call(window).href = 'https://site-b.test/'">descriptor</button>
+<button id="with" onclick="with (window) { location = 'https://site-b.test/'; }">with</button>
+<button id="frame-index" onclick="const read = (get) => { try { get(); return 'readable'; } catch (e) { return e.name; } }; document.getElementById('frame-access').textContent = JSON.stringify([read(() => frames[0].document), read(() => window[0].document), read(() => Reflect.get(window, 0).document)])">frame index</button>
+<pre id="frame-access"></pre>
 <button id="open" onclick="window.open('https://site-b.test/')">open</button>
 <button id="submit" onclick="document.getElementById('post').submit()">submit</button>
 <button id="push" onclick="history.pushState({}, '', '/pushed?x=1')">push</button>
@@ -1787,9 +1796,17 @@ const REUSE = page(
   } catch (error) {
     contentWindow = error.name;
   }
-  frames[0].mark = "reused";
+  let index = "open";
+  try {
+    frames[0].mark = "reused";
+  } catch (error) {
+    index = error.name;
+  }
+  // An alias still reaches the blank window itself, the single-origin limit, so the page can touch it.
+  const list = frames;
+  list[0].mark = "reused";
   window.addEventListener("message", (event) => {
-    const out = { ...event.data, fromChild: event.source === frame.contentWindow, contentWindow };
+    const out = { ...event.data, fromChild: event.source === frame.contentWindow, contentWindow, index };
     document.getElementById("results").textContent = JSON.stringify(out);
   });
 </script>`,
