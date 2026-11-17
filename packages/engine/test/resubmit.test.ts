@@ -29,7 +29,7 @@ describe("resubmitResponse", () => {
   it("allows its own script by hash and nothing else", async () => {
     const response = await resubmitResponse(post("a=1", "application/x-www-form-urlencoded"), other);
     const html = await response!.text();
-    const script = /<script>([^<]*)<\/script>/.exec(html)![1]!;
+    const script = /<script>([^<]*)<\/script>/i.exec(html)![1]!;
     const hash = createHash("sha256").update(script).digest("base64");
     expect(response!.headers.get("content-security-policy")).toBe(
       `default-src 'none'; script-src 'sha256-${hash}'; form-action https://other.proxy.test; base-uri 'none'; ` +
@@ -54,7 +54,7 @@ describe("resubmitResponse", () => {
     const body = new URLSearchParams([['x"><script>', '"><script>']]).toString();
     const html = await (await resubmitResponse(post(body, "application/x-www-form-urlencoded"), other))!.text();
     expect(html).toContain('name="x&quot;&gt;&lt;script&gt;" value="&quot;&gt;&lt;script&gt;"');
-    expect(html.match(/<script>/g)).toHaveLength(1);
+    expect(html.match(/<script>/gi)).toHaveLength(1);
   });
 
   it("escapes the action", async () => {
