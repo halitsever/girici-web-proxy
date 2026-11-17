@@ -48,5 +48,11 @@
     "typescript": "~6.0.3",
     "vitepress": "^1.6.4",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "vitepress": {
+      "vite": "^6.4.4",
+      "@vitejs/plugin-vue": "5.2.4"
+    }
   }
 }
