@@ -534,28 +534,44 @@ export function locationCheck(location: object): (value: unknown) => boolean {
 /** A window's own `window` getter returns it and throws for anything else, a Proxy included, without running traps. */
 function windowCheck(win: Realm): (value: unknown) => boolean {
   const windowOf = ownDescriptor(win, "window")?.get;
-  return (value) => {
-    if (value === win) return true;
-    if (typeof value !== "object" || value === null || !windowOf) return false;
-    try {
-      return apply(windowOf, value, []) === value;
-    } catch {
-      return false;
-    }
-  };
+  return remembered(
+    (value) => {
+      try {
+        return apply(windowOf as () => unknown, value, []) === value;
+      } catch {
+        return false;
+      }
+    },
+    !windowOf,
+    win,
+  );
 }
 
 /** Document's own URL getter throws for anything but a document, so no page getter or trap runs. */
 function documentCheck(win: Realm): (value: unknown) => boolean {
   const urlOf = win.Document ? ownDescriptor(win.Document.prototype, "URL")?.get : undefined;
-  return (value) => {
-    if (typeof value !== "object" || value === null || !urlOf) return false;
+  return remembered((value) => {
     try {
-      apply(urlOf, value, []);
+      apply(urlOf as () => unknown, value, []);
       return true;
     } catch {
       return false;
     }
+  }, !urlOf);
+}
+
+/** An object stays what it is, so each answer is kept: the check throws for most values, and a throw is slow on hot reads. */
+function remembered(check: (value: object) => boolean, never: boolean, self?: object): (value: unknown) => boolean {
+  const seen = new NativeWeakMap<object, boolean>();
+  return (value) => {
+    if (self !== undefined && value === self) return true;
+    if (typeof value !== "object" || value === null || never) return false;
+    let known = apply(mapGet, seen, [value]) as boolean | undefined;
+    if (known === undefined) {
+      known = check(value);
+      apply(mapSet, seen, [value, known]);
+    }
+    return known;
   };
 }
 
