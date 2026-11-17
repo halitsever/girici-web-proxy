@@ -113,6 +113,8 @@ export const en = {
 
   "settings.title": "Settings",
   "settings.lead": "How Girici opens and handles the sites you visit.",
+  "settings.sectionBrowsing": "Browsing",
+  "settings.sectionPrivacy": "Privacy and data",
   "settings.language": "Language",
   "settings.languageHelp": "For Girici's own pages and toolbar. Automatic follows your browser.",
   "settings.languageAuto": "Automatic",

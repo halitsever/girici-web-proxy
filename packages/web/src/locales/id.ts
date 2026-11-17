@@ -113,6 +113,8 @@ export const id: Messages = {
 
   "settings.title": "Pengaturan",
   "settings.lead": "Cara Girici membuka dan menangani situs yang Anda kunjungi.",
+  "settings.sectionBrowsing": "Penjelajahan",
+  "settings.sectionPrivacy": "Privasi dan data",
   "settings.language": "Bahasa",
   "settings.languageHelp": "Untuk halaman dan bilah alat Girici sendiri. Otomatis mengikuti browser Anda.",
   "settings.languageAuto": "Otomatis",

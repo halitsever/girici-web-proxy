@@ -116,6 +116,8 @@ export const fa: Messages = {
 
   "settings.title": "تنظیمات",
   "settings.lead": "اینکه Girici سایت‌هایی را که بازدید می‌کنید چگونه باز و مدیریت کند.",
+  "settings.sectionBrowsing": "مرور",
+  "settings.sectionPrivacy": "حریم خصوصی و داده‌ها",
   "settings.language": "زبان",
   "settings.languageHelp": "برای صفحه‌ها و نوار ابزار خود Girici. گزینه خودکار از زبان مرورگر شما پیروی می‌کند.",
   "settings.languageAuto": "خودکار",

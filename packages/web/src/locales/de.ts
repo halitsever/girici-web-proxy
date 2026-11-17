@@ -115,6 +115,8 @@ export const de: Messages = {
 
   "settings.title": "Einstellungen",
   "settings.lead": "Wie Girici die Websites öffnet und behandelt, die Sie besuchen.",
+  "settings.sectionBrowsing": "Surfen",
+  "settings.sectionPrivacy": "Datenschutz und Daten",
   "settings.language": "Sprache",
   "settings.languageHelp": "Für die Seiten und die Symbolleiste von Girici. Automatisch folgt Ihrem Browser.",
   "settings.languageAuto": "Automatisch",

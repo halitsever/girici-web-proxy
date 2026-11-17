@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { captureSiteDataEnv, SITES_CLEARED_PARAM, type SiteListAnswer, type SiteSummary } from "@girici/engine/shared";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,36 @@ import { SEARCH_ENGINES, toProxyPath, type SearchEngine } from "@/lib/target";
 import StatusPanel from "./StatusPanel.vue";
 
 const route = useRoute();
+const active = ref("browsing");
+const sections = computed(() => [
+  { id: "browsing", label: "settings.sectionBrowsing" as TextKey },
+  { id: "privacy", label: "settings.sectionPrivacy" as TextKey },
+  ...(authed.value ? [{ id: "admin", label: "admin.title" as TextKey }] : []),
+]);
+
+function jump(id: string) {
+  active.value = id;
+  document.getElementById(id)?.scrollIntoView({
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+  });
+  window.history.replaceState(window.history.state, "", `#${id}`);
+}
+
+/** The side nav follows whichever section holds the top of the viewport. */
+function watchSections(): () => void {
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const shown = entries.filter((entry) => entry.isIntersecting).map((entry) => entry.target.id);
+      if (shown[0]) active.value = shown[0];
+    },
+    { rootMargin: "-96px 0px -60% 0px" },
+  );
+  for (const section of sections.value) {
+    const element = document.getElementById(section.id);
+    if (element) observer.observe(element);
+  }
+  return () => observer.disconnect();
+}
 const router = useRouter();
 const engines = Object.keys(SEARCH_ENGINES) as SearchEngine[];
 const settings = ref(loadSettings());
@@ -314,6 +344,9 @@ function onClearHistory() {
   history.value = [];
 }
 
+let stopWatching: (() => void) | undefined;
+onBeforeUnmount(() => stopWatching?.());
+
 onMounted(async () => {
   settings.value = loadSettings();
   history.value = loadHistory();
@@ -327,6 +360,10 @@ onMounted(async () => {
   const state = await getAuthState(true);
   authState.value = state;
   authed.value = state.authed;
+  // After the admin section renders, so it is watched too.
+  await nextTick();
+  stopWatching?.();
+  stopWatching = watchSections();
   publicAccess.value = state.public;
   instanceSeal.value = state.sealAddresses;
   if (!state.authed) return;
@@ -342,359 +379,423 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="mx-auto flex w-full max-w-[680px] flex-col gap-6 px-4" style="padding-top: clamp(28px, 6vh, 56px)">
-    <div>
-      <h1 class="text-[26px] font-semibold tracking-[-0.03em]">{{ t("settings.title") }}</h1>
-      <p class="mt-1 text-[14px] text-muted-foreground">{{ t("settings.lead") }}</p>
-    </div>
+  <div class="mx-auto w-full max-w-[1040px] px-5" style="padding-top: clamp(24px, 6vh, 56px)">
+    <h1 class="text-[clamp(30px,4.5vw,44px)] leading-tight font-semibold tracking-[-0.04em]">
+      {{ t("settings.title") }}
+    </h1>
+    <p class="mt-2 text-[16px] text-muted-foreground">{{ t("settings.lead") }}</p>
 
-    <div class="divide-y divide-border rounded-xl border border-border bg-gi-panel">
-      <div class="flex flex-col gap-3.5 p-5">
-        <div>
-          <p id="language-label" class="text-[14px] font-medium">{{ t("settings.language") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.languageHelp") }}</p>
-        </div>
-        <div
-          role="radiogroup"
-          aria-labelledby="language-label"
-          class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
-          style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
-        >
-          <button
-            v-for="option in languageOptions"
-            :key="option.code"
-            type="button"
-            role="radio"
-            :aria-checked="settings.lang === option.code"
-            :lang="option.code === 'auto' ? undefined : option.code"
-            class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
-            :class="
-              settings.lang === option.code
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="settings.lang = option.code"
-          >
-            {{ option.name }}
-          </button>
-        </div>
-      </div>
-
-      <div class="flex flex-col gap-3.5 p-5">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.engine") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.engineHelp") }}</p>
-        </div>
-        <div
-          class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
-          style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
-        >
-          <button
-            v-for="engine in engines"
-            :key="engine"
-            type="button"
-            class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
-            :class="
-              settings.engine === engine
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-            "
-            @click="settings.engine = engine"
-          >
-            {{ engine }}
-          </button>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.newTab") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.newTabHelp") }}</p>
-        </div>
-        <Switch v-model="settings.newTab" />
-      </div>
-
-      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.toolbar") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.toolbarHelp") }}</p>
-        </div>
-        <Switch v-model="settings.toolbar" :aria-label="t('settings.toolbar')" />
-      </div>
-
-      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.history") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.historyHelp") }}</p>
-        </div>
-        <Switch v-model="settings.rememberHistory" />
-      </div>
-
-      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.cookies") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.cookiesHelp") }}</p>
-          <p v-if="!settings.blockCookies" class="mt-1 text-[13px] text-gi-danger">{{ t("settings.cookiesOff") }}</p>
-        </div>
-        <Switch v-model="settings.blockCookies" :aria-label="t('settings.cookies')" />
-      </div>
-
-      <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("settings.seal") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("settings.sealHelp") }}</p>
-          <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">{{ t("settings.sealByAdmin") }}</p>
-        </div>
-        <Switch
-          :model-value="settings.sealAddresses || instanceSeal"
-          :disabled="instanceSeal"
-          :aria-label="t('settings.seal')"
-          @update:model-value="(on: boolean) => (settings.sealAddresses = on)"
-        />
-      </div>
-    </div>
-
-    <div v-if="authed" class="rounded-xl border border-border bg-gi-panel">
-      <div class="px-5 pt-5">
-        <p class="text-[15px] font-semibold">{{ t("admin.title") }}</p>
-        <p class="mt-1 text-[13px] text-muted-foreground">{{ t("admin.lead") }}</p>
-        <label class="mt-4 flex flex-col gap-2 text-[14px] font-medium">
-          {{ t("account.currentPassword") }}
-          <Input v-model="adminPassword" type="password" autocomplete="current-password" />
-        </label>
-        <p class="mt-2 text-[13px] text-muted-foreground">{{ t("admin.passwordHelp") }}</p>
-      </div>
-      <div class="mt-4 flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("admin.public") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("admin.publicHelp") }}</p>
-          <p v-if="publicError" class="mt-1 text-[13px] text-gi-danger">{{ publicError }}</p>
-        </div>
-        <Switch :model-value="publicAccess" :aria-label="t('admin.public')" @update:model-value="onTogglePublic" />
-      </div>
-      <div class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("admin.seal") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("admin.sealHelp") }}</p>
-          <p v-if="instanceSealError" class="mt-1 text-[13px] text-gi-danger">{{ instanceSealError }}</p>
-        </div>
-        <Switch :model-value="instanceSeal" :aria-label="t('admin.seal')" @update:model-value="onToggleInstanceSeal" />
-      </div>
-      <div
-        v-for="row in SWITCH_ROWS"
-        :key="row.name"
-        class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]"
+    <div class="mt-10 grid gap-8 lg:grid-cols-[200px_minmax(0,1fr)] lg:gap-14">
+      <nav
+        class="-mx-5 flex gap-1 overflow-x-auto px-5 lg:sticky lg:top-24 lg:mx-0 lg:flex-col lg:self-start lg:overflow-visible lg:px-0"
+        :aria-label="t('settings.title')"
       >
-        <div>
-          <p class="text-[14px] font-medium">{{ t(row.label) }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t(row.help) }}</p>
-          <p v-if="instanceSwitchErrors[row.name]" class="mt-1 text-[13px] text-gi-danger">
-            {{ instanceSwitchErrors[row.name] }}
-          </p>
-        </div>
-        <Switch
-          :model-value="instanceSwitches[row.name]"
-          :aria-label="t(row.label)"
-          @update:model-value="(on: boolean) => onToggleInstanceSwitch(row.name, on)"
-        />
-      </div>
-      <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
-        <div>
-          <p class="text-[14px] font-medium">{{ t("admin.instance") }}</p>
-          <p class="text-[13px] text-muted-foreground">{{ t("admin.instanceHelp") }}</p>
-        </div>
-        <label class="flex flex-col gap-2 text-[14px] font-medium">
-          {{ t("admin.instanceName") }}
-          <Input v-model="instanceName" type="text" maxlength="40" :placeholder="DEFAULT_BRAND_NAME" />
-        </label>
-        <div class="flex flex-col gap-2">
-          <label for="instance-logo" class="text-[14px] font-medium">{{ t("admin.logo") }}</label>
-          <input
-            id="instance-logo"
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            class="text-[13px]"
-            @change="onPickLogo"
+        <a
+          v-for="section in sections"
+          :key="section.id"
+          :href="`#${section.id}`"
+          class="relative flex h-10 shrink-0 items-center rounded-lg px-3 text-[14px] font-medium whitespace-nowrap no-underline transition-colors lg:pl-6"
+          :class="active === section.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground'"
+          :aria-current="active === section.id ? 'true' : undefined"
+          @click.prevent="jump(section.id)"
+        >
+          <span
+            v-if="active === section.id"
+            class="absolute top-1/2 left-2 hidden h-[3px] w-2.5 -translate-y-1/2 rounded-full bg-gi-brand lg:block"
+            aria-hidden="true"
           />
-          <p class="text-[13px] text-muted-foreground">{{ t("admin.logoHelp") }}</p>
-          <div v-if="logoPreview" class="flex items-center gap-3">
-            <img
-              :src="logoPreview"
-              class="h-9 w-9 rounded-md border border-border object-contain"
-              :alt="t('admin.logoPreview')"
-            />
-            <Button type="button" size="sm" variant="outline" @click="pendingLogo = null">{{
-              t("admin.removeLogo")
-            }}</Button>
+          {{ t(section.label) }}
+        </a>
+      </nav>
+
+      <div class="flex min-w-0 flex-col gap-16">
+        <div id="browsing" class="flex scroll-mt-24 flex-col gap-5">
+          <h2 class="text-[22px] font-semibold tracking-[-0.02em]">{{ t("settings.sectionBrowsing") }}</h2>
+          <div class="divide-y divide-border rounded-xl border border-border bg-gi-panel">
+            <div class="flex flex-col gap-3.5 p-5">
+              <div>
+                <p id="language-label" class="text-[14px] font-medium">{{ t("settings.language") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.languageHelp") }}</p>
+              </div>
+              <div
+                role="radiogroup"
+                aria-labelledby="language-label"
+                class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
+                style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
+              >
+                <button
+                  v-for="option in languageOptions"
+                  :key="option.code"
+                  type="button"
+                  role="radio"
+                  :aria-checked="settings.lang === option.code"
+                  :lang="option.code === 'auto' ? undefined : option.code"
+                  class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
+                  :class="
+                    settings.lang === option.code
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="settings.lang = option.code"
+                >
+                  {{ option.name }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-3.5 p-5">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.engine") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.engineHelp") }}</p>
+              </div>
+              <div
+                class="grid gap-1 rounded-[10px] border border-border bg-card p-1"
+                style="grid-template-columns: repeat(auto-fit, minmax(110px, 1fr))"
+              >
+                <button
+                  v-for="engine in engines"
+                  :key="engine"
+                  type="button"
+                  class="h-9 rounded-[7px] text-[13px] font-medium transition-colors"
+                  :class="
+                    settings.engine === engine
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  "
+                  @click="settings.engine = engine"
+                >
+                  {{ engine }}
+                </button>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.newTab") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.newTabHelp") }}</p>
+              </div>
+              <Switch v-model="settings.newTab" />
+            </div>
+
+            <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.toolbar") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.toolbarHelp") }}</p>
+              </div>
+              <Switch v-model="settings.toolbar" :aria-label="t('settings.toolbar')" />
+            </div>
+
+            <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.history") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.historyHelp") }}</p>
+              </div>
+              <Switch v-model="settings.rememberHistory" />
+            </div>
+
+            <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.cookies") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.cookiesHelp") }}</p>
+                <p v-if="!settings.blockCookies" class="mt-1 text-[13px] text-gi-danger">
+                  {{ t("settings.cookiesOff") }}
+                </p>
+              </div>
+              <Switch v-model="settings.blockCookies" :aria-label="t('settings.cookies')" />
+            </div>
+
+            <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("settings.seal") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.sealHelp") }}</p>
+                <p v-if="instanceSeal" class="mt-1 text-[13px] text-muted-foreground">
+                  {{ t("settings.sealByAdmin") }}
+                </p>
+              </div>
+              <Switch
+                :model-value="settings.sealAddresses || instanceSeal"
+                :disabled="instanceSeal"
+                :aria-label="t('settings.seal')"
+                @update:model-value="(on: boolean) => (settings.sealAddresses = on)"
+              />
+            </div>
           </div>
         </div>
-        <div class="flex items-center gap-3">
-          <Button type="button" size="sm" :disabled="savingInstance" @click="onSaveInstance">{{
-            t("admin.saveInstance")
-          }}</Button>
-          <span v-if="instanceStatus" class="text-[13px] text-gi-success">{{ instanceStatus }}</span>
-          <span v-if="instanceError" class="text-[13px] text-gi-danger">{{ instanceError }}</span>
-        </div>
-      </div>
-      <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
-        <div>
-          <label for="blocked-hosts" class="text-[14px] font-medium">{{ t("admin.blocked") }}</label>
-          <p class="text-[13px] text-muted-foreground">{{ t("admin.blockedHelp") }}</p>
-        </div>
-        <textarea
-          id="blocked-hosts"
-          v-model="blockedText"
-          rows="5"
-          spellcheck="false"
-          placeholder="example.com"
-          class="w-full rounded-md border border-input bg-card px-3.5 py-2 font-mono text-[13px] shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        />
-        <p v-if="envBlocked.length" class="text-[13px] text-muted-foreground">
-          {{ t("admin.blockedByEnv", { list: envBlocked.join(", ") }) }}
-        </p>
-        <div class="flex items-center gap-3">
-          <Button type="button" size="sm" :disabled="savingBlocked" @click="onSaveBlocked">{{
-            t("admin.save")
-          }}</Button>
-          <span v-if="blockedStatus" class="text-[13px] text-gi-success">{{ blockedStatus }}</span>
-          <span v-if="blockedError" class="text-[13px] text-gi-danger">{{ blockedError }}</span>
-        </div>
-      </div>
-    </div>
 
-    <StatusPanel v-if="authed" />
+        <div id="privacy" class="flex scroll-mt-24 flex-col gap-5">
+          <h2 class="text-[22px] font-semibold tracking-[-0.02em]">{{ t("settings.sectionPrivacy") }}</h2>
+          <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
+                <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSites") }}</p>
+              </div>
+              <button
+                type="button"
+                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                :disabled="!visited.length || siteBusy"
+                @click="onClearSites('all')"
+              >
+                {{ t("sites.clearAll") }}
+              </button>
+            </div>
+            <p v-if="clearedStatus" role="status" class="border-t border-border px-5 py-3 text-[13px] text-gi-success">
+              {{ clearedStatus }}
+            </p>
+            <div
+              v-for="entry in visited"
+              :key="entry.site"
+              class="flex items-center gap-3 border-t border-border px-5 py-3"
+            >
+              <span
+                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
+              >
+                {{ siteName(entry.site).charAt(0).toUpperCase() }}
+              </span>
+              <p class="min-w-0 flex-1 truncate text-[14px]">{{ siteName(entry.site) }}</p>
+              <button
+                type="button"
+                class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                :aria-label="t('sites.clearOne', { site: siteName(entry.site) })"
+                :disabled="siteBusy"
+                @click="onClearSites([entry.site])"
+              >
+                {{ t("sites.clear") }}
+              </button>
+            </div>
+            <div v-if="legacyData" class="flex items-center justify-between gap-4 border-t border-border px-5 py-3">
+              <p class="text-[13px] text-muted-foreground">{{ t("sites.legacy") }}</p>
+              <button
+                type="button"
+                class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                :disabled="siteBusy"
+                @click="onRemoveLegacy"
+              >
+                {{ t("sites.removeLegacy") }}
+              </button>
+            </div>
+            <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">
+              {{ siteNote }}
+            </p>
+            <p v-if="siteError" class="border-t border-border px-5 py-3 text-[13px] text-gi-danger">{{ siteError }}</p>
+          </section>
 
-    <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-      <div class="flex items-center justify-between px-5 py-4">
-        <div>
-          <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSites") }}</p>
-        </div>
-        <button
-          type="button"
-          class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
-          :disabled="!visited.length || siteBusy"
-          @click="onClearSites('all')"
-        >
-          {{ t("sites.clearAll") }}
-        </button>
-      </div>
-      <p v-if="clearedStatus" role="status" class="border-t border-border px-5 py-3 text-[13px] text-gi-success">
-        {{ clearedStatus }}
-      </p>
-      <div v-for="entry in visited" :key="entry.site" class="flex items-center gap-3 border-t border-border px-5 py-3">
-        <span
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-        >
-          {{ siteName(entry.site).charAt(0).toUpperCase() }}
-        </span>
-        <p class="min-w-0 flex-1 truncate text-[14px]">{{ siteName(entry.site) }}</p>
-        <button
-          type="button"
-          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          :aria-label="t('sites.clearOne', { site: siteName(entry.site) })"
-          :disabled="siteBusy"
-          @click="onClearSites([entry.site])"
-        >
-          {{ t("sites.clear") }}
-        </button>
-      </div>
-      <div v-if="legacyData" class="flex items-center justify-between gap-4 border-t border-border px-5 py-3">
-        <p class="text-[13px] text-muted-foreground">{{ t("sites.legacy") }}</p>
-        <button
-          type="button"
-          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          :disabled="siteBusy"
-          @click="onRemoveLegacy"
-        >
-          {{ t("sites.removeLegacy") }}
-        </button>
-      </div>
-      <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">{{ siteNote }}</p>
-      <p v-if="siteError" class="border-t border-border px-5 py-3 text-[13px] text-gi-danger">{{ siteError }}</p>
-    </section>
+          <section v-else class="overflow-hidden rounded-xl border border-border bg-gi-panel">
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
+                <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSingle") }}</p>
+              </div>
+              <button
+                type="button"
+                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                :disabled="!sites.length || siteBusy"
+                @click="onClearSite(null)"
+              >
+                {{ t("sites.clearAll") }}
+              </button>
+            </div>
+            <div
+              v-for="entry in sites"
+              :key="entry.site"
+              class="flex items-center gap-3 border-t border-border px-5 py-3"
+            >
+              <span
+                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
+              >
+                {{ entry.site.charAt(0).toUpperCase() }}
+              </span>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-[14px]">{{ entry.site }}</p>
+                <p class="text-[12px] text-gi-subtle">{{ siteDetail(entry) }}</p>
+              </div>
+              <button
+                type="button"
+                class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+                :aria-label="t('sites.clearOne', { site: entry.site })"
+                :disabled="siteBusy"
+                @click="onClearSite(entry.site)"
+              >
+                {{ t("sites.clear") }}
+              </button>
+            </div>
+            <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">
+              {{ siteNote }}
+            </p>
+            <p v-if="siteError" class="border-t border-border px-5 py-3 text-[13px] text-gi-danger">{{ siteError }}</p>
+          </section>
 
-    <section v-else class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-      <div class="flex items-center justify-between px-5 py-4">
-        <div>
-          <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSingle") }}</p>
+          <div class="overflow-hidden rounded-xl border border-border bg-gi-panel">
+            <div class="flex items-center justify-between px-5 py-4">
+              <div>
+                <p class="text-[15px] font-semibold">{{ t("history.title") }}</p>
+                <p class="mt-1 text-[13px] text-muted-foreground">{{ t("history.lead") }}</p>
+              </div>
+              <button
+                type="button"
+                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                :disabled="!history.length"
+                @click="onClearHistory"
+              >
+                {{ t("sites.clearAll") }}
+              </button>
+            </div>
+            <div
+              v-for="entry in history"
+              :key="entry.name"
+              class="flex items-center gap-3 border-t border-border px-5 py-3"
+            >
+              <span
+                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
+              >
+                {{ entry.name.charAt(0).toUpperCase() }}
+              </span>
+              <span class="min-w-0 flex-1 truncate text-[14px]">{{ entry.name }}</span>
+              <span class="shrink-0 font-mono text-[12px] text-gi-subtle">{{ relativeTime(entry.t) }}</span>
+              <button
+                type="button"
+                class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
+                @click="openEntry(entry.name)"
+              >
+                {{ t("history.open") }}
+              </button>
+              <button
+                type="button"
+                class="h-8 shrink-0 rounded-md px-2.5 text-[13px] font-medium text-gi-subtle transition-colors hover:text-gi-danger"
+                :aria-label="t('history.removeOne', { name: entry.name })"
+                @click="removeEntry(entry.name)"
+              >
+                {{ t("history.remove") }}
+              </button>
+            </div>
+            <p v-if="!history.length" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">
+              {{ t("history.empty") }}
+            </p>
+          </div>
         </div>
-        <button
-          type="button"
-          class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
-          :disabled="!sites.length || siteBusy"
-          @click="onClearSite(null)"
-        >
-          {{ t("sites.clearAll") }}
-        </button>
-      </div>
-      <div v-for="entry in sites" :key="entry.site" class="flex items-center gap-3 border-t border-border px-5 py-3">
-        <span
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-        >
-          {{ entry.site.charAt(0).toUpperCase() }}
-        </span>
-        <div class="min-w-0 flex-1">
-          <p class="truncate text-[14px]">{{ entry.site }}</p>
-          <p class="text-[12px] text-gi-subtle">{{ siteDetail(entry) }}</p>
-        </div>
-        <button
-          type="button"
-          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-          :aria-label="t('sites.clearOne', { site: entry.site })"
-          :disabled="siteBusy"
-          @click="onClearSite(entry.site)"
-        >
-          {{ t("sites.clear") }}
-        </button>
-      </div>
-      <p v-if="siteNote" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">{{ siteNote }}</p>
-      <p v-if="siteError" class="border-t border-border px-5 py-3 text-[13px] text-gi-danger">{{ siteError }}</p>
-    </section>
 
-    <div class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-      <div class="flex items-center justify-between px-5 py-4">
-        <div>
-          <p class="text-[15px] font-semibold">{{ t("history.title") }}</p>
-          <p class="mt-1 text-[13px] text-muted-foreground">{{ t("history.lead") }}</p>
+        <div v-if="authed" id="admin" class="flex scroll-mt-24 flex-col gap-5">
+          <div>
+            <h2 class="text-[22px] font-semibold tracking-[-0.02em]">{{ t("admin.title") }}</h2>
+            <p class="mt-1 text-[14px] text-muted-foreground">{{ t("admin.lead") }}</p>
+          </div>
+          <div v-if="authed" class="rounded-xl border border-border bg-gi-panel">
+            <div class="px-5 pt-5">
+              <label class="flex flex-col gap-2 text-[14px] font-medium">
+                {{ t("account.currentPassword") }}
+                <Input v-model="adminPassword" type="password" autocomplete="current-password" />
+              </label>
+              <p class="mt-2 text-[13px] text-muted-foreground">{{ t("admin.passwordHelp") }}</p>
+            </div>
+            <div class="mt-4 flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("admin.public") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("admin.publicHelp") }}</p>
+                <p v-if="publicError" class="mt-1 text-[13px] text-gi-danger">{{ publicError }}</p>
+              </div>
+              <Switch
+                :model-value="publicAccess"
+                :aria-label="t('admin.public')"
+                @update:model-value="onTogglePublic"
+              />
+            </div>
+            <div class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("admin.seal") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("admin.sealHelp") }}</p>
+                <p v-if="instanceSealError" class="mt-1 text-[13px] text-gi-danger">{{ instanceSealError }}</p>
+              </div>
+              <Switch
+                :model-value="instanceSeal"
+                :aria-label="t('admin.seal')"
+                @update:model-value="onToggleInstanceSeal"
+              />
+            </div>
+            <div
+              v-for="row in SWITCH_ROWS"
+              :key="row.name"
+              class="flex items-center justify-between gap-4 border-t border-border px-5 py-[18px]"
+            >
+              <div>
+                <p class="text-[14px] font-medium">{{ t(row.label) }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t(row.help) }}</p>
+                <p v-if="instanceSwitchErrors[row.name]" class="mt-1 text-[13px] text-gi-danger">
+                  {{ instanceSwitchErrors[row.name] }}
+                </p>
+              </div>
+              <Switch
+                :model-value="instanceSwitches[row.name]"
+                :aria-label="t(row.label)"
+                @update:model-value="(on: boolean) => onToggleInstanceSwitch(row.name, on)"
+              />
+            </div>
+            <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
+              <div>
+                <p class="text-[14px] font-medium">{{ t("admin.instance") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("admin.instanceHelp") }}</p>
+              </div>
+              <label class="flex flex-col gap-2 text-[14px] font-medium">
+                {{ t("admin.instanceName") }}
+                <Input v-model="instanceName" type="text" maxlength="40" :placeholder="DEFAULT_BRAND_NAME" />
+              </label>
+              <div class="flex flex-col gap-2">
+                <label for="instance-logo" class="text-[14px] font-medium">{{ t("admin.logo") }}</label>
+                <input
+                  id="instance-logo"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  class="text-[13px]"
+                  @change="onPickLogo"
+                />
+                <p class="text-[13px] text-muted-foreground">{{ t("admin.logoHelp") }}</p>
+                <div v-if="logoPreview" class="flex items-center gap-3">
+                  <img
+                    :src="logoPreview"
+                    class="h-9 w-9 rounded-md border border-border object-contain"
+                    :alt="t('admin.logoPreview')"
+                  />
+                  <Button type="button" size="sm" variant="outline" @click="pendingLogo = null">{{
+                    t("admin.removeLogo")
+                  }}</Button>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <Button type="button" size="sm" :disabled="savingInstance" @click="onSaveInstance">{{
+                  t("admin.saveInstance")
+                }}</Button>
+                <span v-if="instanceStatus" class="text-[13px] text-gi-success">{{ instanceStatus }}</span>
+                <span v-if="instanceError" class="text-[13px] text-gi-danger">{{ instanceError }}</span>
+              </div>
+            </div>
+            <div class="flex flex-col gap-3 border-t border-border px-5 py-[18px]">
+              <div>
+                <label for="blocked-hosts" class="text-[14px] font-medium">{{ t("admin.blocked") }}</label>
+                <p class="text-[13px] text-muted-foreground">{{ t("admin.blockedHelp") }}</p>
+              </div>
+              <textarea
+                id="blocked-hosts"
+                v-model="blockedText"
+                rows="5"
+                spellcheck="false"
+                placeholder="example.com"
+                class="w-full rounded-md border border-input bg-card px-3.5 py-2 font-mono text-[13px] shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              />
+              <p v-if="envBlocked.length" class="text-[13px] text-muted-foreground">
+                {{ t("admin.blockedByEnv", { list: envBlocked.join(", ") }) }}
+              </p>
+              <div class="flex items-center gap-3">
+                <Button type="button" size="sm" :disabled="savingBlocked" @click="onSaveBlocked">{{
+                  t("admin.save")
+                }}</Button>
+                <span v-if="blockedStatus" class="text-[13px] text-gi-success">{{ blockedStatus }}</span>
+                <span v-if="blockedError" class="text-[13px] text-gi-danger">{{ blockedError }}</span>
+              </div>
+            </div>
+          </div>
+
+          <StatusPanel />
         </div>
-        <button
-          type="button"
-          class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
-          :disabled="!history.length"
-          @click="onClearHistory"
-        >
-          {{ t("sites.clearAll") }}
-        </button>
       </div>
-      <div v-for="entry in history" :key="entry.name" class="flex items-center gap-3 border-t border-border px-5 py-3">
-        <span
-          class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-        >
-          {{ entry.name.charAt(0).toUpperCase() }}
-        </span>
-        <span class="min-w-0 flex-1 truncate text-[14px]">{{ entry.name }}</span>
-        <span class="shrink-0 font-mono text-[12px] text-gi-subtle">{{ relativeTime(entry.t) }}</span>
-        <button
-          type="button"
-          class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
-          @click="openEntry(entry.name)"
-        >
-          {{ t("history.open") }}
-        </button>
-        <button
-          type="button"
-          class="h-8 shrink-0 rounded-md px-2.5 text-[13px] font-medium text-gi-subtle transition-colors hover:text-gi-danger"
-          :aria-label="t('history.removeOne', { name: entry.name })"
-          @click="removeEntry(entry.name)"
-        >
-          {{ t("history.remove") }}
-        </button>
-      </div>
-      <p v-if="!history.length" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">
-        {{ t("history.empty") }}
-      </p>
     </div>
   </div>
 </template>

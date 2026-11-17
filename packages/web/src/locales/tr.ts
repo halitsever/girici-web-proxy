@@ -114,6 +114,8 @@ export const tr: Messages = {
 
   "settings.title": "Ayarlar",
   "settings.lead": "Girici'nin ziyaret ettiğiniz siteleri nasıl açacağı ve işleyeceği.",
+  "settings.sectionBrowsing": "Gezinme",
+  "settings.sectionPrivacy": "Gizlilik ve veriler",
   "settings.language": "Dil",
   "settings.languageHelp": "Girici'nin kendi sayfaları ve araç çubuğu için. Otomatik, tarayıcınızın dilini kullanır.",
   "settings.languageAuto": "Otomatik",

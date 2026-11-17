@@ -113,6 +113,8 @@ export const ptBR: Messages = {
 
   "settings.title": "Configurações",
   "settings.lead": "Como o Girici abre e trata os sites que você visita.",
+  "settings.sectionBrowsing": "Navegação",
+  "settings.sectionPrivacy": "Privacidade e dados",
   "settings.language": "Idioma",
   "settings.languageHelp": "Para as páginas e a barra de ferramentas do Girici. Automático segue o seu navegador.",
   "settings.languageAuto": "Automático",

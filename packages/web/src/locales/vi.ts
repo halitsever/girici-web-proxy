@@ -114,6 +114,8 @@ export const vi: Messages = {
 
   "settings.title": "Cài đặt",
   "settings.lead": "Cách Girici mở và xử lý các trang web bạn truy cập.",
+  "settings.sectionBrowsing": "Duyệt web",
+  "settings.sectionPrivacy": "Quyền riêng tư và dữ liệu",
   "settings.language": "Ngôn ngữ",
   "settings.languageHelp": "Dành cho các trang và thanh công cụ của Girici. Tự động sẽ theo ngôn ngữ trình duyệt.",
   "settings.languageAuto": "Tự động",
