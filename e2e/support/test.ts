@@ -71,7 +71,11 @@ export async function openThroughUi(page: Page, url: string): Promise<void> {
   // A typed URL is the first row; Enter submits the command palette and opens it.
   await input.press("Enter");
   await page.waitForURL(/\/~\//);
-  // A site host's first visit shows the bootstrap page at the same address before the page itself loads.
+  await pastBoot(page);
+}
+
+/** A site host's first visit shows the bootstrap page, which reloads itself and cuts off the next navigation. */
+export async function pastBoot(page: Page): Promise<void> {
   await expect(page.locator("#girici-boot")).toHaveCount(0);
   // The count is also 0 while the reload's new document is still empty, before the runtime has run.
   await page.waitForLoadState("load");

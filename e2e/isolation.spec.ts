@@ -1,4 +1,4 @@
-import { expect, isSiteProject, openThroughUi, test } from "./support/test.ts";
+import { expect, isSiteProject, openThroughUi, pastBoot, test } from "./support/test.ts";
 
 test("installs the runtime into blank and srcdoc frames", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/frames");
@@ -13,6 +13,7 @@ test("keeps IndexedDB apart per site", async ({ page }) => {
   await openThroughUi(page, "https://site-a.test/idb-store?set=a");
   await expect(page.locator("#value")).toHaveText("a");
   await page.goto("/~/https/site-b.test/idb-store");
+  await pastBoot(page);
   await expect(page.locator("#value")).toHaveText("");
   await page.goto("/~/https/site-a.test/idb-store");
   await expect(page.locator("#value")).toHaveText("a");
@@ -136,6 +137,7 @@ test("keeps the origin private file system apart per site", async ({ page, brows
   await openThroughUi(page, "https://site-a.test/idb-store");
   await write("a");
   await page.goto("/~/https/site-b.test/idb-store");
+  await pastBoot(page);
   expect(await read()).toEqual({ rootName: "", names: [], note: null });
   await page.goto("/~/https/site-a.test/idb-store");
   expect(await read()).toEqual({ rootName: "", names: ["note"], note: "a" });
@@ -146,9 +148,7 @@ test("refuses one site's blob URLs to another", async ({ page, context }) => {
   const theirs = await page.evaluate(() => URL.createObjectURL(new Blob(["secret"])));
   const other = await context.newPage();
   await other.goto("/~/https/site-b.test/idb-store");
-  // A site host's first visit reloads past the bootstrap page, which would cut off a fetch started before it.
-  await expect(other.locator("#girici-boot")).toHaveCount(0);
-  await other.waitForLoadState("load");
+  await pastBoot(other);
   const outcome = await other.evaluate(async (url) => {
     const own = URL.createObjectURL(new Blob(["mine"]));
     const viaFetch = await fetch(url).then(
