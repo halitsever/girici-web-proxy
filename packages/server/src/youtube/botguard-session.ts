@@ -1,35 +1,69 @@
-import { JSDOM } from "jsdom";
-import { getChallenge, BotGuardClient } from "bgutils-js/botguard";
+import { JSDOM, VirtualConsole } from "jsdom";
+import { BotGuardClient } from "bgutils-js/botguard";
 import { WebPoMinter } from "bgutils-js/webpo";
-import { GOOG_BASE_URL, GOOG_API_KEY, USER_AGENT } from "bgutils-js/utils";
+import { buildURL, getHeaders, parseLooseJSON, USER_AGENT } from "bgutils-js/utils";
 import type { PoSession } from "./potoken.ts";
 
 // YouTube's long-lived web BotGuard key; stable for years.
 const REQUEST_KEY = "O43z0dpjhgX20SCx4KAo";
-const GENERATE_IT = `${GOOG_BASE_URL}/$rpc/google.internal.waa.v1.Waa/GenerateIT`;
 // Refresh a minute before the integrity token's real expiry.
 const TTL_MARGIN_MS = 60_000;
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-let domReady = false;
-
-/** BotGuard inspects the environment, so a jsdom window stands in for a browser, once per process. */
-function ensureDom(): void {
-  if (domReady) return;
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://www.youtube.com/" });
-  Object.assign(globalThis, { window: dom.window, document: dom.window.document });
-  if (!(globalThis as { origin?: string }).origin)
-    (globalThis as { origin?: string }).origin = "https://www.youtube.com";
-  if (!globalThis.navigator)
-    Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
-  domReady = true;
+interface BgChallenge {
+  program: string;
+  globalName: string;
+  interpreterUrl?: { privateDoNotAccessOrElseTrustedResourceUrlWrappedValue?: string };
+  interpreterJavascript?: { privateDoNotAccessOrElseSafeScriptWrappedValue?: string };
 }
 
-async function interpreterSource(
-  challenge: Awaited<ReturnType<typeof getChallenge>>,
-  fetchImpl: FetchLike,
-): Promise<string> {
+export interface PageAttestation {
+  config: Record<string, unknown>;
+  challenge: BgChallenge;
+}
+
+/**
+ * The page's ytcfg and the BotGuard challenge it embeds. googlevideo only honours tokens from a challenge issued with
+ * a page, attested while yt.config_ (its EVENT_ID) is present.
+ */
+export function pageAttestation(html: string): PageAttestation | null {
+  const config = /ytcfg\.set\(({.+?})\);/s.exec(html)?.[1];
+  const initial = /window\.ytAtN\(\s*({[\s\S]*?})\s*\)/.exec(html)?.[1];
+  if (!config || !initial) return null;
+  try {
+    const challenge = (parseLooseJSON(initial) as { R?: { bgChallenge?: BgChallenge } }).R?.bgChallenge;
+    if (!challenge?.program || !challenge.globalName) return null;
+    return { config: JSON.parse(config) as Record<string, unknown>, challenge };
+  } catch {
+    return null;
+  }
+}
+
+/** BotGuard inspects the environment, so a jsdom window stands in for the YouTube page that issued the challenge. */
+function installDom(config: Record<string, unknown>): void {
+  const dom = new JSDOM('<!doctype html><html lang="en"><head><title></title></head><body></body></html>', {
+    url: "https://www.youtube.com/",
+    referrer: "https://www.youtube.com/",
+    // The page holds no subresources, so this only sets navigator.userAgent to match the requests.
+    resources: { userAgent: USER_AGENT },
+    // BotGuard probes APIs jsdom lacks, such as canvas, and jsdom would log each probe.
+    virtualConsole: new VirtualConsole(),
+  });
+  const yt = { config_: config };
+  Object.assign(dom.window, { yt });
+  Object.assign(globalThis, {
+    yt,
+    window: dom.window,
+    document: dom.window.document,
+    location: dom.window.location,
+    origin: dom.window.origin,
+  });
+  // Node has a navigator of its own, which would tell BotGuard it runs in Node.
+  Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
+}
+
+async function interpreterSource(challenge: BgChallenge, fetchImpl: FetchLike): Promise<string> {
   const inline = challenge.interpreterJavascript?.privateDoNotAccessOrElseSafeScriptWrappedValue;
   if (inline) return inline;
   const wrapped = challenge.interpreterUrl?.privateDoNotAccessOrElseTrustedResourceUrlWrappedValue;
@@ -43,14 +77,14 @@ async function interpreterSource(
  * fetchImpl, because YouTube ties the tokens to the IP that minted them and the relay must share it.
  */
 export async function createBotGuardSession(fetchImpl: FetchLike = fetch): Promise<PoSession> {
-  ensureDom();
-  const challenge = await getChallenge({
-    requestKey: REQUEST_KEY,
-    fetchFunction: fetchImpl as typeof fetch,
-    useYouTubeAPI: true,
+  const page = await fetchImpl("https://www.youtube.com/", {
+    headers: { accept: "text/html", "accept-language": "en-US,en;q=0.9", "user-agent": USER_AGENT },
   });
-  if (!challenge?.program || !challenge.globalName) throw new Error("botguard challenge incomplete");
+  const attestation = pageAttestation(await page.text());
+  if (!attestation) throw new Error(`no botguard challenge on the YouTube page (${page.status})`);
+  installDom(attestation.config);
 
+  const { challenge } = attestation;
   new Function(await interpreterSource(challenge, fetchImpl))();
   const client = await BotGuardClient.create({
     program: challenge.program,
@@ -60,14 +94,9 @@ export async function createBotGuardSession(fetchImpl: FetchLike = fetch): Promi
   const webPoSignalOutput: Parameters<typeof WebPoMinter.create>[1] = [];
   const botguardResponse = await client.snapshot({ webPoSignalOutput });
 
-  const response = await fetchImpl(GENERATE_IT, {
+  const response = await fetchImpl(buildURL("GenerateIT", true), {
     method: "POST",
-    headers: {
-      "content-type": "application/json+protobuf",
-      "x-goog-api-key": GOOG_API_KEY,
-      "x-user-agent": "grpc-web-javascript/0.1",
-      "user-agent": USER_AGENT,
-    },
+    headers: getHeaders(),
     body: JSON.stringify([REQUEST_KEY, botguardResponse]),
   });
   const [integrityToken, estimatedTtlSecs] = (await response.json()) as [string?, number?];

@@ -55,7 +55,15 @@ import { HttpRelayTransport } from "./transport.ts";
 import { loadsUi, UiClients } from "./ui-clients.ts";
 import { buildWsPrep, sealWsPrep, wsCaller } from "./ws-prep.ts";
 import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
-import { isYtPlayer, spliceDirectStreams } from "./yt-extract.ts";
+import {
+  carriesPlayer,
+  isSabrRequest,
+  SabrStreams,
+  SabrTokens,
+  streamIdOf,
+  videoIdOf,
+  withPoToken,
+} from "./yt-sabr.ts";
 
 declare const self: ServiceWorkerGlobalScope;
 declare const __GIRICI_CLIENT__: string;
@@ -370,31 +378,20 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
         };
         const blocked = await cookiesBlocked(event, client, route.target);
         const cookieHeader = blocked ? null : await cookies.header(route.target, cookieContext);
-        // Keep the untouched player request so we can re-ask as a non-SABR client.
-        const ytPlayer = isYtPlayer(route.target) && request.method === "POST";
-        const playerBody = ytPlayer ? await request.clone().arrayBuffer() : null;
-        const result = await transport.send(request, {
+        const outgoing = isSabrRequest(route.target, request.method)
+          ? await withServerPoToken(request, route.target, initiator)
+          : request;
+        const result = await transport.send(outgoing, {
           target: route.target,
           clientUrl: initiator,
           isNavigation: navigation,
           cookie: cookieHeader,
           ...(site ? { privateDomains: true } : undefined),
         });
-        if (ytPlayer && playerBody && result.ok && result.response.body) {
-          const webText = await new Response(result.response.body).text();
-          const spliced = await spliceDirectStreams(
-            playerBody,
-            webText,
-            request,
-            route.target,
-            initiator,
-            cookieHeader,
-            transport,
-            mintPoToken,
-          );
-          result.response.body = new Response(spliced ?? webText).body;
-          // The spliced body differs in length, so the upstream content-length no longer applies.
-          result.response.headers = result.response.headers.filter(([name]) => name !== "content-length");
+        if (result.ok && result.response.body && carriesPlayer(route.target)) {
+          const [body, copy] = result.response.body.tee();
+          result.response.body = body;
+          sabrStreams.learnFrom(copy);
         }
         const changes =
           result.ok && !blocked ? await cookies.store(route.target, result.response.setCookies, cookieContext) : [];
@@ -480,6 +477,21 @@ async function askTop(clientId: string): Promise<string | null> {
     };
     client.postMessage({ type: TOP_SITE_QUERY }, [channel.port2]);
   });
+}
+
+const sabrTokens = new SabrTokens(mintPoToken);
+const sabrStreams = new SabrStreams();
+
+/** The SABR request carrying a server-minted poToken for its video, or the request as it came. */
+async function withServerPoToken(request: Request, target: URL, page: URL | null): Promise<Request> {
+  const stream = streamIdOf(target);
+  // The page address lags behind in-page navigation, so it only stands in for a stream the worker never saw.
+  const video = (stream ? await sabrStreams.videoOf(stream) : null) ?? videoIdOf(page);
+  const token = video ? await sabrTokens.get(video) : null;
+  if (!token) return request;
+  const body = withPoToken(new Uint8Array(await request.clone().arrayBuffer()), token);
+  if (!body) return request;
+  return new Request(request, { body });
 }
 
 /** Ask the server to mint a GVS poToken; same-origin, time-boxed, null on any failure. */
