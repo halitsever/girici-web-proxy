@@ -19,9 +19,9 @@ async function start(): Promise<void> {
   const state = await getAuthState().catch(() => null);
   const reloading = await (isSiteMode(state) ? retireRootEngine().catch(() => false) : engine);
   if (reloading) return;
-  setLanguage(loadSettings().lang, navigator.languages);
+  // Both before the first render, so the page never shows English first or the default brand.
+  await Promise.all([setLanguage(loadSettings().lang, navigator.languages), loadBrand()]);
   watch(lang, (next) => applyLanguageToDocument(next, document.documentElement), { immediate: true });
-  await loadBrand();
   // BrandDocument is the narrow structural view the unit test fakes; the real Document satisfies it at run time.
   watch(brand, (next) => applyBrandToDocument(next, document as unknown as BrandDocument), { immediate: true });
   createApp(App).use(router).mount("#app");

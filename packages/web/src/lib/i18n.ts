@@ -14,32 +14,51 @@ import {
 } from "@girici/engine/shared";
 import { ref } from "vue";
 import { en, type Messages } from "@/locales/en";
-import { tr } from "@/locales/tr";
-import { es } from "@/locales/es";
-import { ptBR } from "@/locales/pt-BR";
-import { fr } from "@/locales/fr";
-import { de } from "@/locales/de";
-import { ru } from "@/locales/ru";
-import { fa } from "@/locales/fa";
-import { ar } from "@/locales/ar";
-import { zhCN } from "@/locales/zh-CN";
-import { id } from "@/locales/id";
-import { vi } from "@/locales/vi";
 
-const CATALOGS: Catalogs<Messages> = { en, tr, es, "pt-BR": ptBR, fr, de, ru, fa, ar, "zh-CN": zhCN, id, vi };
+/** Every language but English loads when chosen, so a visitor downloads one catalog, not a dozen. */
+const LOADERS: { readonly [L in Exclude<Lang, "en">]?: () => Promise<Messages> } = {
+  tr: () => import("@/locales/tr").then((module) => module.tr),
+  es: () => import("@/locales/es").then((module) => module.es),
+  "pt-BR": () => import("@/locales/pt-BR").then((module) => module.ptBR),
+  fr: () => import("@/locales/fr").then((module) => module.fr),
+  de: () => import("@/locales/de").then((module) => module.de),
+  ru: () => import("@/locales/ru").then((module) => module.ru),
+  fa: () => import("@/locales/fa").then((module) => module.fa),
+  ar: () => import("@/locales/ar").then((module) => module.ar),
+  "zh-CN": () => import("@/locales/zh-CN").then((module) => module.zhCN),
+  id: () => import("@/locales/id").then((module) => module.id),
+  vi: () => import("@/locales/vi").then((module) => module.vi),
+};
+
+const AVAILABLE: Catalogs<true> = { en: true, ...Object.fromEntries(Object.keys(LOADERS).map((code) => [code, true])) };
+const CATALOGS: { en: Messages } & { [L in Lang]?: Messages } = { en };
 
 type KeyOf<T> = { [K in keyof Messages]: Messages[K] extends T ? K : never }[keyof Messages];
 export type TextKey = KeyOf<string>;
 export type PluralKey = KeyOf<PluralForms>;
 
 /** The languages the UI has text for, as the Settings picker lists them. */
-export const UI_LANGUAGES = LANGUAGES.filter((info) => CATALOGS[info.code] !== undefined);
+export const UI_LANGUAGES = LANGUAGES.filter((info) => AVAILABLE[info.code] !== undefined);
 
 /** English until main.ts applies the saved choice, so code that never does, tests included, reads English. */
 export const lang = ref<Lang>(DEFAULT_LANG);
 
-export function setLanguage(choice: LangChoice, ranges: readonly string[]): Lang {
-  lang.value = pickLanguage(CATALOGS, choice, ranges);
+let latest = 0;
+
+/** Switches once the language's text has loaded; the page stays in its current language until then, or if it fails. */
+export async function setLanguage(choice: LangChoice, ranges: readonly string[]): Promise<Lang> {
+  const ask = ++latest;
+  const next = pickLanguage(AVAILABLE, choice, ranges);
+  const load = next === "en" ? undefined : LOADERS[next];
+  if (load && !CATALOGS[next]) {
+    try {
+      CATALOGS[next] = await load();
+    } catch {
+      return lang.value;
+    }
+  }
+  // A choice made while this one loaded wins.
+  if (ask === latest) lang.value = next;
   return lang.value;
 }
 

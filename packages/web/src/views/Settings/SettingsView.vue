@@ -127,7 +127,7 @@ const siteNote = computed(() => {
 watch(settings, (value) => saveSettings(value), { deep: true });
 watch(
   () => settings.value.lang,
-  (choice) => setLanguage(choice, navigator.languages),
+  (choice) => void setLanguage(choice, navigator.languages),
 );
 // Site hosts also read the toolbar and search engine, from the cookie the root keeps for them.
 watch(
