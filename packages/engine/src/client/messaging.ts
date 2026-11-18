@@ -5,6 +5,7 @@ import {
   define,
   defineData,
   isWebUrl,
+  joined,
   originOf,
   parseUrl,
   toText,
@@ -37,10 +38,13 @@ export function installMessaging(
 ): DocumentListeners | null {
   const native = win.postMessage;
   const send: Send = (...args) => invoke(native, win, args);
-  win.postMessage = function (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) {
+  const hooked = maskNative(function (this: unknown, ...args: unknown[]) {
+    requireMessage(win, args.length);
     const own = originOf(ctx.realUrl());
-    post(send, own, ctx.origin, message, targetOrigin, rest, own);
-  } as typeof win.postMessage;
+    post(send, own, ctx.origin, args[0], args[1], joined([], args, 2), own);
+  }, native);
+  copyShape(hooked, native);
+  win.postMessage = hooked as typeof win.postMessage;
 
   const proto = win.MessageEvent.prototype;
   const sourceDescriptor = ownDescriptor(proto, "source");
@@ -97,18 +101,37 @@ export function createMessageSender(
       // A cross-origin window hides its address. Its own postMessage needs no translation, unless it is on another host.
       if (!crossSite) return value;
       return {
-        postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
-          crossSite(value as object, message, targetOrigin, rest),
+        postMessage: (...args: unknown[]) => {
+          requireMessage(win, args.length);
+          crossSite(value as object, args[0], args[1], joined([], args, 2));
+        },
       };
     }
     // Its page can redefine `origin`, so the address or its runtime says where it really is.
     const realOrigin = realOriginOf(value, ctx.origin) ?? "null";
     const send: Send = (...args) => invoke(native, value, args);
     return {
-      postMessage: (message: unknown, targetOrigin?: unknown, ...rest: unknown[]) =>
-        post(send, realOrigin, ctx.origin, message, targetOrigin, rest, originOf(ctx.realUrl())),
+      postMessage: (...args: unknown[]) => {
+        requireMessage(win, args.length);
+        post(send, realOrigin, ctx.origin, args[0], args[1], joined([], args, 2), originOf(ctx.realUrl()));
+      },
     };
   };
+}
+
+/** A bare call throws in browsers and anti-bot scripts check that it does; posting it would deliver `undefined`. */
+export function requireMessage(win: { TypeError?: TypeErrorConstructor }, count: number): void {
+  if (count > 0) return;
+  const Thrown = win.TypeError ?? TypeError;
+  throw new Thrown("Failed to execute 'postMessage' on 'Window': 1 argument required, but only 0 present.");
+}
+
+/** Pages that fingerprint builtins compare a function's name and length with the native's. */
+function copyShape(hooked: unknown, native: unknown): void {
+  const name = ownDescriptor(native, "name");
+  const length = ownDescriptor(native, "length");
+  if (name) define(hooked, "name", name);
+  if (length) define(hooked, "length", length);
 }
 
 /** Delivers as our origin a message addressed to the receiver's real origin, and drops one addressed elsewhere. */

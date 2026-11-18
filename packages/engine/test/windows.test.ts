@@ -139,6 +139,14 @@ describe("createWindowGuard", () => {
     expect(calls).toEqual([["hi", proxy]]);
   });
 
+  it("throws for a bare postMessage on a restricted window and posts nothing", () => {
+    const calls: unknown[][] = [];
+    const guard = guardFor("https://a.test", (_fn, _self, args) => calls.push([...args]));
+    const other = guard.wrap(fakeWindow(`${proxy}/~/https/b.test/`)) as { postMessage: () => void };
+    expect(() => other.postMessage()).toThrow(TypeError);
+    expect(calls).toEqual([]);
+  });
+
   it("sends through the site poster from a wrapper whose window it cannot read", () => {
     const calls: unknown[][] = [];
     const posted: unknown[][] = [];
