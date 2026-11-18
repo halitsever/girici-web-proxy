@@ -69,8 +69,9 @@ function ctxFor(realOrigin: string, proxyOrigin: string): UrlContext {
 
 function fakeMessagingWin(calls: unknown[][], proxyOrigin: string): Realm {
   return {
-    postMessage(...args: unknown[]) {
-      calls.push(args);
+    // One required argument, as the native declares.
+    postMessage(message: unknown, ...rest: unknown[]) {
+      calls.push([message, ...rest]);
     },
     location: { origin: proxyOrigin },
     MessageEvent: { prototype: {} },
@@ -89,6 +90,27 @@ function fakeWindow(origin: string): Record<string, unknown> {
   win.window = win;
   return win;
 }
+
+describe("postMessage called with no arguments", () => {
+  // Anti-bot scripts call it bare to check that it throws; a hook that posted would deliver an undefined message.
+  it("throws as the native does and posts nothing", () => {
+    const calls: unknown[][] = [];
+    const win = fakeMessagingWin(calls, "http://proxy.test");
+    const ctx = ctxFor("https://site-a.test", "http://proxy.test");
+    const sender = createMessageSender(win, ctx, direct);
+    installMessaging(win, ctx, direct, asIs);
+    const standIn = sender(fakeWindow("https://site-a.test")) as { postMessage: (...args: unknown[]) => void };
+    expect(() => (win.postMessage as () => void)()).toThrow(TypeError);
+    expect(() => standIn.postMessage()).toThrow(TypeError);
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps the native's name and length", () => {
+    const win = fakeMessagingWin([], "http://proxy.test");
+    installMessaging(win, ctxFor("https://site-a.test", "http://proxy.test"), direct, asIs);
+    expect([win.postMessage.name, win.postMessage.length]).toEqual(["postMessage", 1]);
+  });
+});
 
 describe("installMessaging", () => {
   it("delivers to a matching target origin, drops a mismatch and keeps the wildcard", () => {
