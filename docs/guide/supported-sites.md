@@ -14,7 +14,7 @@ gets much further than a datacenter IP.
 | Google Search | Works | Google sends many datacenter IPs to its "unusual traffic" CAPTCHA, with or without a proxy. |
 | reCAPTCHA | Works | The widget loads and its challenge opens. Whether you pass depends on the IP. |
 | YouTube | Works | Search, watch pages, recommendations, comments, Shorts and embeds work, and videos and ads play to the end with server-minted poTokens. Datacenter IPs can still be refused. |
-| Instagram | Partly | Logged-out profiles rendered in early testing. Sign-in was not verified. |
+| Instagram | Blocked by the site | Sends logged-out profile loads to its sign-in page. It does this to any client that is not a browser, even from a home connection with browser headers, so the server cannot avoid it. |
 | Reddit | Partly | Renders, but datacenter IPs get bot challenges and redirects to sign-in. |
 | X (Twitter) | Blocked by the site | Refuses datacenter IPs with 403. |
 | Discord | Not verified | Its live updates use WebSockets, which Girici relays from pages and workers. Voice and video need WebRTC, which Girici turns off. |
