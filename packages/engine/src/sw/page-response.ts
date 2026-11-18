@@ -1,7 +1,8 @@
 import { rewriteCss } from "../rewrite/css.ts";
-import { rewriteHtml, rewriteXml } from "../rewrite/html.ts";
+import { createHtmlRewriter, rewriteXml, type HtmlRewriteOptions } from "../rewrite/html.ts";
 import { rewriteJs } from "../rewrite/js.ts";
 import { rewriteRefresh } from "../rewrite/refresh.ts";
+import { CHARSET_SNIFF_BYTES, decoderFor } from "../shared/charset.ts";
 import { clientTag, xmlClientTag } from "../shared/client-tag.ts";
 import { encodeUrl } from "../shared/codec.ts";
 import {
@@ -55,6 +56,8 @@ export interface PageContext {
   sites?: SiteContext;
   /** For the error pages; English when unset. */
   lang?: Lang;
+  /** Keeps the worker alive while a page it rewrites is still streaming out. */
+  waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 const rewrites = new RewriteMemo();
@@ -75,12 +78,7 @@ async function peek(
     chunks.push(value);
     size += value.byteLength;
   }
-  const head = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    head.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const head = joinBytes(chunks, size);
   const replay = new ReadableStream<Uint8Array>({
     start(controller) {
       for (const chunk of chunks) controller.enqueue(chunk);
@@ -93,6 +91,76 @@ async function peek(
     cancel: (reason) => reader.cancel(reason),
   });
   return { head: head.buffer, body: replay };
+}
+
+function joinBytes(chunks: Uint8Array[], size: number): Uint8Array<ArrayBuffer> {
+  const joined = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return joined;
+}
+
+/** Rewrites a page as its bytes arrive, so the browser starts rendering before the whole document has loaded. */
+function streamHtml(
+  body: ReadableStream<Uint8Array>,
+  contentType: string | null,
+  options: HtmlRewriteOptions,
+  waitUntil: PageContext["waitUntil"],
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  const rewriter = createHtmlRewriter(options);
+  const encoder = new TextEncoder();
+  let decoder: TextDecoder | null = null;
+  let head: Uint8Array[] = [];
+  let headSize = 0;
+  let finished = () => {};
+  waitUntil?.(new Promise<void>((resolve) => (finished = resolve)));
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          let text = "";
+          if (!decoder) {
+            if (value) {
+              head.push(value);
+              headSize += value.byteLength;
+            }
+            // The charset may only be named in the first bytes, so decoding waits for them.
+            if (!done && headSize < CHARSET_SNIFF_BYTES) continue;
+            const bytes = joinBytes(head, headSize);
+            head = [];
+            decoder = decoderFor(bytes.buffer, contentType);
+            text = decoder.decode(bytes, { stream: !done });
+          } else if (value) {
+            text = decoder.decode(value, { stream: true });
+          }
+          if (done) {
+            const rest = rewriter.write(text + decoder.decode()) + rewriter.end();
+            if (rest) controller.enqueue(encoder.encode(rest));
+            controller.close();
+            finished();
+            return;
+          }
+          const ready = rewriter.write(text);
+          if (ready) {
+            controller.enqueue(encoder.encode(ready));
+            return;
+          }
+        }
+      } catch (error) {
+        controller.error(error);
+        finished();
+      }
+    },
+    cancel(reason) {
+      finished();
+      return reader.cancel(reason);
+    },
+  });
 }
 
 // The browser already decoded the relay body, so the upstream encoding and length no longer apply.
@@ -165,6 +233,11 @@ export async function buildPageResponse(result: TransportResult, ctx: PageContex
   if ((kind === "html" || kind === "xml") && ctx.runtimeAvailable && !(await ctx.runtimeAvailable())) {
     return errorResponse("runtime", 503, ctx.target, undefined, homeOf(ctx), ctx.lang);
   }
+  if (kind === "html") {
+    headers.set("content-type", REWRITTEN_TYPES.html);
+    const options = await documentOptions(ctx, clientTag);
+    return new Response(streamHtml(body, contentType, options, ctx.waitUntil), { status, headers });
+  }
   const bytes = await new Response(body).arrayBuffer();
   const text = decodeText(bytes, contentType);
   if (kind === "xml") {
@@ -188,7 +261,7 @@ function sandbox(headers: Headers, contentType: string | null): void {
 }
 
 /** What the HTML and XML rewriters need to give a document its runtime. */
-async function documentOptions(ctx: PageContext, tag: typeof clientTag) {
+async function documentOptions(ctx: PageContext, tag: typeof clientTag): Promise<HtmlRewriteOptions> {
   const config: ClientConfig = {
     v: PROTOCOL_VERSION,
     cookies: await ctx.cookies(),
@@ -209,14 +282,12 @@ async function documentOptions(ctx: PageContext, tag: typeof clientTag) {
 }
 
 async function rewriteBody(
-  kind: Exclude<BodyKind, "xml">,
+  kind: Exclude<BodyKind, "xml" | "html">,
   text: string,
   ctx: PageContext,
   validators: Validators,
 ): Promise<string> {
   switch (kind) {
-    case "html":
-      return rewriteHtml(text, await documentOptions(ctx, clientTag));
     case "css":
       return rewriteCss(text, ctx.target, ctx.origin);
     case "js":
