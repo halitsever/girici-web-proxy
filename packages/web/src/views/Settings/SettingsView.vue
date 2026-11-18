@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { captureSiteDataEnv, SITES_CLEARED_PARAM, type SiteListAnswer, type SiteSummary } from "@girici/engine/shared";
+import { X } from "lucide-vue-next";
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
@@ -553,14 +554,14 @@ onMounted(async () => {
         <div id="privacy" class="flex scroll-mt-24 flex-col gap-5">
           <h2 class="text-[22px] font-semibold tracking-[-0.02em]">{{ t("settings.sectionPrivacy") }}</h2>
           <section v-if="siteMode" class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-            <div class="flex items-center justify-between px-5 py-4">
-              <div>
+            <div class="flex items-center justify-between gap-4 px-5 py-4">
+              <div class="min-w-0">
                 <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
                 <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSites") }}</p>
               </div>
               <button
                 type="button"
-                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                class="h-9 shrink-0 whitespace-nowrap rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
                 :disabled="!visited.length || siteBusy"
                 @click="onClearSites('all')"
               >
@@ -609,14 +610,14 @@ onMounted(async () => {
           </section>
 
           <section v-else class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-            <div class="flex items-center justify-between px-5 py-4">
-              <div>
+            <div class="flex items-center justify-between gap-4 px-5 py-4">
+              <div class="min-w-0">
                 <p class="text-[15px] font-semibold">{{ t("sites.title") }}</p>
                 <p class="mt-1 text-[13px] text-muted-foreground">{{ t("sites.leadSingle") }}</p>
               </div>
               <button
                 type="button"
-                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                class="h-9 shrink-0 whitespace-nowrap rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
                 :disabled="!sites.length || siteBusy"
                 @click="onClearSite(null)"
               >
@@ -654,14 +655,14 @@ onMounted(async () => {
           </section>
 
           <div class="overflow-hidden rounded-xl border border-border bg-gi-panel">
-            <div class="flex items-center justify-between px-5 py-4">
-              <div>
+            <div class="flex items-center justify-between gap-4 px-5 py-4">
+              <div class="min-w-0">
                 <p class="text-[15px] font-semibold">{{ t("history.title") }}</p>
                 <p class="mt-1 text-[13px] text-muted-foreground">{{ t("history.lead") }}</p>
               </div>
               <button
                 type="button"
-                class="h-9 rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
+                class="h-9 shrink-0 whitespace-nowrap rounded-md border border-[var(--gi-danger-border)] px-3.5 text-[13px] font-medium text-gi-danger transition-colors hover:bg-[var(--gi-danger-bg)] disabled:opacity-40"
                 :disabled="!history.length"
                 @click="onClearHistory"
               >
@@ -678,8 +679,14 @@ onMounted(async () => {
               >
                 {{ entry.name.charAt(0).toUpperCase() }}
               </span>
-              <span class="min-w-0 flex-1 truncate text-[14px]">{{ entry.name }}</span>
-              <span class="shrink-0 font-mono text-[12px] text-gi-subtle">{{ relativeTime(entry.t) }}</span>
+              <!-- On a phone the time goes under the name, which leaves the name room for a whole host. -->
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-[14px]">{{ entry.name }}</p>
+                <p class="font-mono text-[12px] text-gi-subtle sm:hidden">{{ relativeTime(entry.t) }}</p>
+              </div>
+              <span class="hidden shrink-0 font-mono text-[12px] text-gi-subtle sm:inline">{{
+                relativeTime(entry.t)
+              }}</span>
               <button
                 type="button"
                 class="h-8 shrink-0 rounded-md border border-border px-3 text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -689,11 +696,12 @@ onMounted(async () => {
               </button>
               <button
                 type="button"
-                class="h-8 shrink-0 rounded-md px-2.5 text-[13px] font-medium text-gi-subtle transition-colors hover:text-gi-danger"
+                class="grid h-8 shrink-0 place-items-center rounded-md px-2 text-[13px] font-medium text-gi-subtle transition-colors hover:text-gi-danger sm:px-2.5"
                 :aria-label="t('history.removeOne', { name: entry.name })"
                 @click="removeEntry(entry.name)"
               >
-                {{ t("history.remove") }}
+                <X class="size-4 sm:hidden" aria-hidden="true" />
+                <span class="hidden sm:inline">{{ t("history.remove") }}</span>
               </button>
             </div>
             <p v-if="!history.length" class="border-t border-border px-5 py-4 text-[13px] text-muted-foreground">

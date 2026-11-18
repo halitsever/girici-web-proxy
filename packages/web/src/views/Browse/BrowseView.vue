@@ -297,7 +297,8 @@ onMounted(async () => {
           ><span class="text-[#6e90ff]">{{ preview.route }}</span
           >{{ preview.rest }}
         </span>
-        <span v-else class="text-gi-subtle">{{ t("browse.keys") }}</span>
+        <!-- Keys mean nothing on a touch screen. -->
+        <span v-else class="text-gi-subtle pointer-coarse:hidden">{{ t("browse.keys") }}</span>
       </p>
 
       <!-- Typing: what Enter opens, then the suggestions that match. -->
