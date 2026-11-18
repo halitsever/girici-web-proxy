@@ -7,20 +7,36 @@ const siteUrl = "https://halitsever.github.io/girici-web-proxy/";
 const description =
   "Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy that runs in Docker.";
 
+const license = "https://www.gnu.org/licenses/agpl-3.0.html";
+const author = { "@type": "Person", name: "Halit Sever", url: "https://github.com/halitsever" };
+
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "SoftwareApplication",
-  name: "Girici",
-  description,
-  url: siteUrl,
-  image: `${siteUrl}og.png`,
-  applicationCategory: "UtilitiesApplication",
-  operatingSystem: "Linux",
-  codeRepository: repo,
-  programmingLanguage: "TypeScript",
-  license: "https://www.gnu.org/licenses/agpl-3.0.html",
-  author: { "@type": "Person", name: "Halit Sever", url: "https://github.com/halitsever" },
-  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": `${siteUrl}#app`,
+      name: "Girici",
+      description,
+      url: siteUrl,
+      image: `${siteUrl}og.png`,
+      applicationCategory: "UtilitiesApplication",
+      operatingSystem: "Linux",
+      license,
+      author,
+      offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": `${siteUrl}#source`,
+      name: "Girici",
+      codeRepository: repo,
+      programmingLanguage: "TypeScript",
+      license,
+      author,
+      targetProduct: { "@id": `${siteUrl}#app` },
+    },
+  ],
 };
 
 const sidebar: DefaultTheme.SidebarItem[] = [
@@ -142,7 +158,7 @@ export default defineConfig({
     ];
   },
   themeConfig: {
-    logo: "/girici-icon-dark.svg",
+    logo: { src: "/girici-icon-dark.svg", alt: "Girici logo" },
     nav: [
       { text: "Guide", link: "/guide/getting-started", activeMatch: "/guide/" },
       { text: "Configuration", link: "/guide/configuration" },
