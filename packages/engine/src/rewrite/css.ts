@@ -1,6 +1,7 @@
 import { rewriteUrl } from "../shared/url-rewrite.ts";
 
-const IMAGE_SET_FUNCTIONS = ["-webkit-image-set(", "image-set("];
+const IMAGE_SET = "image-set(";
+const WEBKIT_IMAGE_SET = "-webkit-image-set(";
 
 /** Rewrites url(), @import and image-set() targets; everything else, comments included, keeps its exact text. */
 export function rewriteCss(css: string, base: URL, origin: string, opaque = false): string {
@@ -39,7 +40,8 @@ export function rewriteCss(css: string, base: URL, origin: string, opaque = fals
       index = end;
       continue;
     }
-    if (startsFunction(css, index, "url(")) {
+    // Slicing at every character would make each stylesheet cost several strings per byte.
+    if ((char === "u" || char === "U") && startsFunction(css, index, "url(")) {
       const token = readUrl(css, index + 4);
       if (token) {
         const rewritten = rewriteUrl(token.value, base, origin, undefined, opaque);
@@ -56,7 +58,12 @@ export function rewriteCss(css: string, base: URL, origin: string, opaque = fals
       index += 7;
       continue;
     }
-    const imageSet = IMAGE_SET_FUNCTIONS.find((name) => startsFunction(css, index, name));
+    const imageSet =
+      (char === "i" || char === "I") && startsFunction(css, index, IMAGE_SET)
+        ? IMAGE_SET
+        : char === "-" && startsFunction(css, index, WEBKIT_IMAGE_SET)
+          ? WEBKIT_IMAGE_SET
+          : null;
     if (imageSet) {
       imageSets.push(depth);
       depth++;
@@ -73,8 +80,13 @@ export function rewriteCss(css: string, base: URL, origin: string, opaque = fals
   return output + css.slice(copied);
 }
 
+/** `name` is lowercase ASCII, and no other character lowercases into one of its letters. */
 function startsFunction(css: string, index: number, name: string): boolean {
-  return css.slice(index, index + name.length).toLowerCase() === name && !isIdentChar(css[index - 1]);
+  for (let offset = 0; offset < name.length; offset++) {
+    const code = css.charCodeAt(index + offset);
+    if ((code >= 65 && code <= 90 ? code + 32 : code) !== name.charCodeAt(offset)) return false;
+  }
+  return !isIdentChar(css[index - 1]);
 }
 
 /** Returns the index after the closing quote, or where an unterminated string ends. */
