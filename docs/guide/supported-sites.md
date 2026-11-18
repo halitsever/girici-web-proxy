@@ -13,7 +13,7 @@ gets much further than a datacenter IP.
 | Wikipedia | Works | Reading and navigation are covered by the smoke test. |
 | Google Search | Works | Google sends many datacenter IPs to its "unusual traffic" CAPTCHA, with or without a proxy. |
 | reCAPTCHA | Works | The widget loads and its challenge opens. Whether you pass depends on the IP. |
-| YouTube | Partly | Pages, videos and ads play past the first minute, with server-minted poTokens. Datacenter IPs can still be refused. |
+| YouTube | Works | Search, watch pages, recommendations, comments, Shorts and embeds work, and videos and ads play to the end with server-minted poTokens. Datacenter IPs can still be refused. |
 | Instagram | Partly | Logged-out profiles rendered in early testing. Sign-in was not verified. |
 | Reddit | Partly | Renders, but datacenter IPs get bot challenges and redirects to sign-in. |
 | X (Twitter) | Blocked by the site | Refuses datacenter IPs with 403. |
