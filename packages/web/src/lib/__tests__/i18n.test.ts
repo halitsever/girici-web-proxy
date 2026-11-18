@@ -11,8 +11,8 @@ import { applyLanguageToDocument, lang, setLanguage, t, tn, UI_LANGUAGES } from 
 import { clearedNote } from "../site-data";
 import { limitText } from "../status";
 
-afterEach(() => {
-  setLanguage("en", []);
+afterEach(async () => {
+  await setLanguage("en", []);
 });
 
 /** The distinct `{name}`s in a text or its plural forms, sorted, so two languages can be compared. */
@@ -21,13 +21,28 @@ function placeholders(value: unknown): string[] {
 }
 
 describe("UI language", () => {
-  it("starts in English and follows the setting or the browser", () => {
+  it("starts in English and follows the setting or the browser", async () => {
     expect(lang.value).toBe("en");
-    expect(setLanguage("auto", ["tr-TR", "en-US"])).toBe("tr");
-    expect(setLanguage("auto", ["ja-JP", "en"])).toBe("en");
-    expect(setLanguage("auto", ["de-DE", "en"])).toBe("de");
-    expect(setLanguage("tr", ["en-US"])).toBe("tr");
-    expect(setLanguage("de", ["tr"])).toBe("de");
+    expect(await setLanguage("auto", ["tr-TR", "en-US"])).toBe("tr");
+    expect(await setLanguage("auto", ["ja-JP", "en"])).toBe("en");
+    expect(await setLanguage("auto", ["de-DE", "en"])).toBe("de");
+    expect(await setLanguage("tr", ["en-US"])).toBe("tr");
+    expect(await setLanguage("de", ["tr"])).toBe("de");
+  });
+
+  it("keeps the current language until the new one's text has loaded", async () => {
+    const loading = setLanguage("fr", []);
+    expect(lang.value).toBe("en");
+    expect(t("nav.settings")).toBe(en["nav.settings"]);
+    await loading;
+    expect(lang.value).toBe("fr");
+  });
+
+  it("ends on the last choice when choices overlap", async () => {
+    const first = setLanguage("ru", []);
+    const second = setLanguage("vi", []);
+    await Promise.all([first, second]);
+    expect(lang.value).toBe("vi");
   });
 
   it("offers only the languages it has text for", () => {
@@ -47,20 +62,20 @@ describe("UI language", () => {
     expect(root).toEqual({ lang: "tr", dir: "ltr" });
   });
 
-  it("writes texts, counts and library messages in Turkish", () => {
-    setLanguage("tr", []);
+  it("writes texts, counts and library messages in Turkish", async () => {
+    await setLanguage("tr", []);
     expect(t("browse.opening", { name: "example.com" })).toBe("example.com açılıyor…");
     expect(tn("sites.cookies", 1)).toBe("1 çerez");
     expect(clearedNote("3")).toBe("3 sitenin verileri temizlendi.");
     expect(limitText(1_048_576, "day")).toBe("ziyaretçi başına günde 1 MB");
     expect(relativeTime(0, 5 * 60_000)).toBe("5 dk");
-    setLanguage("en", []);
+    await setLanguage("en", []);
     expect(tn("sites.cookies", 2)).toBe("2 cookies");
     expect(clearedNote("1")).toBe("Cleared 1 site.");
   });
 
   it("renders the sign-in page in Turkish", async () => {
-    setLanguage("tr", []);
+    await setLanguage("tr", []);
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: LoginView }] });
     await router.push("/");
     await router.isReady();
