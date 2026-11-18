@@ -65,6 +65,18 @@ describe("CookieRpc", () => {
     expect(waited).toBe(true);
   });
 
+  it("by default waits for a write that a busy worker applies late", async () => {
+    const rpc = new CookieRpc(await service());
+    let waited = false;
+    const waiting = rpc.waitFor("client-1", 1).then(() => {
+      waited = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(waited).toBe(false);
+    await rpc.handle(post({ v: PROTOCOL_VERSION, seq: 1, cookie: "a=1" }), "client-1", page);
+    await waiting;
+  });
+
   it("stops waiting after the time limit", async () => {
     const rpc = new CookieRpc(await service(), { maxWait: 20 });
     const started = Date.now();

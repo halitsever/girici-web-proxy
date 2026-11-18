@@ -52,7 +52,8 @@ import { createIdbSiteStore, SiteModeService } from "./site-mode.ts";
 import { FrameTops, isThirdParty, topSiteFor, windowTop, type TopSiteDeps } from "./third-party.ts";
 import { RuntimeStore, sha256Hex } from "./runtime-store.ts";
 import { HttpRelayTransport } from "./transport.ts";
-import { loadsUi, UiClients } from "./ui-clients.ts";
+import { claimThenSeed, loadsUi, UiClients } from "./ui-clients.ts";
+import { CALLER_LOOKUP_WAIT, lookupClient, SCRIPT_LOOKUP_WAIT } from "./client-lookup.ts";
 import { buildWsPrep, sealWsPrep, wsCaller } from "./ws-prep.ts";
 import { answerAnnouncement, readNonce, WorkerRegistry, type WorkerIdentity } from "./worker-identity.ts";
 import {
@@ -88,8 +89,6 @@ const runtime = new RuntimeStore(
   },
 );
 const transport = new HttpRelayTransport();
-// Window clients answer at once; only a deadlocked worker ever reaches this.
-const CLIENT_LOOKUP_TIMEOUT = 200;
 // A frame whose runtime has not started yet cannot answer; its request then counts as third-party.
 const TOP_QUERY_TIMEOUT = 200;
 const cookies = new CookieService(createIdbCookieStore());
@@ -147,12 +146,6 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  // A site host has no UI tabs to record, and its instance switch comes with its config.
-  seeding = inSingleMode(() => {
-    const seeded = seedUiClients();
-    instance.refresh(true);
-    return seeded;
-  });
   const cleanup = caches
     .keys()
     .then((keys) =>
@@ -160,18 +153,19 @@ self.addEventListener("activate", (event) => {
         keys.filter((key) => key.startsWith("girici:") && key !== CLIENT_CACHE).map((key) => caches.delete(key)),
       ),
     );
-  // UI tabs are recorded before claim() hands them to this worker.
-  event.waitUntil(Promise.all([cleanup, seeding]).then(() => self.clients.claim()));
+  let claimed: Promise<void> | undefined;
+  const claim = () => (claimed ??= cleanup.then(() => self.clients.claim()));
+  const windows = () => self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  // A site host has no UI tabs to record, and its instance switch comes with its config.
+  // Requests from claimed tabs wait for the seed through uiReady().
+  seeding = inSingleMode(() => {
+    instance.refresh(true);
+    return claimThenSeed(ui, { claim, windows, origin: self.location.origin });
+  })
+    .then(claim)
+    .catch(() => {});
+  event.waitUntil(seeding);
 });
-
-async function seedUiClients(): Promise<void> {
-  try {
-    await ui.ready();
-    await ui.seedOnce(await self.clients.matchAll({ type: "window", includeUncontrolled: true }), self.location.origin);
-  } catch {
-    // An unseeded tab gains UI authority on its next load.
-  }
-}
 
 async function uiReady(): Promise<void> {
   await Promise.all([ui.ready(), seeding]);
@@ -288,7 +282,7 @@ async function announceCookies(changes: CookieSnapshot[]): Promise<void> {
 
 /** A client that cannot be looked up in time counts as a page, not as the UI. */
 async function guardReserved(event: FetchEvent, pathname: string, site: boolean): Promise<Response> {
-  const [client] = await Promise.all([clientOf(event), uiReady()]);
+  const [client] = await Promise.all([clientOf(event, CALLER_LOOKUP_WAIT), uiReady()]);
   const decision = reservedAccess(pathname, event.request, client, self.location.origin, ui, site);
   return decision === "allow" ? fetch(event.request) : forbiddenResponse();
 }
@@ -513,7 +507,7 @@ async function mintPoToken(contentBinding: string): Promise<string | null> {
 /** Hand the WebSocket shim a seal of the target's cookies and Origin, read from the jar as the page. */
 async function handleWsPrep(event: FetchEvent): Promise<Response> {
   await Promise.all([cookies.ready(), sealing.ready()]);
-  const client = await clientOf(event);
+  const client = await clientOf(event, CALLER_LOOKUP_WAIT);
   const identity = await identityOf(event, client);
   const caller = wsCaller(
     client?.type,
@@ -546,13 +540,18 @@ async function handleWsPrep(event: FetchEvent): Promise<Response> {
 }
 
 async function handleSiteDataRpc(event: FetchEvent, site: boolean): Promise<Response> {
-  const [client] = await Promise.all([clientOf(event), cookies.ready(), uiReady(), sealing.ready()]);
+  const [client] = await Promise.all([
+    clientOf(event, CALLER_LOOKUP_WAIT),
+    cookies.ready(),
+    uiReady(),
+    sealing.ready(),
+  ]);
   return handleSiteData(event.request, callerOf(client, self.location.origin, ui, sealing.open), cookies, site);
 }
 
 async function handleCookieRpc(event: FetchEvent): Promise<Response> {
   await Promise.all([cookies.ready(), sealing.ready()]);
-  const client = await clientOf(event);
+  const client = await clientOf(event, CALLER_LOOKUP_WAIT);
   // Only a page's document.cookie calls here, and a worker cannot show which page it acts for.
   if (client?.type !== "window") return new Response(null, { status: 403 });
   const pageUrl = realUrlOf(client.url, self.location.origin, sealing.open);
@@ -580,7 +579,7 @@ async function handleWorkerRpc(event: FetchEvent, site: boolean): Promise<Respon
 
 /** The identity a nonce the caller announces binds to: its own page for a window, its own binding for a worker. */
 async function callerIdentity(event: FetchEvent): Promise<WorkerIdentity | null> {
-  const client = await clientOf(event);
+  const client = await clientOf(event, CALLER_LOOKUP_WAIT);
   if (client?.type !== "window") return identityOf(event, client);
   // A blank frame's address is about:blank, so its workers stay unbound.
   await sealing.ready();
@@ -601,11 +600,9 @@ async function forgetClosedClients(): Promise<void> {
   for (const id of ids) if (!(await self.clients.get(id))) rpc.forget(id);
 }
 
-/** Firefox never settles clients.get() for a worker blocked in a synchronous importScripts, so the lookup gives up. */
-async function clientOf(event: FetchEvent): Promise<Client | undefined> {
-  if (!event.clientId) return undefined;
-  const timeout = new Promise<undefined>((resolve) => setTimeout(resolve, CLIENT_LOOKUP_TIMEOUT));
-  return Promise.race([self.clients.get(event.clientId), timeout]);
+/** Requests the runtime makes with fetch() wait longer for their caller than any load a worker may block on. */
+function clientOf(event: FetchEvent, wait = SCRIPT_LOOKUP_WAIT): Promise<Client | undefined> {
+  return lookupClient(self.clients, event.clientId, wait);
 }
 
 /** A site host learns the admin's switch, and whether the visitor came through the UI, from its config. */

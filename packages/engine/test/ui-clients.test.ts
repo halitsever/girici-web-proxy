@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ClientRecordStore } from "../src/sw/client-records.ts";
-import { isUiNavigation, loadsUi, UiClients } from "../src/sw/ui-clients.ts";
+import { claimThenSeed, isUiNavigation, loadsUi, UiClients } from "../src/sw/ui-clients.ts";
 
 const origin = "https://girici.test";
 
@@ -42,6 +42,24 @@ describe("UiClients", () => {
     await ui.seedOnce([{ id: "late", type: "window", frameType: "top-level", url: `${origin}/` }], origin);
     expect(["s", "f", "p", "late"].map((id) => ui.has(id))).toEqual([true, false, false, false]);
     expect(ui.has("#seeded")).toBe(false);
+  });
+
+  it("seeds a UI tab that opened while the worker activated", async () => {
+    const ui = new UiClients(memoryRecords());
+    const open = [{ id: "s", type: "window", frameType: "top-level", url: `${origin}/settings` }];
+    const claim = async () => {
+      // A reload that finished before claim() runs uncontrolled, then claim() hands it to the worker.
+      open.push({ id: "reloaded", type: "window", frameType: "top-level", url: `${origin}/settings` });
+    };
+    await claimThenSeed(ui, { claim, windows: async () => open, origin });
+    expect(["s", "reloaded"].map((id) => ui.has(id))).toEqual([true, true]);
+  });
+
+  it("still seeds when claim() fails", async () => {
+    const ui = new UiClients(memoryRecords());
+    const windows = async () => [{ id: "s", type: "window", frameType: "top-level", url: `${origin}/` }] as const;
+    await claimThenSeed(ui, { claim: () => Promise.reject(new Error("no")), windows, origin });
+    expect(ui.has("s")).toBe(true);
   });
 
   it("does not seed again after a restart", async () => {

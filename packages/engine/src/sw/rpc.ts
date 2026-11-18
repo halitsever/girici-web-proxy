@@ -20,7 +20,8 @@ export class CookieRpc {
 
   constructor(cookies: CookieService, options: { maxWait?: number; orderWait?: number } = {}) {
     this.#cookies = cookies;
-    this.#maxWait = options.maxWait ?? 100;
+    // A busy worker can take this long to look up the writing page, and a write that never comes costs the same wait.
+    this.#maxWait = options.maxWait ?? 1000;
     this.#orderWait = options.orderWait ?? 1000;
   }
 
