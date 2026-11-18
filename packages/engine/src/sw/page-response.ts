@@ -218,21 +218,22 @@ async function rewriteBody(
     case "html":
       return rewriteHtml(text, await documentOptions(ctx, clientTag));
     case "css":
-      return rewriteCss(text, ctx.target, ctx.origin);
+      return cachedRewrite(ctx.target, "css", validators, () => rewriteCss(text, ctx.target, ctx.origin));
     case "js":
       // Workers and blank frames load scripts too, and they have no runtime to call into.
       // sourceURL makes stack traces name the real script, so tamper checks that read Error().stack see no proxy URL.
       return cachedRewrite(
         ctx.target,
+        "js",
         validators,
         () => `${rewriteJs(text, { standalone: true })}\n//# sourceURL=${ctx.target.href}`,
       );
   }
 }
 
-/** Reuses a stored rewrite when the script carries a validator, so a repeat visit skips re-parsing a large bundle. */
-function cachedRewrite(target: URL, validators: Validators, rewrite: () => string): string {
-  const key = cacheKey(target, "js", validators);
+/** Reuses a stored rewrite when the response carries a validator, so a repeat visit skips rewriting a large file. */
+function cachedRewrite(target: URL, kind: "css" | "js", validators: Validators, rewrite: () => string): string {
+  const key = cacheKey(target, kind, validators);
   if (!key) return rewrite();
   const cached = rewrites.get(key);
   if (cached !== null) return cached;
