@@ -5,6 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import SiteBadge from "@/components/SiteBadge.vue";
 import { Switch } from "@/components/ui/switch";
 import { brand, DEFAULT_BRAND_NAME, readLogoFile, saveBrand } from "@/lib/brand";
 import {
@@ -576,11 +577,7 @@ onMounted(async () => {
               :key="entry.site"
               class="flex items-center gap-3 border-t border-border px-5 py-3"
             >
-              <span
-                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-              >
-                {{ siteName(entry.site).charAt(0).toUpperCase() }}
-              </span>
+              <SiteBadge :host="siteName(entry.site)" />
               <p class="min-w-0 flex-1 truncate text-[14px]">{{ siteName(entry.site) }}</p>
               <button
                 type="button"
@@ -629,11 +626,7 @@ onMounted(async () => {
               :key="entry.site"
               class="flex items-center gap-3 border-t border-border px-5 py-3"
             >
-              <span
-                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-              >
-                {{ entry.site.charAt(0).toUpperCase() }}
-              </span>
+              <SiteBadge :host="entry.site" />
               <div class="min-w-0 flex-1">
                 <p class="truncate text-[14px]">{{ entry.site }}</p>
                 <p class="text-[12px] text-gi-subtle">{{ siteDetail(entry) }}</p>
@@ -674,11 +667,7 @@ onMounted(async () => {
               :key="entry.name"
               class="flex items-center gap-3 border-t border-border px-5 py-3"
             >
-              <span
-                class="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-accent text-[11px] font-semibold text-[#d4d4d8]"
-              >
-                {{ entry.name.charAt(0).toUpperCase() }}
-              </span>
+              <SiteBadge :host="entry.name" />
               <!-- On a phone the time goes under the name, which leaves the name room for a whole host. -->
               <div class="min-w-0 flex-1">
                 <p class="truncate text-[14px]">{{ entry.name }}</p>
