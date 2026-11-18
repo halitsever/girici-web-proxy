@@ -6,7 +6,7 @@ description: "How Girici compares with php-proxy: where each web proxy rewrites 
 # A Node.js alternative to php-proxy
 
 [php-proxy](https://github.com/Athlon1600/php-proxy-app) is an open source web proxy script written in PHP,
-built on the php-proxy library. Girici does the same job, browsing other sites through a server you host yourself, but it runs on Node.js and
+built on the php-proxy library, which was itself written as an alternative to the older Glype proxy script. Girici does the same job, browsing other sites through a server you host yourself, but it runs on Node.js and
 rewrites pages in the browser instead of on the server. This page sets the two side by side so you can pick the one
 that suits your server and the sites you need.
 
