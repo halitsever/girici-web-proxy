@@ -47,6 +47,11 @@ Type a URL or a search term into the box and press Enter. URLs open through the 
 not a URL is searched with your chosen engine. Everything after that, including links, forms, and
 media, stays inside Girici.
 
+Browsers that support installing web apps can add Girici to the home screen or the desktop. Use
+**Install app** in Chrome or Edge, or **Add to Home Screen** in Safari on iPhone and iPad. The
+installed app opens sites in its own window, and the Girici toolbar on each page has back, forward,
+and reload. The app uses the instance name and logo the admin set in Account.
+
 ## Next steps
 
 - [How it works](/guide/how-it-works) for the architecture.

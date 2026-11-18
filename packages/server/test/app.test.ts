@@ -64,6 +64,7 @@ describe("createApp", () => {
     mkdirSync(join(webDistDir, "_g/ui"), { recursive: true });
     writeFileSync(join(webDistDir, "_g/ui/app.js"), "console.log(1)");
     writeFileSync(join(webDistDir, "_g/ui/THIRD_PARTY_LICENSES.txt"), "== vue@3 (MIT) ==");
+    writeFileSync(join(webDistDir, "_g/ui/icon-192.png"), "png");
     emptyDir = mkdtempSync(join(tmpdir(), "girici-empty-"));
     ({ server, base } = await listen(webDistDir, (line) => logLines.push(line)));
     ({ server: emptyServer, base: emptyBase } = await listen(emptyDir));
@@ -133,7 +134,7 @@ describe("createApp", () => {
     expect(res.headers.get("cache-control")).toContain("immutable");
   });
 
-  it("serves the brand without signing in on a private instance", async () => {
+  it("serves the brand and the app manifest without signing in on a private instance", async () => {
     const store = new AuthStore(openDb(":memory:"));
     store.createAdmin({ username: "a", name: "A", email: "a@a.a", password: "pw-123456" });
     const privateServer = createServer(
@@ -149,11 +150,20 @@ describe("createApp", () => {
     );
     await new Promise<void>((resolve) => privateServer.listen(0, "127.0.0.1", resolve));
     try {
-      const res = await fetch(`http://127.0.0.1:${(privateServer.address() as AddressInfo).port}/_g/brand`);
-      expect(res.status).toBe(200);
+      // Browsers fetch the manifest and its icons without cookies.
+      const privateBase = `http://127.0.0.1:${(privateServer.address() as AddressInfo).port}`;
+      for (const path of ["/_g/brand", "/_g/manifest.webmanifest", "/_g/ui/icon-192.png"]) {
+        expect((await fetch(`${privateBase}${path}`)).status, path).toBe(200);
+      }
     } finally {
       await close(privateServer);
     }
+  });
+
+  it("serves the app icons revalidated, since their names carry no hash", async () => {
+    const res = await fetch(`${base}/_g/ui/icon-192.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
   });
 
   it("serves the UI license texts revalidated, not immutable", async () => {

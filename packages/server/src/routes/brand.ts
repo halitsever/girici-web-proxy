@@ -1,6 +1,13 @@
 import { Router } from "express";
 import type { BrandStore } from "../brand/store.ts";
 
+const DEFAULT_NAME = "Girici";
+const MIDNIGHT = "#0a0f1e";
+const DEFAULT_ICONS = [
+  { src: "/_g/ui/icon-192.png", sizes: "192x192", type: "image/png" },
+  { src: "/_g/ui/icon-512.png", sizes: "512x512", type: "image/png" },
+];
+
 // The sandbox keeps an SVG opened on its own from running script or reaching the network.
 export const LOGO_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
@@ -10,6 +17,25 @@ export function brandRouter(brand: BrandStore): Router {
   router.get("/_g/brand", (_req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.json(brand.info());
+  });
+  /** Lets phones and desktop browsers install the UI as an app that opens sites in its own window. */
+  router.get("/_g/manifest.webmanifest", (_req, res) => {
+    const { name, logo } = brand.info();
+    const title = name ?? DEFAULT_NAME;
+    const type = brand.logo()?.type;
+    res.setHeader("Cache-Control", "no-cache");
+    res.type("application/manifest+json").send(
+      JSON.stringify({
+        name: title,
+        short_name: title,
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        background_color: MIDNIGHT,
+        theme_color: MIDNIGHT,
+        icons: logo && type ? [{ src: logo, sizes: "any", type }] : DEFAULT_ICONS,
+      }),
+    );
   });
   router.get("/_g/brand/logo", (req, res) => {
     const logo = brand.logo();
