@@ -21,7 +21,8 @@ that you run with Docker on your own server.
 <a href="https://halitsever.github.io/girici-web-proxy/"><b>Documentation</b></a> ·
 <a href="https://halitsever.github.io/girici-web-proxy/guide/getting-started">Getting started</a> ·
 <a href="https://halitsever.github.io/girici-web-proxy/guide/supported-sites">Supported sites</a> ·
-<a href="https://halitsever.github.io/girici-web-proxy/guide/threat-model">Threat model</a>
+<a href="https://halitsever.github.io/girici-web-proxy/guide/threat-model">Threat model</a> ·
+<a href="https://halitsever.github.io/girici-web-proxy/guide/php-proxy-alternative">php-proxy alternative</a>
 </p>
 
 > **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.

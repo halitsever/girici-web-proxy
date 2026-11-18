@@ -33,6 +33,7 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: "Configuration", link: "/guide/configuration" },
       { text: "Running with Docker", link: "/guide/docker" },
       { text: "Supported sites", link: "/guide/supported-sites" },
+      { text: "php-proxy alternative", link: "/guide/php-proxy-alternative" },
     ],
   },
   {

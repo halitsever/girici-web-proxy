@@ -3,7 +3,7 @@
   "version": "2.0.0-dev",
   "private": true,
   "type": "module",
-  "description": "Web proxy project written in Typescript & Vue.js. Node.js alternative for php-proxy.",
+  "description": "Self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy.",
   "author": "Halit Sever",
   "license": "AGPL-3.0-only",
   "engines": {

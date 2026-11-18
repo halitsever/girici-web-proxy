@@ -152,8 +152,8 @@ async function copy() {
       <div class="hero-copy">
         <h1 class="hero-title">Every site, through one door.</h1>
         <p class="hero-lead">
-          Girici is a web proxy you host yourself. A service worker in your browser rewrites each page, and your server
-          only relays the bytes.
+          Girici is a self-hosted web proxy that runs on Node.js. A service worker in your browser rewrites each page,
+          and your server only relays the bytes.
         </p>
 
         <div
@@ -297,6 +297,9 @@ async function copy() {
       </div>
       <p class="closing-note">
         Then open port 3000 and create the admin account with the code Girici prints to its log.
+      </p>
+      <p class="closing-note">
+        Coming from php-proxy? <a :href="withBase('/guide/php-proxy-alternative')">See how the two compare</a>.
       </p>
       <div class="actions">
         <a class="btn btn-primary" :href="withBase('/guide/getting-started')">Get started</a>
