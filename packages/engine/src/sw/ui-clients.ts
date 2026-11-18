@@ -140,3 +140,24 @@ export class UiClients implements UiClientSet {
     }
   }
 }
+
+export interface Activation {
+  claim(): Promise<void>;
+  windows(): Promise<readonly ClientShape[]>;
+  origin: string;
+}
+
+/** A tab that loads before claim() takes it over is only recorded when the seed reads the windows after the claim. */
+export async function claimThenSeed(ui: UiClients, activation: Activation): Promise<void> {
+  try {
+    await activation.claim();
+  } catch {
+    // Unclaimed tabs still get recorded, and come under the worker on their next load.
+  }
+  try {
+    await ui.ready();
+    await ui.seedOnce(await activation.windows(), activation.origin);
+  } catch {
+    // An unseeded tab gains UI authority on its next load.
+  }
+}
