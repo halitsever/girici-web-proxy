@@ -23,3 +23,14 @@ test("fits Settings' buttons and history names on a phone", async ({ page }) => 
     expect(await overflows(`:text-is('${name}')`), name).toEqual([]);
   }
 });
+
+test.describe("on a touch screen", () => {
+  test.use({ hasTouch: true, isMobile: true });
+
+  test("leaves out the keyboard hints", async ({ page, browserName }) => {
+    test.skip(browserName !== "chromium", "only Chromium emulates a coarse pointer");
+    await page.goto("/");
+    await expect(page.getByLabel("URL or search")).toBeVisible();
+    await expect(page.getByText("↑↓ navigate")).toBeHidden();
+  });
+});
