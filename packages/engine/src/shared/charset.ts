@@ -57,16 +57,22 @@ export function mimeOf(contentType: string | null): string | null {
 const CHARSET = /charset\s*=\s*["']?([^"';\s>]+)/i;
 
 export function decodeText(bytes: ArrayBuffer, contentType: string | null): string {
+  return decoderFor(bytes, contentType).decode(bytes);
+}
+
+/** Bytes a document's charset is read from when its type names none. */
+export const CHARSET_SNIFF_BYTES = 1024;
+
+/** The decoder for a document, chosen from its type or from `head`, the first CHARSET_SNIFF_BYTES of its body. */
+export function decoderFor(head: ArrayBuffer, contentType: string | null): TextDecoder {
   const mime = mimeOf(contentType) ?? "";
-  const sniffed = mime === "text/html" ? metaCharset(bytes) : isXml(mime) ? xmlCharset(bytes) : undefined;
+  const sniffed = mime === "text/html" ? metaCharset(head) : isXml(mime) ? xmlCharset(head) : undefined;
   const label = CHARSET.exec(contentType ?? "")?.[1] ?? sniffed;
-  let decoder: TextDecoder;
   try {
-    decoder = new TextDecoder(label ?? "utf-8");
+    return new TextDecoder(label ?? "utf-8");
   } catch {
-    decoder = new TextDecoder("utf-8");
+    return new TextDecoder("utf-8");
   }
-  return decoder.decode(bytes);
 }
 
 function isXml(mime: string): boolean {
@@ -85,7 +91,7 @@ function xmlCharset(bytes: ArrayBuffer): string | undefined {
 /** Pages that name their encoding only in a <meta> tag must still decode right; full sniffing comes later. */
 function metaCharset(bytes: ArrayBuffer): string | undefined {
   // The first 1024 bytes are read as Latin-1, which keeps the ASCII of the tag intact whatever the encoding.
-  const head = new TextDecoder("latin1").decode(bytes.slice(0, 1024));
+  const head = new TextDecoder("latin1").decode(bytes.slice(0, CHARSET_SNIFF_BYTES));
   for (const tag of head.match(/<meta\b[^>]*>/gi) ?? []) {
     const label = CHARSET.exec(tag)?.[1];
     if (label) return label;

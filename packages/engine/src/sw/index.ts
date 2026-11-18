@@ -411,6 +411,7 @@ async function handle(event: FetchEvent, site: boolean): Promise<Response> {
           uiOrigin: siteState?.root,
           sites: (siteState && siteMode.context(route.target)) ?? undefined,
           lang: pageLang(),
+          waitUntil: (promise) => event.waitUntil(promise),
         });
       } catch {
         return navigation ? htmlError("connect", 502, route.target) : Response.error();

@@ -605,3 +605,59 @@ describe("pages on site hosts", () => {
     expect(await unverified.text()).toContain('href="https://proxy.test/"');
   });
 });
+
+describe("buildPageResponse streaming a page", () => {
+  const html = (body: ReadableStream<Uint8Array>): TransportResult => ({
+    ok: true,
+    response: { status: 200, headers: [["content-type", "text/html"]], setCookies: [], body },
+  });
+
+  it("hands out the start of a page before the rest arrives", async () => {
+    const encoder = new TextEncoder();
+    let finish = () => {};
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(`<!doctype html><html><head><title>t</title></head><body>${"x".repeat(2000)}`),
+        );
+        finish = () => {
+          controller.enqueue(encoder.encode("<p>end</p>"));
+          controller.close();
+        };
+      },
+    });
+    const kept: Promise<unknown>[] = [];
+    const res = await buildPageResponse(
+      html(body),
+      context({ navigation: true, destination: "document", waitUntil: (promise) => kept.push(promise) }),
+    );
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    expect(first).toMatch(/<head><script src="[^"]*\/_g\/client\.test\.js"/);
+    expect(kept).toHaveLength(1);
+    finish();
+    let rest = "";
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read())
+      rest += new TextDecoder().decode(chunk.value);
+    expect(rest).toContain("<p>end</p>");
+    await expect(kept[0]).resolves.toBeUndefined();
+  });
+
+  it("decodes a page by the charset its first bytes name, even split across chunks", async () => {
+    const bytes = [
+      ...new TextEncoder().encode('<html><head><meta charset="windows-1254"></head><body>'),
+      0xfe,
+      0xfd,
+      0xf0,
+      ...new TextEncoder().encode("</body>"),
+    ];
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+        controller.close();
+      },
+    });
+    const res = await buildPageResponse(html(body), context({ navigation: true, destination: "document" }));
+    expect(await res.text()).toContain("<body>şığ</body>");
+  });
+});

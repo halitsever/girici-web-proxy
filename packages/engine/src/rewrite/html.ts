@@ -82,19 +82,47 @@ const JS_TYPE = /^(?:(?:text|application)\/(?:x-)?(?:java|ecma)script(?:1\.[0-5]
 
 /** Edits attribute and inline code ranges in place; the document is never re-serialised, so markup quirks survive. */
 export function rewriteHtml(html: string, options: HtmlRewriteOptions): string {
-  return new HtmlRewriter(html, options).run() ?? html;
+  const rewriter = new HtmlRewriter(options, false);
+  rewriter.write(html);
+  return rewriter.end() ?? html;
 }
 
 /** Null when the document has no root element to put the runtime in, so it cannot be served with scripts on. */
 export function rewriteXml(xml: string, options: Omit<HtmlRewriteOptions, "xml">): string | null {
-  return new HtmlRewriter(xml, { ...options, xml: true }).run();
+  const rewriter = new HtmlRewriter({ ...options, xml: true }, false);
+  rewriter.write(xml);
+  return rewriter.end();
 }
 
+export interface HtmlStreamRewriter {
+  /** The rewritten markup that can no longer change, which may be less than was written. */
+  write(chunk: string): string;
+  end(): string;
+}
+
+/** Rewrites HTML as it arrives, so the browser can render the start of a page before the rest has loaded. */
+export function createHtmlRewriter(options: Omit<HtmlRewriteOptions, "xml">): HtmlStreamRewriter {
+  const rewriter = new HtmlRewriter({ ...options, xml: false }, true);
+  return { write: (chunk) => rewriter.write(chunk), end: () => rewriter.end() ?? "" };
+}
+
+type Edit =
+  { kind: "overwrite"; start: number; end: number; text: string } | { kind: "remove"; start: number; end: number };
+
 class HtmlRewriter {
-  readonly #html: string;
   readonly #options: HtmlRewriteOptions;
   readonly #scripts: boolean;
-  readonly #output: MagicString;
+  readonly #streaming: boolean;
+  #parser: Parser | null = null;
+  /** The markup from `#flushed` on; everything before it has been handed out. */
+  #pending = "";
+  #flushed = 0;
+  #received = 0;
+  #fed = 0;
+  /** The end of the last whole token, so nothing before it can gain an edit any more. */
+  #settled = 0;
+  #edits: Edit[] = [];
+  #injected = false;
   #base: URL;
   readonly #owner: string;
   readonly #opaque: boolean;
@@ -109,31 +137,60 @@ class HtmlRewriter {
   #script: { start: number; contentStart: number; kind: ScriptKind } | null = null;
   #styleStart = -1;
 
-  constructor(html: string, options: HtmlRewriteOptions) {
-    this.#html = html;
+  constructor(options: HtmlRewriteOptions, streaming: boolean) {
     this.#options = options;
     this.#scripts = options.scripts ?? true;
-    this.#output = new MagicString(html);
+    this.#streaming = streaming;
     this.#base = options.url;
     this.#owner = options.owner ?? (isWebUrl(options.url) ? originOf(options.url) : "null");
     this.#opaque = options.opaque ?? false;
     this.#xml = options.xml ?? false;
   }
 
-  run(): string | null {
-    let source = this.#html;
+  write(chunk: string): string {
+    this.#pending += chunk;
+    this.#received += chunk.length;
+    // An XML prolog is read whole before parsing starts.
+    if (this.#xml || !this.#streaming) return "";
+    const { inject } = this.#options;
+    // Telling a runtime tag already in place from a page's own script takes the tag's whole length.
+    this.#feed(this.#injectFrozen || !inject ? this.#received : this.#received - inject.length);
+    if (this.#injectFrozen) this.#feed(this.#received);
+    return this.#flush(false);
+  }
+
+  #feed(until: number): void {
+    if (until <= this.#fed) return;
+    const text = this.#raw(this.#fed, until);
+    this.#fed = until;
+    (this.#parser ??= this.#createParser()).write(text);
+  }
+
+  end(): string | null {
     if (this.#xml) {
-      const prolog = scanProlog(source);
+      const prolog = scanProlog(this.#pending);
       if (!prolog) return null;
       for (const instruction of prolog.instructions) this.#prologInstruction(instruction);
       // Blanked, so the parser never sees the doctype's internal subset; offsets stay the same.
-      source = " ".repeat(prolog.root) + source.slice(prolog.root);
+      this.#createParser().end(" ".repeat(prolog.root) + this.#pending.slice(prolog.root));
+      if (this.#options.inject && !this.#rootSeen) return null;
+    } else {
+      this.#feed(this.#received);
+      (this.#parser ??= this.#createParser()).end();
     }
+    return this.#flush(true);
+  }
+
+  #createParser(): Parser {
     const parser: Parser = new Parser(
       {
         onprocessinginstruction: (name) => {
+          this.#settled = parser.endIndex + 1;
           if (this.#xml) return;
           if (!this.#injectFrozen && name.toLowerCase() === "!doctype") this.#injectAt = parser.endIndex + 1;
+        },
+        oncommentend: () => {
+          this.#settled = parser.endIndex + 1;
         },
         onattribute: (name, value) => {
           this.#attributes.push({ name, value, start: parser.startIndex, end: parser.endIndex });
@@ -143,21 +200,68 @@ class HtmlRewriter {
           this.#attributes = [];
           if (implied && !this.#xml) return;
           this.#openTag(name, attribs, attributes, parser.startIndex, parser.endIndex);
+          this.#settled = parser.endIndex + 1;
         },
         ontext: (text) => {
+          this.#settled = parser.endIndex + 1;
           if (text.trim()) this.#injectFrozen = true;
         },
         onclosetag: (name, implied) => {
           // In XML only a self-closing tag is implied, and it still ends its element.
-          if (!implied || this.#xml) this.#closeTag(name, parser.startIndex, parser.endIndex);
+          if (implied && !this.#xml) return;
+          this.#closeTag(name, parser.startIndex, parser.endIndex);
+          this.#settled = parser.endIndex + 1;
         },
       },
       { decodeEntities: true, xmlMode: this.#xml },
     );
-    parser.end(source);
-    if (this.#xml && this.#options.inject && !this.#rootSeen) return null;
-    if (this.#options.inject && !this.#carried) this.#output.appendLeft(this.#injectAt, this.#options.inject);
-    return this.#output.hasChanged() ? this.#output.toString() : this.#html;
+    return parser;
+  }
+
+  /**
+   * Hands out the markup no later token can edit: up to the last whole token, and short of an open script, style or
+   * element being dropped, whose edits come at its end. Nothing goes before the runtime tag's place is known.
+   */
+  #flush(final: boolean): string {
+    let safe = this.#received;
+    if (!final) {
+      if (!this.#injectFrozen) return "";
+      safe = this.#settled;
+      if (this.#removing) safe = Math.min(safe, this.#removing.start);
+      if (this.#script) safe = Math.min(safe, this.#script.contentStart);
+      if (this.#styleStart >= 0) safe = Math.min(safe, this.#styleStart);
+      if (safe <= this.#flushed) return "";
+    }
+    const from = this.#flushed;
+    const output = new MagicString(this.#pending.slice(0, safe - from));
+    const later: Edit[] = [];
+    for (let index = 0; index < this.#edits.length; index++) {
+      const edit = this.#edits[index] as Edit;
+      if (edit.start >= safe && !final) later.push(edit);
+      else if (edit.kind === "overwrite") output.overwrite(edit.start - from, edit.end - from, edit.text);
+      else output.remove(edit.start - from, edit.end - from);
+    }
+    this.#edits = later;
+    const { inject } = this.#options;
+    if (inject && !this.#carried && !this.#injected) {
+      this.#injected = true;
+      output.appendLeft(this.#injectAt - from, inject);
+    }
+    this.#pending = this.#pending.slice(safe - from);
+    this.#flushed = safe;
+    return output.toString();
+  }
+
+  #raw(start: number, end: number): string {
+    return this.#pending.slice(start - this.#flushed, end - this.#flushed);
+  }
+
+  #overwrite(start: number, end: number, text: string): void {
+    this.#edits.push({ kind: "overwrite", start, end, text });
+  }
+
+  #remove(start: number, end: number): void {
+    this.#edits.push({ kind: "remove", start, end });
   }
 
   #prologInstruction(instruction: XmlInstruction): void {
@@ -166,21 +270,20 @@ class HtmlRewriter {
     if (instruction.target === "xml") {
       // The body is sent as UTF-8, so the declaration has to agree with it.
       const encoding = find("encoding");
-      if (encoding && keyword(encoding.value) !== "utf-8")
-        this.#output.overwrite(encoding.start, encoding.end, "UTF-8");
+      if (encoding && keyword(encoding.value) !== "utf-8") this.#overwrite(encoding.start, encoding.end, "UTF-8");
       return;
     }
     if (instruction.target !== "xml-stylesheet") return;
     // An XSLT result replaces the document, runtime tag included, so only CSS stylesheets stay.
     if (keyword(find("type")?.value) !== "text/css") {
-      this.#output.remove(instruction.start, instruction.end);
+      this.#remove(instruction.start, instruction.end);
       return;
     }
     const href = find("href");
     const value = href && decodeReferences(href.value);
     if (!href || value == null) return;
     const rewritten = rewriteUrl(value, this.#base, this.#options.origin, this.#owner, this.#opaque);
-    if (rewritten !== value) this.#output.overwrite(href.start, href.end, escapeXmlAttribute(rewritten));
+    if (rewritten !== value) this.#overwrite(href.start, href.end, escapeXmlAttribute(rewritten));
   }
 
   #openTag(
@@ -202,7 +305,7 @@ class HtmlRewriter {
       name === "script" &&
       !this.#injectFrozen &&
       start === this.#injectAt &&
-      this.#html.startsWith(inject, start)
+      this.#raw(start, start + inject.length) === inject
     ) {
       this.#carried = true;
       this.#injectFrozen = true;
@@ -218,7 +321,7 @@ class HtmlRewriter {
     if (this.#removesElement(name, attribs)) {
       // XML has no void elements, so the element goes once its end tag is reached.
       if (name === "script" || this.#xml) this.#removing = { name: rawName, start, depth: 1 };
-      else this.#output.remove(start, end + 1);
+      else this.#remove(start, end + 1);
       return;
     }
 
@@ -231,14 +334,14 @@ class HtmlRewriter {
   /** XML allows nothing outside the root, so the tag goes first inside it, or inside an XHTML head right after it. */
   #placeXmlInject(rawName: string, name: string, end: number): void {
     if (this.#injectFrozen) return;
-    const selfClosing = this.#html[end - 1] === "/";
+    const selfClosing = this.#raw(end - 1, end) === "/";
     if (!this.#rootSeen) {
       this.#rootSeen = true;
       this.#injectFrozen = name !== "html";
       const { inject } = this.#options;
       if (!selfClosing) this.#injectAt = end + 1;
       else if (inject) {
-        this.#output.overwrite(end - 1, end + 1, `>${inject}</${rawName}>`);
+        this.#overwrite(end - 1, end + 1, `>${inject}</${rawName}>`);
         this.#carried = true;
         this.#injectFrozen = true;
       }
@@ -251,7 +354,7 @@ class HtmlRewriter {
   #closeTag(rawName: string, start: number, end: number): void {
     if (this.#removing) {
       if (rawName === this.#removing.name && --this.#removing.depth === 0) {
-        this.#output.remove(this.#removing.start, end + 1);
+        this.#remove(this.#removing.start, end + 1);
         this.#removing = null;
       }
       return;
@@ -292,20 +395,20 @@ class HtmlRewriter {
     rewritten = this.#options.attribute?.(tag, attribs, name, rewritten) ?? rewritten;
     if (rewritten !== value) {
       if (this.#xml) {
-        this.#output.overwrite(attribute.start, attribute.end, `${name}="${escapeXmlAttribute(rewritten)}"`);
+        this.#overwrite(attribute.start, attribute.end, `${name}="${escapeXmlAttribute(rewritten)}"`);
         return;
       }
       // Only a srcdoc that gets the runtime tag is written with `<` escaped.
       const text = escapeAttribute(rewritten);
       const escaped =
         tag === "iframe" && name === "srcdoc" && this.#options.frameInject ? text.replace(/</g, "&lt;") : text;
-      this.#output.overwrite(attribute.start, attribute.end, `${name}="${escaped}"`);
+      this.#overwrite(attribute.start, attribute.end, `${name}="${escaped}"`);
     }
   }
 
   /** The value as an XML parser reads it. Null when it names a doctype entity, which only the browser can expand. */
   #xmlAttributeValue(attribute: Attribute): string | null {
-    const raw = this.#html.slice(attribute.start, attribute.end);
+    const raw = this.#raw(attribute.start, attribute.end);
     const match = /^[^=]*=\s*(?:"([^"]*)"|'([^']*)')$/.exec(raw);
     const quoted = match?.[1] ?? match?.[2];
     return quoted === undefined ? null : decodeReferences(quoted.replace(/\r\n|[\t\n\r]/g, " "));
@@ -384,8 +487,8 @@ class HtmlRewriter {
 
   #removeAttribute(attribute: Attribute): void {
     let start = attribute.start;
-    while (start > 0 && /\s/.test(this.#html[start - 1] ?? "")) start--;
-    this.#output.remove(start, attribute.end);
+    while (start > this.#flushed && /\s/.test(this.#raw(start - 1, start))) start--;
+    this.#remove(start, attribute.end);
   }
 
   #scriptKind(type: string | undefined): ScriptKind {
@@ -405,12 +508,12 @@ class HtmlRewriter {
 
   #rewriteRange(start: number, end: number, rewrite: (text: string) => string): void {
     if (end <= start) return;
-    const raw = this.#html.slice(start, end);
+    const raw = this.#raw(start, end);
     // XML element text can hold references and CDATA sections, so it is decoded first and escaped again after.
     const text = this.#xml ? decodeCharacterData(raw) : raw;
     if (text === null) return;
     const rewritten = rewrite(text);
-    if (rewritten !== text) this.#output.overwrite(start, end, this.#xml ? escapeCharacterData(rewritten) : rewritten);
+    if (rewritten !== text) this.#overwrite(start, end, this.#xml ? escapeCharacterData(rewritten) : rewritten);
   }
 }
 
