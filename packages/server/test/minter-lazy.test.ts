@@ -13,6 +13,7 @@ vi.mock("jsdom", () => {
         throw new Error("stub window");
       }
     },
+    VirtualConsole: class {},
   };
 });
 
@@ -20,7 +21,12 @@ describe("createPoTokenMinter", () => {
   it("loads jsdom and BotGuard only when the first token is asked for", async () => {
     const lines: string[] = [];
     const minter = createPoTokenMinter(
-      async () => new Response("{}"),
+      // A YouTube page with a challenge, so minting gets as far as building the window.
+      async () =>
+        new Response(
+          `<script>ytcfg.set({"EVENT_ID":"e"});</script>` +
+            `<script>window.ytAtN({'R': '{"bgChallenge":{"program":"p","globalName":"g"}}'});</script>`,
+        ),
       createLogger("debug", (line) => lines.push(line)),
     );
     expect(loads.jsdom).toBe(0);

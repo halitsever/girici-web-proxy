@@ -80,10 +80,11 @@ home connection, or setting `GIRICI_UPSTREAM_PROXY` to a residential proxy, usua
 
 ### YouTube videos stop after about a minute, or do not play
 
-YouTube ties playback to tokens bound to the IP address. Girici mints one on the server (`GIRICI_YT_POTOKEN`, on by
-default), which plays many videos, but YouTube still blocks sustained playback of some, more often from datacenter
-IPs. A residential `GIRICI_UPSTREAM_PROXY` helps; Girici sends the relay, WebSockets and token minting through it so
-they share one IP.
+YouTube stops streaming a video after about a minute unless each request carries a token bound to that video.
+Through a proxy the page cannot attest itself, so Girici mints the token on the server (`GIRICI_YT_POTOKEN`, on by
+default) and adds it to the player's requests. With minting off, every video stops after a minute. YouTube can still
+refuse some IPs, more often datacenter ones. A residential `GIRICI_UPSTREAM_PROXY` helps; Girici sends the relay,
+WebSockets and token minting through it so they share one IP.
 
 ### Voice and video calls do not work
 
