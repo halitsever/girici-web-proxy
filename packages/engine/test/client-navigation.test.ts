@@ -396,6 +396,45 @@ describe("installNavigation inside an adoption", () => {
   });
 });
 
+/** An installed window with its own History object, as each real window has. */
+function installedAt(page: string) {
+  const fake = fakeWindow();
+  fake.win.location.href = page;
+  const history = new fake.win.History();
+  Object.defineProperty(fake.win, "history", { get: () => history, configurable: true });
+  installNavigation(
+    fake.win as unknown as Realm,
+    createUrlContext(fake.win as unknown as Realm),
+    noCookies,
+    (fn, self, args) => Reflect.apply(fn, self, args),
+    asIs,
+    noBlobs,
+  );
+  return { ...fake, history };
+}
+
+describe("installNavigation across windows", () => {
+  it("runs a same-origin frame's history method on the window that owns the History", () => {
+    // YouTube binds a blank frame's untouched replaceState to its own History.
+    const top = installedAt(PAGE);
+    const frame = installedAt(PAGE);
+    frame.win.History.prototype.replaceState.call(top.history, null, "", "/shorts/abc");
+    frame.win.History.prototype.pushState.call(top.history, null, "", "next");
+    expect(top.loads).toEqual(["replace /~/https/a.test/shorts/abc", "push /~/https/a.test/dir/next"]);
+    expect(frame.loads).toEqual([]);
+  });
+
+  it("refuses another site's History and one no window here owns", () => {
+    const top = installedAt(PAGE);
+    const other = installedAt(`${ORIGIN}/~/https/b.test/page`);
+    expect(() => other.win.History.prototype.pushState.call(top.history, null, "", "/x")).toThrow("access denied");
+    expect(() => top.win.History.prototype.replaceState.call(new other.win.History(), null, "", "/x")).toThrow(
+      "access denied",
+    );
+    expect([...top.loads, ...other.loads]).toEqual([]);
+  });
+});
+
 describe("installNavigation on a sealed page", () => {
   it("pushes sealed addresses for a sealed page", () => {
     const seal = new MasterSealer(new Uint8Array(32).fill(4)).originSeal("https://a.test");

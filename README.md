@@ -129,8 +129,8 @@ The full list is in [Configuration](https://halitsever.github.io/girici-web-prox
   site may reach data other sites left in the same browser.
   [Subdomain mode](https://halitsever.github.io/girici-web-proxy/guide/subdomain-mode) gives each site its own host,
   so the browser keeps them apart. It needs wildcard DNS and a wildcard certificate.
-- **Sites can still refuse you.** Many sites block or challenge datacenter IPs, whatever the proxy does. YouTube
-  playback is partial. Voice and video calls do not work, because WebRTC is turned off.
+- **Sites can still refuse you.** Many sites block or challenge datacenter IPs, whatever the proxy does. Voice and
+  video calls do not work, because WebRTC is turned off.
 
 The [threat model](https://halitsever.github.io/girici-web-proxy/guide/threat-model) and
 [supported sites](https://halitsever.github.io/girici-web-proxy/guide/supported-sites) pages have the details.

@@ -8,6 +8,7 @@ import {
   isWebUrl,
   listIncludes,
   lowerCase,
+  NativeWeakMap,
   newUrl,
   originOf,
   parseUrl,
@@ -37,6 +38,19 @@ const SEVERING_REL = /(?:^|[\t\n\f\r ])(?:noopener|noreferrer)(?:$|[\t\n\f\r ])/
 
 // Taken at load: these hooks run on page calls, after page code may have replaced them.
 const ownDescriptor = Object.getOwnPropertyDescriptor;
+const mapGet = WeakMap.prototype.get;
+const mapSet = WeakMap.prototype.set;
+
+type HistoryMethod = "pushState" | "replaceState";
+type HistoryHook = (this: History, data: unknown, unused: string, url?: string | URL | null) => unknown;
+
+interface HistoryOwner {
+  realOrigin(): string;
+  hooks: Record<HistoryMethod, HistoryHook>;
+}
+
+/** Each window's History with that window's own hooks, shared with the frames this engine adopts. */
+const historyOwners = new NativeWeakMap<object, HistoryOwner>();
 
 export interface NavigationHooks extends DocumentListeners {
   /** The hooked window.open, which owns proxying, the blob swap and the guard for every window opened by URL. */
@@ -55,16 +69,22 @@ export function installNavigation(
 ): NavigationHooks {
   const history = win.History.prototype;
   const historyOf = ownDescriptor(win, "history")?.get;
+  const hooks = { __proto__: null } as unknown as Record<HistoryMethod, HistoryHook>;
   // Every loop here is indexed: adopting a frame installs this inside a page call, after the page may have replaced
   // the array iterator.
   const historyMethods = ["pushState", "replaceState"] as const;
   for (let index = 0; index < historyMethods.length; index++) {
-    const method = historyMethods[index] as (typeof historyMethods)[number];
+    const method = historyMethods[index] as HistoryMethod;
     const native = history[method];
-    history[method] = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      // Another window's History would let a frame rename a page it cannot otherwise touch.
+    const hook: HistoryHook = function (this: History, data, unused, url) {
       if (historyOf && this !== apply(historyOf, win, [])) {
-        throw new win.DOMException(`Failed to execute '${method}' on 'History': access denied.`, "SecurityError");
+        // Pages bind a blank frame's untouched methods to their own History, so a same-origin owner runs the call.
+        // Any other window's History would let a frame rename a page it cannot otherwise touch.
+        const owner = apply(mapGet, historyOwners, [this]) as HistoryOwner | undefined;
+        if (!owner || owner.realOrigin() !== originOf(ctx.realUrl())) {
+          throw new win.DOMException(`Failed to execute '${method}' on 'History': access denied.`, "SecurityError");
+        }
+        return apply(owner.hooks[method], this, [data, unused, url]);
       }
       if (url === undefined || url === null) return apply(native, this, [data, unused, url]);
       const current = ctx.realUrl();
@@ -77,6 +97,14 @@ export function installNavigation(
       }
       return apply(native, this, [data, unused, ctx.documentAddress(target)]);
     };
+    hooks[method] = hook;
+    history[method] = hook;
+  }
+  try {
+    const own = historyOf ? (apply(historyOf, win, []) as object | null) : null;
+    if (own) apply(mapSet, historyOwners, [own, { realOrigin: () => originOf(ctx.realUrl()), hooks }]);
+  } catch {
+    // A window that closed meanwhile has no History to share.
   }
 
   const nativeOpen = win.open;
