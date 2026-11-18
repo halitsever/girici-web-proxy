@@ -17,7 +17,7 @@ gets much further than a datacenter IP.
 | Instagram | Blocked by the site | Sends logged-out profile loads to its sign-in page. It does this to any client that is not a browser, even from a home connection with browser headers, so the server cannot avoid it. |
 | Reddit | Partly | Renders, but datacenter IPs get bot challenges and redirects to sign-in. |
 | X (Twitter) | Blocked by the site | Refuses datacenter IPs with 403. |
-| Discord | Not verified | Its live updates use WebSockets, which Girici relays from pages and workers. Voice and video need WebRTC, which Girici turns off. |
+| Discord | Partly | The home page and the sign-in form load. Cloudflare refuses the server's WebSocket connections to Discord's gateways with 403, even from a home connection, so QR sign-in never finishes and the app gets no live updates. Voice and video need WebRTC, which Girici turns off. |
 
 **Works** means the site loaded and behaved normally in testing. **Partly** means the main pages work with known
 gaps. **Blocked by the site** means the site refuses the server, not that Girici failed. **Not verified** means
