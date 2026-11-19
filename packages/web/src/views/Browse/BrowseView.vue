@@ -196,7 +196,7 @@ async function openRow(row: Row | undefined) {
   error.value = null;
   const name = row.host ?? row.label;
   // A search names no site, so it would come back as a tile that opens nothing.
-  const opensSite = row.kind === "open-url" || row.kind === "suggestion";
+  const opensSite = row.kind !== "open-search";
   if (settings.value.rememberHistory && opensSite) history.value = rememberVisit(history.value, name);
   success.value = t(settings.value.newTab ? "browse.openingTab" : "browse.opening", { name });
   try {
