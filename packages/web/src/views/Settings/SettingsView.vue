@@ -21,6 +21,7 @@ import {
 import { syncEnginePrefs } from "@/lib/engine-prefs";
 import { clearHistory, loadHistory, relativeTime, removeVisit, type HistoryEntry } from "@/lib/history";
 import { setLanguage, t, tn, UI_LANGUAGES, type TextKey } from "@/lib/i18n";
+import { install, installPrompt } from "@/lib/install";
 import { openProxied, serviceWorkerSupport } from "@/lib/proxy";
 import {
   clearedNote,
@@ -505,6 +506,16 @@ onMounted(async () => {
                 <p class="text-[13px] text-muted-foreground">{{ t("settings.newTabHelp") }}</p>
               </div>
               <Switch v-model="settings.newTab" />
+            </div>
+
+            <div v-if="installPrompt" class="flex items-center justify-between gap-4 px-5 py-[18px]">
+              <div class="min-w-0">
+                <p class="text-[14px] font-medium">{{ t("settings.install") }}</p>
+                <p class="text-[13px] text-muted-foreground">{{ t("settings.installHelp") }}</p>
+              </div>
+              <Button type="button" size="sm" class="shrink-0" @click="install">
+                {{ t("settings.installAction") }}
+              </Button>
             </div>
 
             <div class="flex items-center justify-between gap-4 px-5 py-[18px]">
