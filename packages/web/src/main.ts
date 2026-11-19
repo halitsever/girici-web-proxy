@@ -6,12 +6,14 @@ import App from "./App.vue";
 import { getAuthState } from "./lib/auth";
 import { applyBrandToDocument, brand, loadBrand, type BrandDocument } from "./lib/brand";
 import { applyLanguageToDocument, lang, setLanguage } from "./lib/i18n";
+import { watchInstallPrompt } from "./lib/install";
 import { reloadThroughEngine } from "./lib/proxy";
 import { loadSettings } from "./lib/settings";
 import { isSiteMode, retireRootEngine, syncSettings } from "./lib/sites";
 import router from "./router";
 
 async function start(): Promise<void> {
+  watchInstallPrompt(window);
   // Started before the mode is known, so a single-origin tab reloads as early as it always did; a root with no worker
   // in subdomain mode never reloads here.
   const engine = reloadThroughEngine().catch(() => false);
