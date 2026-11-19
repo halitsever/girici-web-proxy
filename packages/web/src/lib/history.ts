@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import { toProxyPath } from "./target";
 
 export interface HistoryEntry {
   name: string;
@@ -12,10 +13,17 @@ export function loadHistory(): HistoryEntry[] {
   try {
     const raw = localStorage.getItem(KEY);
     const value: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(value) ? (value as HistoryEntry[]) : [];
+    return Array.isArray(value) ? value.filter(isVisit) : [];
   } catch {
     return [];
   }
+}
+
+/** A tile must open a site, so anything else in the store is left out. */
+function isVisit(value: unknown): value is HistoryEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const { name, t: time } = value as Partial<HistoryEntry>;
+  return typeof name === "string" && typeof time === "number" && toProxyPath(name) !== null;
 }
 
 /** Prepend a visit, drop duplicates, cap the list, and persist it. */

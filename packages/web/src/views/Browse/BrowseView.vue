@@ -193,7 +193,9 @@ async function openRow(row: Row | undefined) {
   }
   error.value = null;
   const name = row.host ?? row.label;
-  if (settings.value.rememberHistory && row.kind !== "recent") history.value = rememberVisit(history.value, name);
+  // A search names no site, so it would come back as a tile that opens nothing.
+  const opensSite = row.kind === "open-url" || row.kind === "suggestion";
+  if (settings.value.rememberHistory && opensSite) history.value = rememberVisit(history.value, name);
   success.value = t(settings.value.newTab ? "browse.openingTab" : "browse.opening", { name });
   try {
     if (settings.value.newTab) await openProxiedTab(row.path);
