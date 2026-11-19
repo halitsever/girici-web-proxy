@@ -94,6 +94,8 @@ const instanceSwitchErrors = ref<Record<InstanceSwitch, string>>({ deepLinkWarni
 // Kept in memory only, so it is gone once the page closes.
 const adminPassword = ref("");
 const blockedText = ref("");
+/** Edits made before the saved settings arrive would be overwritten by them. */
+const adminLoaded = ref(false);
 const envBlocked = ref<string[]>([]);
 const blockedStatus = ref("");
 const blockedError = ref("");
@@ -399,6 +401,7 @@ onMounted(async () => {
   } catch {
     // The editor starts empty; saving still reports its own errors.
   }
+  adminLoaded.value = true;
 });
 </script>
 
@@ -762,6 +765,7 @@ onMounted(async () => {
               <Switch
                 :model-value="instanceSwitches[row.name]"
                 :aria-label="t(row.label)"
+                :disabled="!adminLoaded"
                 @update:model-value="(on: boolean) => onToggleInstanceSwitch(row.name, on)"
               />
             </div>
@@ -811,16 +815,17 @@ onMounted(async () => {
               <textarea
                 id="blocked-hosts"
                 v-model="blockedText"
+                :disabled="!adminLoaded"
                 rows="5"
                 spellcheck="false"
                 placeholder="example.com"
-                class="w-full rounded-md border border-input bg-card px-3.5 py-2 font-mono text-[13px] shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                class="w-full rounded-md border border-input bg-card px-3.5 py-2 font-mono text-[13px] shadow-sm transition-colors disabled:opacity-60 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               />
               <p v-if="envBlocked.length" class="text-[13px] text-muted-foreground">
                 {{ t("admin.blockedByEnv", { list: envBlocked.join(", ") }) }}
               </p>
               <div class="flex items-center gap-3">
-                <Button type="button" size="sm" :disabled="savingBlocked" @click="onSaveBlocked">{{
+                <Button type="button" size="sm" :disabled="savingBlocked || !adminLoaded" @click="onSaveBlocked">{{
                   t("admin.save")
                 }}</Button>
                 <span v-if="blockedStatus" class="text-[13px] text-gi-success">{{ blockedStatus }}</span>

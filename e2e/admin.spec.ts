@@ -36,9 +36,20 @@ test("an admin signs in, blocks a site, and proxied pages cannot use the admin A
     await changePassword("e2e-password");
   }
 
+  // A slow settings load must not wipe a list typed before it arrives.
+  await page.route("**/_g/admin/settings", async (route) => {
+    if (route.request().method() === "GET") await new Promise((resolve) => setTimeout(resolve, 1000));
+    await route.fallback();
+  });
+  const loaded = page.waitForResponse(
+    (res) => res.url().endsWith("/_g/admin/settings") && res.request().method() === "GET",
+  );
   await page.goto("/settings");
   await page.getByLabel("Current password").fill("e2e-password");
   await page.getByLabel("Blocked sites").fill("blocked.test");
+  await loaded;
+  await expect(page.getByLabel("Blocked sites")).toHaveValue("blocked.test");
+  await page.unrouteAll();
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Saved.")).toBeVisible();
   await openThroughUi(page, "https://www.blocked.test/");
