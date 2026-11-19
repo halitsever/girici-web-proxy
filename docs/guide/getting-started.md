@@ -52,6 +52,11 @@ Browsers that support installing web apps can add Girici to the home screen or t
 installed app opens sites in its own window, and the Girici toolbar on each page has back, forward,
 and reload. The app uses the instance name and logo the admin set in Account.
 
+On Android, the installed app also shows up in the share menu. Sharing a link from another app fills
+Girici's address box with it, and you press Enter to open it. A link to `/?q=` followed by an address
+or a search does the same, so a browser search shortcut set to `https://your-girici/?q=%s` works too.
+Nothing opens until you press Enter, so a shared link cannot send you to a site on its own.
+
 ## Next steps
 
 - [How it works](/guide/how-it-works) for the architecture.

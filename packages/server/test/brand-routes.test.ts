@@ -75,6 +75,11 @@ describe("brand routes", () => {
       scope: "/",
       display: "standalone",
     });
+    expect(manifest.share_target).toEqual({
+      action: "/",
+      method: "GET",
+      params: { title: "title", text: "text", url: "url" },
+    });
     expect(manifest.icons).toEqual([
       { src: "/_g/ui/icon-192.png", sizes: "192x192", type: "image/png" },
       { src: "/_g/ui/icon-512.png", sizes: "512x512", type: "image/png" },

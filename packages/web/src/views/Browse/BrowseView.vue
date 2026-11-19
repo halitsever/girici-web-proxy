@@ -6,6 +6,7 @@ import { lang, t, type TextKey } from "@/lib/i18n";
 import { openProxied, openProxiedTab, serviceWorkerSupport } from "@/lib/proxy";
 import { loadHistory, rememberVisit, relativeTime, type HistoryEntry } from "@/lib/history";
 import { loadSettings } from "@/lib/settings";
+import { sharedInput } from "@/lib/shared";
 import { isSiteMode } from "@/lib/sites";
 import { classifyInput, toProxyPath } from "@/lib/target";
 import { getRandomTagline } from "@/data/taglines";
@@ -225,6 +226,14 @@ function onEscape() {
   success.value = null;
 }
 
+/** Takes a link shared from another app into the box and drops it from the address, so a reload starts clean. */
+function takeShared() {
+  const shared = sharedInput(new URLSearchParams(window.location.search));
+  if (shared === null) return;
+  query.value = shared;
+  window.history.replaceState(window.history.state, "", window.location.pathname);
+}
+
 /** A touch keyboard would cover the page the moment it loads. */
 function focusBox() {
   if (window.matchMedia("(pointer: fine)").matches) box.value?.focus();
@@ -249,6 +258,7 @@ function onPageShow() {
 }
 
 onMounted(async () => {
+  takeShared();
   window.addEventListener("pageshow", onPageShow);
   window.addEventListener("keydown", onSlash);
   focusBox();

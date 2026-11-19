@@ -33,6 +33,8 @@ export function brandRouter(brand: BrandStore): Router {
         display: "standalone",
         background_color: MIDNIGHT,
         theme_color: MIDNIGHT,
+        // Sharing only fills the address box, so a shared link cannot open a site behind the visitor's back.
+        share_target: { action: "/", method: "GET", params: { title: "title", text: "text", url: "url" } },
         icons: logo && type ? [{ src: logo, sizes: "any", type }] : DEFAULT_ICONS,
       }),
     );
