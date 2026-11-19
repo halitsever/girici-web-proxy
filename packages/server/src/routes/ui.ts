@@ -7,6 +7,9 @@ import type { AuthStore } from "../auth/store.ts";
 import { limitByClient, tokenBucket } from "../http/rate-limit.ts";
 import { PERMISSIONS_POLICY, UI_CSP } from "../http/security-headers.ts";
 
+/** Files whose names are not hashed, so a new release must reach browsers that cached the old one. */
+const REVALIDATED = new Set(["THIRD_PARTY_LICENSES.txt", "icon-192.png", "icon-512.png"]);
+
 // The UI is a single-page app; these client routes all load the same shell.
 const APP_ROUTES = ["/", "/settings", "/account", LOGIN_PATH, SETUP_PATH, CHALLENGE_PATH];
 
@@ -18,9 +21,8 @@ export function uiRouter(webDistDir: string, store: AuthStore, { perMinute = 300
       immutable: true,
       maxAge: "1y",
       index: false,
-      // Revalidated like the engine's license file, since the name is not hashed.
       setHeaders: (res, path) => {
-        if (basename(path) === "THIRD_PARTY_LICENSES.txt") res.setHeader("Cache-Control", "no-cache");
+        if (REVALIDATED.has(basename(path))) res.setHeader("Cache-Control", "no-cache");
       },
     }),
   );

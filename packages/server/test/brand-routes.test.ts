@@ -61,6 +61,33 @@ describe("brand routes", () => {
     expect((await fetch(`${base}/_g/brand/logo`)).status).toBe(404);
   });
 
+  it("describes the app for installing, under the instance's name and logo", async () => {
+    const { base, cookie } = await setup();
+    const res = await fetch(`${base}/_g/manifest.webmanifest`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^application\/manifest\+json/);
+    expect(res.headers.get("cache-control")).toBe("no-cache");
+    const manifest = (await res.json()) as Record<string, unknown>;
+    expect(manifest).toMatchObject({
+      name: "Girici",
+      short_name: "Girici",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+    });
+    expect(manifest.icons).toEqual([
+      { src: "/_g/ui/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/_g/ui/icon-512.png", sizes: "512x512", type: "image/png" },
+    ]);
+
+    const change = { name: "Kütüphane", logo: logoBody(PNG, "image/png"), currentPassword: password };
+    expect((await save(base, change, cookie)).status).toBe(200);
+    const branded = (await (await fetch(`${base}/_g/manifest.webmanifest`)).json()) as Record<string, unknown>;
+    expect(branded).toMatchObject({ name: "Kütüphane", short_name: "Kütüphane" });
+    const { logo } = (await (await fetch(`${base}/_g/brand`)).json()) as { logo: string };
+    expect(branded.icons).toEqual([{ src: logo, sizes: "any", type: "image/png" }]);
+  });
+
   it("saves a name and a logo only with the current password", async () => {
     const { base, cookie } = await setup();
     const change = { name: "Kütüphane", logo: logoBody(PNG, "image/png") };
