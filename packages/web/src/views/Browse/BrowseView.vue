@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowRight } from "lucide-vue-next";
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { getAuthState } from "@/lib/auth";
 import { lang, t, type TextKey } from "@/lib/i18n";
 import { openProxied, openProxiedTab, serviceWorkerSupport } from "@/lib/proxy";
@@ -32,6 +32,7 @@ const settings = ref(loadSettings());
 const history = ref<HistoryEntry[]>([]);
 const tagline = getRandomTagline(lang.value);
 const query = ref("");
+const box = ref<HTMLInputElement | null>(null);
 const selectedIndex = ref(0);
 const error = ref<string | null>(null);
 const success = ref<string | null>(null);
@@ -224,14 +225,43 @@ function onEscape() {
   success.value = null;
 }
 
-onMounted(async () => {
+/** A touch keyboard would cover the page the moment it loads. */
+function focusBox() {
+  if (window.matchMedia("(pointer: fine)").matches) box.value?.focus();
+}
+
+function isTyping(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+  );
+}
+
+function onSlash(event: KeyboardEvent) {
+  if (event.key !== "/" || event.ctrlKey || event.metaKey || event.altKey || isTyping(event.target)) return;
+  event.preventDefault();
+  box.value?.focus();
+}
+
+function onPageShow() {
   // Back from the opened site, the page may come out of the cache with the sweep still covering it.
-  window.addEventListener("pageshow", () => (launching.value = false));
+  launching.value = false;
+  focusBox();
+}
+
+onMounted(async () => {
+  window.addEventListener("pageshow", onPageShow);
+  window.addEventListener("keydown", onSlash);
+  focusBox();
   settings.value = loadSettings();
   history.value = loadHistory();
   const state = await getAuthState().catch(() => null);
   siteMode.value = isSiteMode(state);
   visitor.value = state?.authed === false;
+});
+
+onUnmounted(() => {
+  window.removeEventListener("pageshow", onPageShow);
+  window.removeEventListener("keydown", onSlash);
 });
 </script>
 
@@ -255,6 +285,7 @@ onMounted(async () => {
           <rect width="38" height="8" x="24" y="26" fill="#3d6bff" />
         </svg>
         <input
+          ref="box"
           v-model="query"
           type="text"
           class="min-w-0 flex-1 bg-transparent text-[19px] text-foreground outline-none placeholder:text-[var(--gi-placeholder)]"
