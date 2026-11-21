@@ -27,8 +27,8 @@
     "htmlparser2": "^12.0.0",
     "idb": "^8.0.4",
     "magic-string": "^1.4.5",
-    "meriyah": "^7.4.1",
+    "meriyah": "^7.4.2",
     "tldts": "^7.4.19",
-    "tough-cookie": "^6.0.2"
+    "tough-cookie": "^6.1.0"
   }
 }
