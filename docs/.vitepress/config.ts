@@ -134,6 +134,15 @@ export default defineConfig({
   lastUpdated: true,
   buildEnd: writeLlmsTxt,
   head: [
+    /** Cloudflare Web Analytics, one token for every page on halitsever.github.io. */
+    [
+      "script",
+      {
+        defer: "",
+        src: "https://static.cloudflareinsights.com/beacon.min.js",
+        "data-cf-beacon": '{"token": "dd7e54d3f48841c187d72d9dbb92a6b6"}',
+      },
+    ],
     ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
     ["meta", { name: "theme-color", content: "#0A0F1E" }],
     ["meta", { property: "og:type", content: "website" }],
