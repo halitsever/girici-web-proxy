@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-🌐 Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy
+Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy
 that you run with Docker on your own server.
 <br/>
 <br/>
@@ -32,10 +32,10 @@ that you run with Docker on your own server.
 <img src="https://halitsever-api.vercel.app/api/details"/>
 </div>
 
-- 📝 [**Http/Https Support**](#) - http/https protocols are supported
-- 🧑‍💻 [**Can run inside docker**](#) - you can run girici inside of container
-- 🎨 [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
-- 🎨 [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
+- [**Http/Https Support**](#) - http/https protocols are supported
+- [**Can run inside docker**](#) - you can run girici inside of container
+- [**Fancy UI**](#) - looking good ui for surfing on internet without restriction
+- [**Use internet of server**](#) - you can install girici on server and you can use server's internet as web proxy
 
 Girici runs on a server you control and lets you browse other sites through it. Pages open from Girici's own
 address, and a service worker in your browser rewrites them so links, forms, logins, media and WebSockets keep
