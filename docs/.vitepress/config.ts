@@ -4,6 +4,8 @@ import { defineConfig, type DefaultTheme, type SiteConfig } from "vitepress";
 
 const repo = "https://github.com/halitsever/girici-web-proxy";
 const siteUrl = "https://halitsever.github.io/girici-web-proxy/";
+// "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
+const base = process.env.DOCS_BASE || "/";
 const description =
   "Girici is a self-hosted web proxy for Node.js, written in TypeScript and Vue. A Node.js alternative to php-proxy that runs in Docker.";
 
@@ -117,8 +119,7 @@ export default defineConfig({
   lang: "en-US",
   title: "Girici",
   description,
-  // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
-  base: process.env.DOCS_BASE || "/",
+  base,
   // The app is dark-only; drop the toggle so the docs match it.
   appearance: "force-dark",
   cleanUrls: true,
@@ -134,7 +135,7 @@ export default defineConfig({
         "data-cf-beacon": '{"token": "dd7e54d3f48841c187d72d9dbb92a6b6"}',
       },
     ],
-    ["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }],
+    ["link", { rel: "icon", type: "image/svg+xml", href: `${base}favicon.svg` }],
     ["meta", { name: "theme-color", content: "#0A0F1E" }],
     ["meta", { property: "og:type", content: "website" }],
     ["meta", { property: "og:site_name", content: "Girici" }],
