@@ -18,11 +18,11 @@ that you run with Docker on your own server.
 <a href="https://hub.docker.com/r/halitsever/girici-web-proxy"><img src="https://img.shields.io/docker/v/halitsever/girici-web-proxy?sort=semver&label=docker" alt="Docker image version"/></a>
 </p>
 <p align="center">
-<a href="https://halitsever.github.io/girici-web-proxy/"><b>Documentation</b></a> ·
-<a href="https://halitsever.github.io/girici-web-proxy/guide/getting-started">Getting started</a> ·
-<a href="https://halitsever.github.io/girici-web-proxy/guide/supported-sites">Supported sites</a> ·
-<a href="https://halitsever.github.io/girici-web-proxy/guide/threat-model">Threat model</a> ·
-<a href="https://halitsever.github.io/girici-web-proxy/guide/php-proxy-alternative">php-proxy alternative</a>
+<a href="https://projects.halit.org/girici-web-proxy/"><b>Documentation</b></a> ·
+<a href="https://projects.halit.org/girici-web-proxy/guide/getting-started">Getting started</a> ·
+<a href="https://projects.halit.org/girici-web-proxy/guide/supported-sites">Supported sites</a> ·
+<a href="https://projects.halit.org/girici-web-proxy/guide/threat-model">Threat model</a> ·
+<a href="https://projects.halit.org/girici-web-proxy/guide/php-proxy-alternative">php-proxy alternative</a>
 </p>
 
 > **Note:** Girici v1 is no longer maintained. v2, built on its own service worker engine, is the current release.
@@ -85,11 +85,11 @@ GIRICI_DOMAIN=proxy.example.com GIRICI_TRUST_PROXY=1 docker compose --profile ht
 
 Keep Girici's own port 3000 closed to the internet, so nobody can skip Caddy and forge their address.
 
-For nginx, Traefik or Cloudflare Tunnel, see [Reverse proxies](https://halitsever.github.io/girici-web-proxy/guide/reverse-proxy).
+For nginx, Traefik or Cloudflare Tunnel, see [Reverse proxies](https://projects.halit.org/girici-web-proxy/guide/reverse-proxy).
 
 Image tags: `latest` and `v2` follow the newest v2 release, and version tags such as `2.1` and `2.1.2` pin one. The
 same tags are on `ghcr.io/halitsever/girici-web-proxy`. The last v1 image stays at `halitsever/girici-web-proxy:v1`;
-see [Migrating from v1](https://halitsever.github.io/girici-web-proxy/guide/migrating-from-v1).
+see [Migrating from v1](https://projects.halit.org/girici-web-proxy/guide/migrating-from-v1).
 
 ## One-click deploy
 
@@ -98,7 +98,7 @@ see [Migrating from v1](https://halitsever.github.io/girici-web-proxy/guide/migr
 - **Render:** the button uses [`render.yaml`](render.yaml).
 - **Fly.io:** `fly launch --copy-config` with [`fly.toml`](fly.toml).
 - **Railway:** deploy the image with a volume; the settings are in
-  [Cloud platforms](https://halitsever.github.io/girici-web-proxy/guide/cloud-platforms#railway).
+  [Cloud platforms](https://projects.halit.org/girici-web-proxy/guide/cloud-platforms#railway).
 
 > [!IMPORTANT]
 > Every platform needs a **persistent disk mounted at `/data`**. Without it, each deploy or restart deletes the
@@ -117,10 +117,10 @@ Girici reads environment variables and stops at startup with the variable's name
 | `GIRICI_RATE_LIMIT` | `3000` | Relay requests per visitor per minute. `0` turns it off. |
 | `GIRICI_BLOCKED_HOSTS` | unset | Sites to refuse, with their subdomains. |
 | `GIRICI_UPSTREAM_PROXY` | unset | Send all outgoing traffic through an `http://`, `https://`, `socks5://` or `socks5h://` proxy. |
-| `GIRICI_SITE_DOMAIN` | unset | Run each proxied site on its own host under this domain ([subdomain mode](https://halitsever.github.io/girici-web-proxy/guide/subdomain-mode)). |
+| `GIRICI_SITE_DOMAIN` | unset | Run each proxied site on its own host under this domain ([subdomain mode](https://projects.halit.org/girici-web-proxy/guide/subdomain-mode)). |
 | `SOURCE_URL` | this repository | The source code link in the UI. Point it at your fork if you change the code. |
 
-The full list is in [Configuration](https://halitsever.github.io/girici-web-proxy/guide/configuration).
+The full list is in [Configuration](https://projects.halit.org/girici-web-proxy/guide/configuration).
 
 ## Know before you run it
 
@@ -128,13 +128,13 @@ The full list is in [Configuration](https://halitsever.github.io/girici-web-prox
   traffic, passwords included. Only use instances you trust.
 - **By default, all sites share one origin.** Girici keeps sites apart in JavaScript, which has known gaps; a hostile
   site may reach data other sites left in the same browser.
-  [Subdomain mode](https://halitsever.github.io/girici-web-proxy/guide/subdomain-mode) gives each site its own host,
+  [Subdomain mode](https://projects.halit.org/girici-web-proxy/guide/subdomain-mode) gives each site its own host,
   so the browser keeps them apart. It needs wildcard DNS and a wildcard certificate.
 - **Sites can still refuse you.** Many sites block or challenge datacenter IPs, whatever the proxy does. Voice and
   video calls do not work, because WebRTC is turned off.
 
-The [threat model](https://halitsever.github.io/girici-web-proxy/guide/threat-model) and
-[supported sites](https://halitsever.github.io/girici-web-proxy/guide/supported-sites) pages have the details.
+The [threat model](https://projects.halit.org/girici-web-proxy/guide/threat-model) and
+[supported sites](https://projects.halit.org/girici-web-proxy/guide/supported-sites) pages have the details.
 
 ## Run from source
 

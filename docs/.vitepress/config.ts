@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { defineConfig, type DefaultTheme, type SiteConfig } from "vitepress";
 
 const repo = "https://github.com/halitsever/girici-web-proxy";
-const siteUrl = "https://halitsever.github.io/girici-web-proxy/";
+const siteUrl = "https://projects.halit.org/girici-web-proxy/";
 // "/" for local dev; the Pages workflow sets DOCS_BASE to the project path.
 const base = process.env.DOCS_BASE || "/";
 const description =
@@ -126,7 +126,7 @@ export default defineConfig({
   lastUpdated: true,
   buildEnd: writeLlmsTxt,
   head: [
-    /** Cloudflare Web Analytics, one token for every page on halitsever.github.io. */
+    /** Cloudflare Web Analytics, one token for every page on projects.halit.org. */
     [
       "script",
       {

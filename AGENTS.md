@@ -21,7 +21,7 @@ Girici is a self-hosted web proxy (Node.js server, service worker engine, Vue UI
 
 ## Docs and site
 
-- VitePress site in `docs/`, deployed to https://halitsever.github.io/girici-web-proxy/ by `.github/workflows/docs.yml` on pushes to `main` that touch `docs/**`. Pull requests only build it.
+- VitePress site in `docs/`, deployed to https://projects.halit.org/girici-web-proxy/ by `.github/workflows/docs.yml` on pushes to `main` that touch `docs/**`. Pull requests only build it.
 - `llms.txt`, `llms-full.txt` and per-page `.md` copies are generated at build time from the sidebar in `docs/.vitepress/config.ts`. Add a new page to the sidebar and give it a `description` in its front matter.
 - `docs/public/` holds static files served at the site root, including `og.png` and `robots.txt`.
 

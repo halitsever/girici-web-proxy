@@ -29,7 +29,7 @@ advisory unless you prefer otherwise. Please give us a reasonable window to ship
 
 ## Scope
 
-The [threat model](https://halitsever.github.io/girici-web-proxy/guide/threat-model) lists what Girici protects and
+The [threat model](https://projects.halit.org/girici-web-proxy/guide/threat-model) lists what Girici protects and
 the limits it already documents, so reports can focus on real issues. In short:
 
 - **Single origin.** Every proxied site shares Girici's origin, and the separation between sites is rebuilt in
