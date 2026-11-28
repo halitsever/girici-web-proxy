@@ -301,6 +301,10 @@ async function copy() {
       <p class="closing-note">
         Coming from php-proxy? <a :href="withBase('/guide/php-proxy-alternative')">See how the two compare</a>.
       </p>
+      <p class="closing-note">
+        Every way to host it is on the <a :href="withBase('/deploy/')">deploy page</a>, and the
+        <a :href="withBase('/blog/')">blog</a> covers how web proxies work.
+      </p>
       <div class="actions">
         <a class="btn btn-primary" :href="withBase('/guide/getting-started')">Get started</a>
         <a class="btn" :href="withBase('/guide/docker')">Run with Docker</a>
