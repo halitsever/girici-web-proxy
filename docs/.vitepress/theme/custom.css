@@ -105,3 +105,14 @@
 .VPSidebarItem.is-active > .item .text {
   color: var(--gi-brand-hover);
 }
+
+/* Blog posts: byline and the opening paragraph. */
+.vp-doc .post-meta {
+  margin-top: -8px;
+  font-size: 14px;
+  color: var(--vp-c-text-2);
+}
+.vp-doc .lead {
+  font-size: 1.12rem;
+  color: var(--vp-c-text-1);
+}
