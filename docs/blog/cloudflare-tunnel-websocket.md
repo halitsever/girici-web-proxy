@@ -2,13 +2,13 @@
 title: "Cloudflare Tunnel and WebSockets: What to Set"
 titleTemplate: false
 description: "WebSockets through Cloudflare Tunnel and an nginx reverse proxy: the zone setting, idle timeouts, reconnects, the nginx upgrade headers and Girici's /_g/ws."
-headline: "Cloudflare Tunnel and WebSockets: what to set"
+headline: "Carrying WebSockets through Cloudflare Tunnel and nginx"
 date: "2026-11-28"
 keyword: "cloudflare tunnel websocket"
 faq: [{"q": "Does Cloudflare Tunnel support WebSockets?", "a": "Yes. Cloudflare supports proxied WebSockets on all plans, and a tunnel hostname carries them. Make sure the zone's Network, WebSockets setting is on."}, {"q": "Why do WebSockets disconnect behind Cloudflare?", "a": "Cloudflare closes idle WebSockets after a period without data and may close them during server restarts. Clients should send heartbeats and reconnect."}]
 ---
 
-# Cloudflare Tunnel and WebSockets: what to set
+# Carrying WebSockets through Cloudflare Tunnel and nginx
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -111,6 +111,7 @@ Cloudflare closes idle WebSockets after a period without data and may close them
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Cloudflare Tunnel error 1033: causes and fixes](/blog/cloudflare-tunnel-error-1033)
+- [Why Cloudflare shows error 1033 for a tunnel, and how to fix it](/blog/cloudflare-tunnel-error-1033)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
+- [X-Forwarded-For: the header that carries the client IP, and how far to trust it](/blog/x-forwarded-for)
 - [All posts](/blog/)

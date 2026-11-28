@@ -112,6 +112,12 @@ const sidebar: DefaultTheme.SidebarItem[] = [
       { text: "Cloudflare Tunnel and WebSockets", link: "/blog/cloudflare-tunnel-websocket" },
       { text: "Create a web proxy with Docker", link: "/blog/create-web-proxy-server-docker" },
       { text: "proxy.py vs a web proxy", link: "/blog/proxypy-alternative" },
+      { text: "Forward vs reverse proxy", link: "/blog/forward-proxy-vs-reverse-proxy" },
+      { text: "VPN vs proxy", link: "/blog/vpn-vs-proxy" },
+      { text: "X-Forwarded-For", link: "/blog/x-forwarded-for" },
+      { text: "SSRF in a web proxy", link: "/blog/ssrf-web-proxy" },
+      { text: "DNS rebinding", link: "/blog/dns-rebinding" },
+      { text: "SSH SOCKS5 proxy", link: "/blog/ssh-socks5-proxy" },
     ],
   },
   {

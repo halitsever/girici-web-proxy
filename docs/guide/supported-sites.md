@@ -1,8 +1,9 @@
 ---
+title: "Supported sites"
 description: "Which sites work through the Girici web proxy, based on testing, and why results depend on where the server runs."
 ---
 
-# Supported sites
+# Which sites work through Girici
 
 Girici aims to run any site, but sites differ, and many judge the server's IP address before Girici gets a say.
 This table records what was seen in testing. Results depend heavily on where the server runs: a home connection

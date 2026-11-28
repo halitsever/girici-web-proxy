@@ -1,8 +1,9 @@
 ---
+title: "Migrating from v1"
 description: "What changes when you move from Girici v1 to v2: the service worker engine, the admin account and the new database."
 ---
 
-# Migrating from v1
+# Moving from Girici v1 to v2
 
 Girici v2 is a rewrite. v1 rewrote pages on the server; v2 does it in the browser with a service worker, adds an
 admin account and keeps a small database. Nothing from v1 needs to be carried over, but a few things change for

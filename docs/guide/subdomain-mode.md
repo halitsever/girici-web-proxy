@@ -1,8 +1,9 @@
 ---
+title: "Subdomain mode"
 description: "Subdomain mode runs every proxied site on its own host under your domain, so the browser keeps sites apart."
 ---
 
-# Subdomain mode
+# One subdomain per site: Girici's subdomain mode
 
 Subdomain mode runs every proxied site on its own host under your domain, so the browser itself keeps sites apart. It
 is optional and off by default, and it needs wildcard DNS and a wildcard certificate.

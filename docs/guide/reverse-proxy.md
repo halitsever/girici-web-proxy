@@ -1,8 +1,9 @@
 ---
+title: "Reverse proxies"
 description: "Put Girici behind nginx, Traefik or Cloudflare Tunnel with HTTPS, and the settings every reverse proxy setup needs."
 ---
 
-# Reverse proxies
+# nginx, Traefik and Cloudflare Tunnel in front of Girici
 
 Service workers need HTTPS on any host other than `localhost`, so a real deployment puts a TLS terminator in front
 of Girici. The compose file ships one with Caddy (see [Running with Docker](/guide/docker)). This page covers nginx,

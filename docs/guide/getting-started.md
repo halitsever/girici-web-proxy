@@ -1,8 +1,9 @@
 ---
+title: "Getting started"
 description: "Install the Girici self-hosted web proxy from source or Docker, then finish first-run setup and create the admin account."
 ---
 
-# Getting started
+# Your first Girici instance
 
 Girici is a self-hosted web proxy. You run it on a machine you control, open its web UI, and browse
 other sites through it. This page gets a local instance running and walks through first-run setup.

@@ -1,8 +1,9 @@
 ---
+title: "Cloud platforms"
 description: "Deploy the Girici web proxy on Render, Fly.io or Railway with HTTPS and a persistent disk mounted at /data."
 ---
 
-# Cloud platforms
+# Running Girici on Render, Fly.io and Railway
 
 Girici runs on any platform that runs a Docker image, gives it HTTPS and keeps a disk. The repository has ready
 configs for Render and Fly.io, and the settings for a Railway template are below.

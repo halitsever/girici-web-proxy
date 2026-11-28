@@ -2,13 +2,13 @@
 title: "Proxyium Alternative: Run Your Own Web Proxy"
 titleTemplate: false
 description: "What Proxyium says about itself, what any public web proxy can see by design, and how to run your own web proxy with Docker so that the operator is you."
-headline: "Proxyium alternative: run your own web proxy"
+headline: "Running your own web proxy instead of Proxyium"
 date: "2026-11-28"
 keyword: "proxyium free web proxy"
 faq: [{"q": "Is Proxyium free?", "a": "Its home page says it is absolutely free and offers servers in Poland/France, the United States and Singapore."}, {"q": "Can a web proxy operator see my passwords?", "a": "Yes, any web proxy can. It fetches the site on its own server, so it can read what you type, including passwords and cookies."}]
 ---
 
-# Proxyium alternative: run your own web proxy
+# Running your own web proxy instead of Proxyium
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -62,7 +62,7 @@ What you get by default:
 - **No setup.** You run and update a server.
 - **Site support from a datacenter.** Many sites challenge or refuse datacenter IPs whatever the proxy does; the [supported sites](/guide/supported-sites) table records what worked in testing.
 
-[Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted) compares the two in more detail.
+[A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted) compares the two in more detail.
 
 ## FAQ
 
@@ -77,6 +77,6 @@ Yes, any web proxy can. It fetches the site on its own server, so it can read wh
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted)
+- [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
 - [All posts](/blog/)

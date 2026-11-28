@@ -53,7 +53,7 @@ Girici moves most of the work into the browser. As [how it works](/guide/how-it-
 
 ## Which one to use
 
-If you can change the settings on the device and want everything to go through one exit, use a proxy server (or a VPN). If you want to reach sites through a server from any browser without configuring it, a web proxy fits, and running your own means the only operator who can see the traffic is you. [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted) covers that trade-off, and the [deploy page](/deploy/) has the ways to run Girici.
+If you can change the settings on the device and want everything to go through one exit, use a proxy server (or a VPN). If you want to reach sites through a server from any browser without configuring it, a web proxy fits, and running your own means the only operator who can see the traffic is you. [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted) covers that trade-off, and the [deploy page](/deploy/) has the ways to run Girici.
 
 ## FAQ
 
@@ -67,7 +67,8 @@ Yes. A web proxy fetches the real site itself, so TLS ends on its server and it 
 
 ## Related posts
 
-- [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted)
+- [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
-- [proxy.py vs a web proxy: which one do you need?](/blog/proxypy-alternative)
+- [Choosing between proxy.py and a web proxy you open in the browser](/blog/proxypy-alternative)
+- [Which side is the proxy on? Forward and reverse proxies explained](/blog/forward-proxy-vs-reverse-proxy)
 - [All posts](/blog/)

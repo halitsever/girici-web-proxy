@@ -2,13 +2,13 @@
 title: "Watching YouTube Through a Self-Hosted Web Proxy"
 titleTemplate: false
 description: "Why YouTube videos stop after about a minute behind most web proxies, and how Girici mints poTokens on the server so videos and ads play to the end."
-headline: "Watching YouTube through a self-hosted web proxy"
+headline: "How YouTube plays through a self-hosted web proxy"
 date: "2026-11-28"
 keyword: "youtube on proxy server"
 faq: [{"q": "Why does YouTube stop playing after a minute behind a proxy?", "a": "The web player streams video with requests that carry a poToken from BotGuard attestation. Through a proxy that attestation fails and googlevideo stops serving after about a minute."}, {"q": "Does YouTube work through Girici?", "a": "In testing, search, watch pages, comments, Shorts and embeds work, and videos and ads play to the end with server-minted poTokens. Datacenter IPs can still be refused by YouTube."}]
 ---
 
-# Watching YouTube through a self-hosted web proxy
+# How YouTube plays through a self-hosted web proxy
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -75,6 +75,6 @@ In testing, search, watch pages, comments, Shorts and embeds work, and videos an
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted)
+- [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
 - [All posts](/blog/)
