@@ -1,8 +1,9 @@
 ---
+title: "Configuration"
 description: "Every environment variable that configures Girici, with defaults and validation, for running the web proxy."
 ---
 
-# Configuration
+# Environment variables and settings
 
 Girici is configured with environment variables. Every value is validated at startup, so a bad setting
 stops the server with a message naming the variable.

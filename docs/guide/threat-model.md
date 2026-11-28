@@ -1,8 +1,9 @@
 ---
+title: "Threat model"
 description: "What Girici protects, what it cannot protect, and what the person running a web proxy instance can see."
 ---
 
-# Threat model
+# What Girici protects, and what it cannot
 
 This page says what Girici protects, what it cannot protect, and what the person running it can see. Read it before
 you run a public instance or sign in to accounts through someone else's.

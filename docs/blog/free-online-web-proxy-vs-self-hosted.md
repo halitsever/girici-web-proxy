@@ -2,13 +2,13 @@
 title: "Free Online Web Proxies vs Hosting Your Own"
 titleTemplate: false
 description: "Free online web proxies cost nothing to open but someone else sees your traffic. What a self-hosted web proxy changes, what it costs, and how to choose."
-headline: "Free online web proxies vs hosting your own"
+headline: "A free public web proxy, or one you run yourself?"
 date: "2026-11-28"
 keyword: "online web proxy free"
 faq: [{"q": "Are free online web proxies safe?", "a": "They can see everything you do through them, including passwords, because TLS to the real site ends on their server. Use them for public pages and do not sign in to anything important."}, {"q": "What does it cost to host your own web proxy?", "a": "A server that runs Docker, a domain with HTTPS, and your time for updates. Girici's cloud guides use a 1 GB persistent disk."}]
 ---
 
-# Free online web proxies vs hosting your own
+# A free public web proxy, or one you run yourself?
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -79,6 +79,7 @@ A server that runs Docker, a domain with HTTPS, and your time for updates. Giric
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Proxyium alternative: run your own web proxy](/blog/proxyium-alternative)
+- [Running your own web proxy instead of Proxyium](/blog/proxyium-alternative)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
+- [VPN or proxy: which traffic each covers, and who can still see it](/blog/vpn-vs-proxy)
 - [All posts](/blog/)

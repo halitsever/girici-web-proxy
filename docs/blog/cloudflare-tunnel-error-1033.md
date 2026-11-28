@@ -2,13 +2,13 @@
 title: "Cloudflare Tunnel Error 1033: Causes and Fixes"
 titleTemplate: false
 description: "Error 1033 means Cloudflare found no healthy cloudflared connector for your hostname. How to check the tunnel's status, fix each case, and tell it from a 502."
-headline: "Cloudflare Tunnel error 1033: causes and fixes"
+headline: "Why Cloudflare shows error 1033 for a tunnel, and how to fix it"
 date: "2026-11-28"
 keyword: "error 1033 cloudflare tunnel error"
 faq: [{"q": "What does Cloudflare error 1033 mean?", "a": "Cloudflare cannot find a healthy cloudflared connector for the tunnel the hostname is routed to. The tunnel is down, has never run, or DNS points at a different tunnel."}, {"q": "How do I fix Cloudflare Tunnel error 1033?", "a": "Check the tunnel's status in Networking, Tunnels or with cloudflared tunnel list, start or repair the cloudflared connector, and make sure the hostname's CNAME points at the running tunnel's cfargotunnel.com address."}]
 ---
 
-# Cloudflare Tunnel error 1033: causes and fixes
+# Why Cloudflare shows error 1033 for a tunnel, and how to fix it
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -91,6 +91,6 @@ Check the tunnel's status in Networking, Tunnels or with cloudflared tunnel list
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Cloudflare Tunnel and WebSockets: what to set](/blog/cloudflare-tunnel-websocket)
+- [Carrying WebSockets through Cloudflare Tunnel and nginx](/blog/cloudflare-tunnel-websocket)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
 - [All posts](/blog/)

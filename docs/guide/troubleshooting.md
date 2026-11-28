@@ -1,8 +1,9 @@
 ---
+title: "Troubleshooting and FAQ"
 description: "Fixes for common problems when running or using the Girici web proxy, and answers to questions operators often ask."
 ---
 
-# Troubleshooting and FAQ
+# Fixing common problems, and answers to common questions
 
 Common problems when running or using Girici and how to fix them, followed by questions operators often ask.
 

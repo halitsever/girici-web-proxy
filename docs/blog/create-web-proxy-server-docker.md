@@ -96,6 +96,7 @@ Girici runs on a service worker, and browsers only allow service workers over HT
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Cloudflare Tunnel error 1033: causes and fixes](/blog/cloudflare-tunnel-error-1033)
-- [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted)
+- [Why Cloudflare shows error 1033 for a tunnel, and how to fix it](/blog/cloudflare-tunnel-error-1033)
+- [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted)
+- [Server-side request forgery in a web proxy: what to block and where](/blog/ssrf-web-proxy)
 - [All posts](/blog/)

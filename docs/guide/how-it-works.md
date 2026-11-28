@@ -1,8 +1,9 @@
 ---
+title: "How it works"
 description: "How Girici proxies pages with a service worker in the browser while the Node.js server stays a thin relay."
 ---
 
-# How it works
+# Inside Girici: the service worker, rewriting and the relay
 
 Girici is built around a service worker. Instead of rewriting every page on the server, it registers a
 service worker at the root of its own origin and lets that worker catch the requests a proxied page

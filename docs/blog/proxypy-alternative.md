@@ -2,13 +2,13 @@
 title: "proxy.py vs a Web Proxy: Which One Do You Need?"
 titleTemplate: false
 description: "proxy.py is a Python proxy server framework you set in the browser; Girici is a web proxy you open as a site. What each does, how to run it and when to pick it."
-headline: "proxy.py vs a web proxy: which one do you need?"
+headline: "Choosing between proxy.py and a web proxy you open in the browser"
 date: "2026-11-28"
 keyword: "proxypy web proxy"
 faq: [{"q": "Is proxy.py a web proxy?", "a": "No. proxy.py is a forward proxy server and framework in Python that you configure as a proxy in a browser or tool. A web proxy is a website you browse through without changing any settings."}, {"q": "What port does proxy.py use?", "a": "8899 by default, listening on 127.0.0.1. Use --hostname 0.0.0.0 to accept connections from other machines."}]
 ---
 
-# proxy.py vs a web proxy: which one do you need?
+# Choosing between proxy.py and a web proxy you open in the browser
 
 <p class="post-meta">By <a href="https://halit.org">Halit Sever</a> · <time datetime="2026-11-28">28 November 2026</time></p>
 
@@ -81,6 +81,6 @@ No. proxy.py is a forward proxy server and framework in Python that you configur
 ## Related posts
 
 - [Proxy server vs a proxy in the browser: how web proxies work](/blog/proxy-server-browser)
-- [Free online web proxies vs hosting your own](/blog/free-online-web-proxy-vs-self-hosted)
+- [A free public web proxy, or one you run yourself?](/blog/free-online-web-proxy-vs-self-hosted)
 - [How to create your own web proxy server with Docker](/blog/create-web-proxy-server-docker)
 - [All posts](/blog/)
