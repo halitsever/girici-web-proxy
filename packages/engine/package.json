@@ -28,7 +28,7 @@
     "idb": "^8.0.4",
     "magic-string": "^1.4.5",
     "meriyah": "^7.4.1",
-    "tldts": "^7.4.19",
+    "tldts": "^7.5.5",
     "tough-cookie": "^6.0.2"
   }
 }
